@@ -584,7 +584,7 @@ app.post("/auth", async (req, res) => {
   }
 
   try {
-    const BASE_URL = process.env.MAKERBLE_BASE_URL || "https://makerble.com/api/v2";
+    const BASE_URL = process.env.MAKERBLE_BASE_URL || "https://qa.makerble.com/api/v2";
     const body = new URLSearchParams({
       "user[email]":    email,
       "user[password]": password,
