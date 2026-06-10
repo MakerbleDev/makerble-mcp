@@ -30,7 +30,7 @@ import { makeApiClient, buildTools, registerTools } from "./makerble-tools.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BASE_URL  = process.env.MAKERBLE_BASE_URL || "https://qa-makerble.com/api/v2";
+const BASE_URL  = process.env.MAKERBLE_BASE_URL || "https://qa.makerble.com/api/v2";
 const ENV_EMAIL = process.env.MAKERBLE_EMAIL    || "";
 const ENV_TOKEN = process.env.MAKERBLE_TOKEN    || "";
 const PORT      = process.env.PORT              || 3000;
