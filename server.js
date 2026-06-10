@@ -30,7 +30,7 @@ import { makeApiClient, buildTools, registerTools } from "./makerble-tools.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BASE_URL  = process.env.MAKERBLE_BASE_URL || "https://qa.makerble.com/api/v2";
+const BASE_URL  = process.env.MAKERBLE_BASE_URL || "https://makerble.com/api/v2";
 const ENV_EMAIL = process.env.MAKERBLE_EMAIL    || "";
 const ENV_TOKEN = process.env.MAKERBLE_TOKEN    || "";
 const PORT      = process.env.PORT              || 3000;
@@ -84,6 +84,47 @@ app.use(express.json());
 const sessions = {};
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Favicon — Makerble shield SVG (used by Claude as the connector icon)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SHIELD_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 136">
+  <defs>
+    <clipPath id="shield">
+      <path d="M60 4 L114 32 L114 90 Q114 120 60 132 Q6 120 6 90 L6 32 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Shield outline -->
+  <path d="M60 4 L114 32 L114 90 Q114 120 60 132 Q6 120 6 90 L6 32 Z"
+        fill="white" stroke="#1e3a5f" stroke-width="6"/>
+  <!-- Coloured dots -->
+  <circle cx="60"  cy="20"  r="5.5" fill="#e91e8c"/>
+  <circle cx="74"  cy="23"  r="5.5" fill="#c2185b"/>
+  <circle cx="86"  cy="32"  r="5.5" fill="#9c27b0"/>
+  <circle cx="92"  cy="46"  r="5.5" fill="#673ab7"/>
+  <circle cx="90"  cy="61"  r="5.5" fill="#1976d2"/>
+  <circle cx="82"  cy="74"  r="5.5" fill="#0288d1"/>
+  <circle cx="69"  cy="82"  r="5.5" fill="#00897b"/>
+  <circle cx="51"  cy="82"  r="5.5" fill="#43a047"/>
+  <circle cx="38"  cy="74"  r="5.5" fill="#7cb342"/>
+  <circle cx="30"  cy="61"  r="5.5" fill="#f9a825"/>
+  <circle cx="28"  cy="46"  r="5.5" fill="#fb8c00"/>
+  <circle cx="34"  cy="32"  r="5.5" fill="#e53935"/>
+  <circle cx="46"  cy="23"  r="5.5" fill="#f06292"/>
+  <!-- M lettermark -->
+  <text x="60" y="70" text-anchor="middle"
+        font-family="Arial,sans-serif" font-weight="700" font-size="30"
+        fill="#c2185b">M</text>
+</svg>`;
+
+app.get("/favicon.svg", (_req, res) => {
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(SHIELD_SVG);
+});
+
+app.get("/favicon.ico", (_req, res) => res.redirect(301, "/favicon.svg"));
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Health check
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -116,18 +157,54 @@ app.get("/connect", (_req, res) => {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Connect to Makerble — AI Integration</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: "Quicksand", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #f5f7fa;
       min-height: 100vh;
       display: flex;
+      flex-direction: column;
+      color: #1a1a2e;
+    }
+
+    /* ── Full-width header ── */
+    .site-header {
+      width: 100%;
+      background: #fff;
+      border-bottom: 1px solid #e8eaed;
+      padding: 0 32px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .site-header a {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .site-header img {
+      height: 40px;
+      width: auto;
+      display: block;
+    }
+
+    /* ── Page body ── */
+    .page-body {
+      flex: 1;
+      display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
-      color: #1a1a2e;
+      padding: 40px 24px;
     }
 
     .card {
@@ -137,33 +214,6 @@ app.get("/connect", (_req, res) => {
       width: 100%;
       max-width: 480px;
       padding: 40px;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 28px;
-    }
-
-    .logo-mark {
-      width: 36px;
-      height: 36px;
-      background: #0d6efd;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: 700;
-      font-size: 18px;
-      flex-shrink: 0;
-    }
-
-    .logo-text {
-      font-size: 20px;
-      font-weight: 700;
-      color: #1a1a2e;
     }
 
     h1 {
@@ -193,6 +243,7 @@ app.get("/connect", (_req, res) => {
       border: 1.5px solid #dde1e9;
       border-radius: 8px;
       font-size: 15px;
+      font-family: "Quicksand", sans-serif;
       outline: none;
       transition: border-color 0.15s;
       margin-bottom: 18px;
@@ -210,6 +261,7 @@ app.get("/connect", (_req, res) => {
       border-radius: 8px;
       font-size: 16px;
       font-weight: 600;
+      font-family: "Quicksand", sans-serif;
       cursor: pointer;
       transition: background 0.15s, opacity 0.15s;
     }
@@ -382,11 +434,36 @@ app.get("/connect", (_req, res) => {
   </style>
 </head>
 <body>
+  <header class="site-header">
+    <a href="https://www.makerble.com" target="_self" rel="noopener">
+      <!-- Makerble shield mark -->
+      <svg width="36" height="40" viewBox="0 0 120 136" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M60 4 L114 32 L114 90 Q114 120 60 132 Q6 120 6 90 L6 32 Z"
+              fill="white" stroke="#1e3a5f" stroke-width="6"/>
+        <circle cx="60"  cy="20"  r="5.5" fill="#e91e8c"/>
+        <circle cx="74"  cy="23"  r="5.5" fill="#c2185b"/>
+        <circle cx="86"  cy="32"  r="5.5" fill="#9c27b0"/>
+        <circle cx="92"  cy="46"  r="5.5" fill="#673ab7"/>
+        <circle cx="90"  cy="61"  r="5.5" fill="#1976d2"/>
+        <circle cx="82"  cy="74"  r="5.5" fill="#0288d1"/>
+        <circle cx="69"  cy="82"  r="5.5" fill="#00897b"/>
+        <circle cx="51"  cy="82"  r="5.5" fill="#43a047"/>
+        <circle cx="38"  cy="74"  r="5.5" fill="#7cb342"/>
+        <circle cx="30"  cy="61"  r="5.5" fill="#f9a825"/>
+        <circle cx="28"  cy="46"  r="5.5" fill="#fb8c00"/>
+        <circle cx="34"  cy="32"  r="5.5" fill="#e53935"/>
+        <circle cx="46"  cy="23"  r="5.5" fill="#f06292"/>
+        <text x="60" y="70" text-anchor="middle"
+              font-family="Quicksand,Arial,sans-serif" font-weight="700" font-size="30"
+              fill="#c2185b">M</text>
+      </svg>
+      <!-- Makerble wordmark -->
+      <span style="font-family:'Quicksand',sans-serif;font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:0.2px;">Makerble</span>
+    </a>
+  </header>
+
+  <div class="page-body">
   <div class="card">
-    <div class="logo">
-      <div class="logo-mark">M</div>
-      <div class="logo-text">Makerble</div>
-    </div>
 
     <div id="formSection">
       <h1>Connect to your AI assistant</h1>
@@ -442,8 +519,10 @@ app.get("/connect", (_req, res) => {
         <div class="platform">
           <div class="platform-name">Claude (claude.ai)</div>
           <div class="platform-steps">
-            Go to <strong>Settings → Integrations → Add integration</strong>,
-            choose <strong>Custom MCP</strong>, and paste your link.
+            Click your profile icon → <strong>Customize</strong>, then click
+            <strong>Connectors</strong> in the left menu, then click the
+            <strong>+ Add Connector</strong> button (top right), choose
+            <strong>Add custom connector</strong>, and paste your link.
           </div>
         </div>
 
@@ -481,6 +560,7 @@ app.get("/connect", (_req, res) => {
       </div>
     </div>
   </div>
+  </div> <!-- /.page-body -->
 
   <script>
     let currentUrl = "";
@@ -584,7 +664,7 @@ app.post("/auth", async (req, res) => {
   }
 
   try {
-    const BASE_URL = process.env.MAKERBLE_BASE_URL || "https://qa.makerble.com/api/v2";
+    const BASE_URL = process.env.MAKERBLE_BASE_URL || "https://makerble.com/api/v2";
     const body = new URLSearchParams({
       "user[email]":    email,
       "user[password]": password,
@@ -604,9 +684,12 @@ app.post("/auth", async (req, res) => {
     }
 
     // Build the personal MCP URL with credentials as query params.
-    // We use the request host so this works on any deployment (Vercel, localhost, custom domain).
-    const host    = `${req.protocol}://${req.get("host")}`;
-    const mcpUrl  = `${host}/mcp?email=${encodeURIComponent(email)}&token=${encodeURIComponent(data.authentication_token)}`;
+    // Force https in production; fall back to http only on localhost.
+    const reqHost  = req.get("host");
+    const isLocal  = reqHost.startsWith("localhost") || reqHost.startsWith("127.");
+    const protocol = isLocal ? "http" : "https";
+    const host     = `${protocol}://${reqHost}`;
+    const mcpUrl   = `${host}/mcp?email=${encodeURIComponent(email)}&token=${encodeURIComponent(data.authentication_token)}`;
 
     return res.json({
       mcp_url:  mcpUrl,
