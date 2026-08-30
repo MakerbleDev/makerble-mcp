@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 37 Makerble MCP tool definitions.
+ * All 39 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -63,6 +63,26 @@ export function makeApiClient(baseUrl, email, token) {
   return {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
+    postBearer: async (path, body, bearerToken) => {
+      const url = `${baseUrl}${path}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${bearerToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      if (!res.ok) {
+        const msg = data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
+        throw new McpError(ErrorCode.InternalError, `Makerble API error: ${JSON.stringify(msg)}`);
+      }
+      return data;
+    },
     signIn: async (email, password) => {
       const body = new URLSearchParams({
         "user[email]": email,
@@ -81,7 +101,7 @@ export function makeApiClient(baseUrl, email, token) {
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export function buildTools(api) {
-  const { get, post, signIn } = api;
+  const { get, post, postBearer, signIn } = api;
 
   return [
     // ── Authentication ────────────────────────────────────────────────────────
@@ -784,6 +804,91 @@ export function buildTools(api) {
       },
       handler: ({ ratio_set_ids, ...p }) =>
         get("/sub_ratios", { ...p, ...(ratio_set_ids ? { ratio_set_ids } : {}) }),
+    },
+
+    // ── Signup Pages / Offline Collector ────────────────────────────────────────
+    {
+      name: "makerble_get_signup_page_offline_definition",
+      description:
+        "Get the Form Definition for a Signup Page (Referral Link Detail) — its contact form " +
+        "and survey fields, skip logic, branding, and settings, in the same JSON shape the " +
+        "Offline Collector app uses. Useful for inspecting or testing a Signup Page's offline " +
+        "form before it goes out to field workers. Uses your own Makerble credentials, and only " +
+        "works for Signup Pages belonging to an organisation you have access to. Does not include " +
+        "the offline submission bearer token — that's only issued to the offline device itself.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          signup_page_id: { type: "number", description: "The Signup Page (Referral Link Detail) ID" },
+        },
+        required: ["signup_page_id"],
+      },
+      handler: ({ signup_page_id }) => get(`/referral_link_details/${signup_page_id}/definition`),
+    },
+
+    {
+      name: "makerble_sync_offline_signup_submission",
+      description:
+        "Submit a completed offline Signup Page response — the same call an Offline Collector " +
+        "device makes once it regains connectivity. Mainly useful for testing the offline flow " +
+        "end-to-end (e.g. simulating a field worker's submission). Requires a submission_token " +
+        "(the submission_credential.token from an offline Form Definition fetch), not your own " +
+        "Makerble login. idempotency_key should be a fresh UUID per submission — retrying the " +
+        "same key returns the original result rather than creating duplicates. Use `primary` + " +
+        "`related_people` for a structured Signup Page, or `roles` for a personalised one — " +
+        "never both. Every answer object is keyed by field id from the Form Definition, not name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          submission_token: { type: "string", description: "submission_credential.token from the offline Form Definition" },
+          idempotency_key: { type: "string", description: "A fresh UUID v4, generated once per completed submission" },
+          definition_version: { type: "string", description: "The definition_version the cached Form Definition was fetched with" },
+          primary: {
+            type: "object",
+            description: "For a structured Signup Page: the primary person's answers",
+            properties: {
+              contact_form_answers: { type: "object", description: "Keyed by field id" },
+              survey_answers: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    story_category_id: { type: "number" },
+                    answers: { type: "object", description: "Keyed by field id" },
+                  },
+                },
+              },
+            },
+          },
+          related_people: {
+            type: "array",
+            description: "For a structured Signup Page: additional related people, each identified by referral_link_relationship_detail_id",
+            items: {
+              type: "object",
+              properties: {
+                referral_link_relationship_detail_id: { type: "number" },
+                contact_form_answers: { type: "object" },
+                survey_answers: { type: "array", items: { type: "object" } },
+              },
+            },
+          },
+          roles: {
+            type: "array",
+            description: "For a personalised Signup Page instead of primary/related_people — one entry per person, identified by referral_link_beneficiary_role_detail_id",
+            items: {
+              type: "object",
+              properties: {
+                referral_link_beneficiary_role_detail_id: { type: "number" },
+                contact_form_answers: { type: "object" },
+                survey_answers: { type: "array", items: { type: "object" } },
+              },
+            },
+          },
+        },
+        required: ["submission_token", "idempotency_key", "definition_version"],
+      },
+      handler: ({ submission_token, ...body }) =>
+        postBearer("/referral_submissions", body, submission_token),
     },
   ];
 }
