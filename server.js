@@ -743,6 +743,67 @@ app.get("/connect", (_req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// /debug-signin — TEMPORARY diagnostic route. Calls the sign-in endpoint for a
+// given environment and returns the raw response (status, headers, body) so we
+// can see exactly what Makerble is sending back, instead of just our own
+// generic "invalid email or password" message. Delete this route once done.
+//
+// Usage: GET /debug-signin?env=production&email=...&password=...
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/debug-signin", async (req, res) => {
+  const { env: rawEnv, email, password } = req.query;
+
+  if (!email || !password) {
+    return res.status(400).json({
+      error: "Provide ?email=...&password=...&env=production (env defaults to production).",
+    });
+  }
+
+  const envKey = ENV_CONFIG[rawEnv] ? rawEnv : DEFAULT_ENV;
+  const env    = ENV_CONFIG[envKey];
+  const signInUrl = `${env.baseUrl}/users/sign_in`;
+
+  try {
+    const body = new URLSearchParams({
+      "user[email]":    email,
+      "user[password]": password,
+    });
+
+    const response = await fetch(signInUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      redirect: "manual", // don't silently follow redirects — we want to see them
+    });
+
+    const rawText = await response.text();
+    let parsedJson = null;
+    try { parsedJson = JSON.parse(rawText); } catch { /* not JSON */ }
+
+    return res.json({
+      tested_url: signInUrl,
+      env: envKey,
+      status: response.status,
+      statusText: response.statusText,
+      redirected: response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400),
+      location_header: response.headers.get("location") || null,
+      content_type: response.headers.get("content-type") || null,
+      body_parsed_as_json: parsedJson,
+      body_raw_snippet: rawText.slice(0, 1000),
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      tested_url: signInUrl,
+      env: envKey,
+      error: "Fetch itself failed (DNS, TLS, or network error), not a Makerble response.",
+      details: err.message,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // /auth — called by the /connect page
 // Accepts { email, password }, calls Makerble sign-in, returns personal MCP URL
 // ─────────────────────────────────────────────────────────────────────────────
