@@ -471,6 +471,37 @@ app.get("/connect", (_req, res) => {
       background: #fff7ed;
       color: #c2410c;
     }
+
+    .password-box {
+      position: relative;
+      margin-bottom: 18px;
+    }
+
+    .password-box input {
+      margin-bottom: 0;
+      padding-right: 44px;
+    }
+
+    .toggle-pw {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      background: transparent;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .toggle-pw:hover { background: #f0f2f6; }
+    .toggle-pw svg { width: 18px; height: 18px; stroke: #777; }
+    .toggle-pw.active svg { stroke: #0d6efd; }
   </style>
 </head>
 <body>
@@ -498,7 +529,15 @@ app.get("/connect", (_req, res) => {
       <input type="email" id="email" placeholder="you@yourorganisation.org" autocomplete="email" />
 
       <label for="password">Makerble password</label>
-      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+      <div class="password-box">
+        <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+        <button type="button" class="toggle-pw" id="togglePw" onclick="togglePassword()" title="Show password" aria-label="Show password">
+          <svg id="eyeIcon" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        </button>
+      </div>
 
       <button id="connectBtn" onclick="connect()">Get my personal link</button>
       <div class="error" id="errorBox"></div>
@@ -593,6 +632,22 @@ app.get("/connect", (_req, res) => {
       tab.classList.add("active");
       selectedEnv = tab.dataset.env;
     });
+
+    function togglePassword() {
+      const input = document.getElementById("password");
+      const btn   = document.getElementById("togglePw");
+      const icon  = document.getElementById("eyeIcon");
+      const showing = input.type === "text";
+
+      input.type = showing ? "password" : "text";
+      btn.classList.toggle("active", !showing);
+      btn.title = showing ? "Show password" : "Hide password";
+      btn.setAttribute("aria-label", btn.title);
+
+      icon.innerHTML = showing
+        ? '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>'
+        : '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.6 18.6 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a18.6 18.6 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+    }
 
     async function connect() {
       const email    = document.getElementById("email").value.trim();
