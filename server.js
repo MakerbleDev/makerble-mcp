@@ -6,6 +6,11 @@
  *   2. Query parameters: ?email=...&token=...                  (personal URL from /connect page)
  *   3. Environment vars: MAKERBLE_EMAIL + MAKERBLE_TOKEN       (single-org fallback / local dev)
  *
+ * Environment (which Makerble deployment to talk to) — same resolution pattern:
+ *   1. Request header:  X-Makerble-Env
+ *   2. Query parameter: ?env=qa|preview|preprod|production
+ *   3. Defaults to "production" if not supplied (so existing links keep working).
+ *
  * Endpoints:
  *   GET  /          — health check
  *   GET  /connect   — self-service web UI for non-technical users to get their personal MCP URL
@@ -15,20 +20,13 @@
  *   POST /messages  — Legacy SSE message endpoint
  *
  * Environment variables (Vercel dashboard):
- *   MAKERBLE_BASE_URL — optional, defaults to https://makerble.com/api/v2
+ *   MAKERBLE_BASE_URL — optional, overrides the "production" entry in ENV_CONFIG below
  *   MAKERBLE_EMAIL    — optional org-wide fallback email
  *   MAKERBLE_TOKEN    — optional org-wide fallback token
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import express from "express";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ICON_PNG   = readFileSync(join(__dirname, "makerble-icon.png"));
-const LOGO_PNG   = readFileSync(join(__dirname, "makerble-logo.png"));
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -37,10 +35,35 @@ import { makeApiClient, buildTools, registerTools } from "./makerble-tools.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BASE_URL  = process.env.MAKERBLE_BASE_URL || "https://makerble.com/api/v2";
-const ENV_EMAIL = process.env.MAKERBLE_EMAIL    || "";
-const ENV_TOKEN = process.env.MAKERBLE_TOKEN    || "";
-const PORT      = process.env.PORT              || 3000;
+const ENV_EMAIL = process.env.MAKERBLE_EMAIL || "";
+const ENV_TOKEN = process.env.MAKERBLE_TOKEN || "";
+const PORT      = process.env.PORT           || 3000;
+
+// ─── Environment config ───────────────────────────────────────────────────────
+// The four Makerble deployments. Each tab on /connect maps to one of these keys.
+// MAKERBLE_BASE_URL (if set) overrides the production entry, preserving the old
+// single-environment behaviour for anyone who hasn't updated their deployment.
+
+const ENV_CONFIG = {
+  production: {
+    label:   "Production",
+    baseUrl: process.env.MAKERBLE_BASE_URL || "https://www.makerble.com/api/v2",
+  },
+  preprod: {
+    label:   "Pre-production",
+    baseUrl: "https://pre-production.makerble.com/api/v2",
+  },
+  qa: {
+    label:   "QA",
+    baseUrl: "https://qa.makerble.com/api/v2",
+  },
+  preview: {
+    label:   "Preview",
+    baseUrl: "https://preview.makerble.com/api/v2",
+  },
+};
+
+const DEFAULT_ENV = "production";
 
 // ─── Credential resolution ────────────────────────────────────────────────────
 // Called per-request so each user's credentials are isolated.
@@ -68,11 +91,25 @@ function resolveCredentials(req) {
   return null;
 }
 
-// ─── MCP Server factory ───────────────────────────────────────────────────────
-// Creates a fresh Server instance per session with credentials scoped to that user.
+// ─── Environment resolution ───────────────────────────────────────────────────
+// Same header → query → default pattern as credentials. Unknown values fall
+// back to production rather than erroring, so a typo can't silently break a link.
 
-function createMcpServer(email, token) {
-  const api    = makeApiClient(BASE_URL, email, token);
+function resolveEnvironment(req) {
+  const raw = (req.headers["x-makerble-env"] || req.query.env || DEFAULT_ENV)
+    .toString()
+    .toLowerCase();
+  const key = ENV_CONFIG[raw] ? raw : DEFAULT_ENV;
+  return { key, ...ENV_CONFIG[key] };
+}
+
+// ─── MCP Server factory ───────────────────────────────────────────────────────
+// Creates a fresh Server instance per session with credentials AND environment
+// scoped to that user/session — two users can be pointed at different deployments
+// at the same time.
+
+function createMcpServer(email, token, baseUrl) {
+  const api    = makeApiClient(baseUrl, email, token);
   const tools  = buildTools(api);
   const server = new Server(
     { name: "makerble-mcp", version: "1.0.0" },
@@ -91,24 +128,6 @@ app.use(express.json());
 const sessions = {};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Static image assets — real Makerble brand files
-// ─────────────────────────────────────────────────────────────────────────────
-
-app.get("/makerble-icon.png", (_req, res) => {
-  res.setHeader("Content-Type", "image/png");
-  res.setHeader("Cache-Control", "public, max-age=86400");
-  res.send(ICON_PNG);
-});
-
-app.get("/makerble-logo.png", (_req, res) => {
-  res.setHeader("Content-Type", "image/png");
-  res.setHeader("Cache-Control", "public, max-age=86400");
-  res.send(LOGO_PNG);
-});
-
-app.get("/favicon.ico", (_req, res) => res.redirect(301, "/makerble-icon.png"));
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Health check
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -125,6 +144,8 @@ app.get("/", (_req, res) => {
     },
     auth: "Pass credentials via headers (X-Makerble-Email / X-Makerble-Token), " +
           "query params (?email=&token=), or set MAKERBLE_EMAIL / MAKERBLE_TOKEN env vars.",
+    environment: "Pass X-Makerble-Env header or ?env= query param " +
+                 `(${Object.keys(ENV_CONFIG).join(" | ")}). Defaults to "${DEFAULT_ENV}".`,
     docs: "https://app.swaggerhub.com/apis/makerble/makerble-api/2.0.0",
   });
 });
@@ -141,54 +162,18 @@ app.get("/connect", (_req, res) => {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Connect to Makerble — AI Integration</title>
-  <link rel="icon" type="image/png" href="/makerble-icon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: "Quicksand", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #f5f7fa;
       min-height: 100vh;
       display: flex;
-      flex-direction: column;
-      color: #1a1a2e;
-    }
-
-    /* ── Full-width header ── */
-    .site-header {
-      width: 100%;
-      background: #fff;
-      border-bottom: 1px solid #e8eaed;
-      padding: 0 32px;
-      height: 64px;
-      display: flex;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .site-header a {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-    }
-
-    .site-header img {
-      height: 40px;
-      width: auto;
-      display: block;
-    }
-
-    /* ── Page body ── */
-    .page-body {
-      flex: 1;
-      display: flex;
       align-items: center;
       justify-content: center;
-      padding: 40px 24px;
+      padding: 24px;
+      color: #1a1a2e;
     }
 
     .card {
@@ -198,6 +183,33 @@ app.get("/connect", (_req, res) => {
       width: 100%;
       max-width: 480px;
       padding: 40px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .logo-mark {
+      width: 36px;
+      height: 36px;
+      background: #0d6efd;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a1a2e;
     }
 
     h1 {
@@ -227,7 +239,6 @@ app.get("/connect", (_req, res) => {
       border: 1.5px solid #dde1e9;
       border-radius: 8px;
       font-size: 15px;
-      font-family: "Quicksand", sans-serif;
       outline: none;
       transition: border-color 0.15s;
       margin-bottom: 18px;
@@ -245,7 +256,6 @@ app.get("/connect", (_req, res) => {
       border-radius: 8px;
       font-size: 16px;
       font-weight: 600;
-      font-family: "Quicksand", sans-serif;
       cursor: pointer;
       transition: background 0.15s, opacity 0.15s;
     }
@@ -415,17 +425,60 @@ app.get("/connect", (_req, res) => {
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    .env-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 24px;
+      background: #f0f2f6;
+      border-radius: 10px;
+      padding: 4px;
+    }
+
+    .env-tab {
+      flex: 1;
+      text-align: center;
+      padding: 9px 6px;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #555;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .env-tab:hover { color: #1a1a2e; }
+
+    .env-tab.active {
+      background: #fff;
+      color: #0d6efd;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .env-badge {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: #eef4ff;
+      color: #0d6efd;
+      margin-bottom: 14px;
+    }
+
+    .env-badge.non-prod {
+      background: #fff7ed;
+      color: #c2410c;
+    }
   </style>
 </head>
 <body>
-  <header class="site-header">
-    <a href="https://www.makerble.com" target="_self" rel="noopener">
-      <img src="/makerble-logo.png" alt="Makerble" style="height:40px;width:auto;display:block;" />
-    </a>
-  </header>
-
-  <div class="page-body">
   <div class="card">
+    <div class="logo">
+      <div class="logo-mark">M</div>
+      <div class="logo-text">Makerble</div>
+    </div>
 
     <div id="formSection">
       <h1>Connect to your AI assistant</h1>
@@ -433,6 +486,13 @@ app.get("/connect", (_req, res) => {
         Sign in with your Makerble account to get a personal link that lets
         Claude, ChatGPT, and other AI assistants access your Makerble data.
       </p>
+
+      <div class="env-tabs" id="envTabs">
+        <div class="env-tab active" data-env="production">Production</div>
+        <div class="env-tab" data-env="qa">QA</div>
+        <div class="env-tab" data-env="preview">Preview</div>
+        <div class="env-tab" data-env="preprod">Pre-prod</div>
+      </div>
 
       <label for="email">Makerble email</label>
       <input type="email" id="email" placeholder="you@yourorganisation.org" autocomplete="email" />
@@ -446,6 +506,7 @@ app.get("/connect", (_req, res) => {
 
     <div class="result" id="resultSection">
       <h2>✓ Your personal MCP link is ready</h2>
+      <div class="env-badge" id="envBadge"></div>
       <p>Copy the link below and paste it into your AI assistant. That's it — no further setup needed.</p>
 
       <div class="url-box">
@@ -481,10 +542,8 @@ app.get("/connect", (_req, res) => {
         <div class="platform">
           <div class="platform-name">Claude (claude.ai)</div>
           <div class="platform-steps">
-            Click your profile icon → <strong>Customize</strong>, then click
-            <strong>Connectors</strong> in the left menu, then click the
-            <strong>+ Add Connector</strong> button (top right), choose
-            <strong>Add custom connector</strong>, and paste your link.
+            Go to <strong>Settings → Integrations → Add integration</strong>,
+            choose <strong>Custom MCP</strong>, and paste your link.
           </div>
         </div>
 
@@ -522,10 +581,18 @@ app.get("/connect", (_req, res) => {
       </div>
     </div>
   </div>
-  </div> <!-- /.page-body -->
 
   <script>
     let currentUrl = "";
+    let selectedEnv = "production";
+
+    document.getElementById("envTabs").addEventListener("click", (e) => {
+      const tab = e.target.closest(".env-tab");
+      if (!tab) return;
+      document.querySelectorAll(".env-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      selectedEnv = tab.dataset.env;
+    });
 
     async function connect() {
       const email    = document.getElementById("email").value.trim();
@@ -546,7 +613,7 @@ app.get("/connect", (_req, res) => {
         const res  = await fetch("/auth", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, env: selectedEnv }),
         });
         const data = await res.json();
 
@@ -557,6 +624,11 @@ app.get("/connect", (_req, res) => {
 
         currentUrl = data.mcp_url;
         document.getElementById("urlDisplay").textContent = currentUrl;
+
+        const badge = document.getElementById("envBadge");
+        badge.textContent = data.env_label + " environment";
+        badge.classList.toggle("non-prod", data.env !== "production");
+
         document.getElementById("formSection").style.display  = "none";
         document.getElementById("resultSection").style.display = "block";
 
@@ -602,6 +674,8 @@ app.get("/connect", (_req, res) => {
       document.getElementById("email").value    = "";
       document.getElementById("password").value = "";
       document.getElementById("errorBox").style.display = "none";
+      // Note: leaves the environment tab as-is, since regenerating is usually
+      // for the same environment (e.g. a rotated token).
     }
 
     // Allow Enter key to submit
@@ -619,19 +693,21 @@ app.get("/connect", (_req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.post("/auth", async (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, env: rawEnv } = req.body || {};
 
   if (!email || !password) {
     return res.status(400).json({ error: "email and password are required." });
   }
 
+  const envKey = ENV_CONFIG[rawEnv] ? rawEnv : DEFAULT_ENV;
+  const env    = ENV_CONFIG[envKey];
+
   try {
-    const BASE_URL = process.env.MAKERBLE_BASE_URL || "https://makerble.com/api/v2";
     const body = new URLSearchParams({
       "user[email]":    email,
       "user[password]": password,
     });
-    const response = await fetch(`${BASE_URL}/users/sign_in`, {
+    const response = await fetch(`${env.baseUrl}/users/sign_in`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
@@ -641,21 +717,22 @@ app.post("/auth", async (req, res) => {
 
     if (!response.ok || !data.authentication_token) {
       return res.status(401).json({
-        error: "Invalid email or password. Please try again.",
+        error: `Invalid email or password for ${env.label}. Please check your details and try again.`,
       });
     }
 
-    // Build the personal MCP URL with credentials as query params.
-    // Force https in production; fall back to http only on localhost.
-    const reqHost  = req.get("host");
-    const isLocal  = reqHost.startsWith("localhost") || reqHost.startsWith("127.");
-    const protocol = isLocal ? "http" : "https";
-    const host     = `${protocol}://${reqHost}`;
-    const mcpUrl   = `${host}/mcp?email=${encodeURIComponent(email)}&token=${encodeURIComponent(data.authentication_token)}`;
+    // Build the personal MCP URL with credentials + environment as query params.
+    // We use the request host so this works on any deployment (Vercel, localhost, custom domain).
+    const host   = `${req.protocol}://${req.get("host")}`;
+    const mcpUrl = `${host}/mcp?email=${encodeURIComponent(email)}` +
+                   `&token=${encodeURIComponent(data.authentication_token)}` +
+                   `&env=${envKey}`;
 
     return res.json({
       mcp_url:  mcpUrl,
       user_id:  data.user_id,
+      env:      envKey,
+      env_label: env.label,
     });
 
   } catch (err) {
@@ -670,6 +747,7 @@ app.post("/auth", async (req, res) => {
 
 app.all("/mcp", async (req, res) => {
   const creds = resolveCredentials(req);
+  const env   = resolveEnvironment(req);
 
   if (!creds) {
     return res.status(401).json({
@@ -687,7 +765,7 @@ app.all("/mcp", async (req, res) => {
   try {
     const sessionId = req.headers["mcp-session-id"];
 
-    // Existing session — reuse transport
+    // Existing session — reuse transport (environment was fixed at session start)
     if (sessionId && sessions[sessionId]) {
       const session = sessions[sessionId];
       if (!(session.transport instanceof StreamableHTTPServerTransport)) {
@@ -705,14 +783,14 @@ app.all("/mcp", async (req, res) => {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sid) => {
-          sessions[sid] = { transport, email: creds.email, token: creds.token };
+          sessions[sid] = { transport, email: creds.email, token: creds.token, env: env.key };
         },
       });
       transport.onclose = () => {
         const sid = transport.sessionId;
         if (sid && sessions[sid]) delete sessions[sid];
       };
-      await createMcpServer(creds.email, creds.token).connect(transport);
+      await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
       return await transport.handleRequest(req, res, req.body);
     }
 
@@ -740,15 +818,16 @@ app.all("/mcp", async (req, res) => {
 
 app.get("/sse", async (req, res) => {
   const creds = resolveCredentials(req);
+  const env   = resolveEnvironment(req);
 
   if (!creds) {
     return res.status(401).send("Unauthorised: no Makerble credentials. Visit /connect for your personal link.");
   }
 
   const transport = new SSEServerTransport("/messages", res);
-  sessions[transport.sessionId] = { transport, email: creds.email, token: creds.token };
+  sessions[transport.sessionId] = { transport, email: creds.email, token: creds.token, env: env.key };
   res.on("close", () => { delete sessions[transport.sessionId]; });
-  await createMcpServer(creds.email, creds.token).connect(transport);
+  await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
 });
 
 app.post("/messages", async (req, res) => {
