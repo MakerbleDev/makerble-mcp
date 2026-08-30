@@ -47,7 +47,7 @@ const PORT      = process.env.PORT           || 3000;
 const ENV_CONFIG = {
   production: {
     label:   "Production",
-    baseUrl: process.env.MAKERBLE_BASE_URL || "https://www.makerble.com/api/v2",
+    baseUrl: process.env.MAKERBLE_BASE_URL || "https://makerble.com/api/v2",
   },
   preprod: {
     label:   "Pre-production",
