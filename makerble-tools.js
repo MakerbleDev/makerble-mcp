@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 39 Makerble MCP tool definitions.
+ * All 41 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -272,6 +272,49 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/beneficiaries/${id}`),
+    },
+
+    // ── Versions (audit trail) ─────────────────────────────────────────────────
+    {
+      name: "makerble_list_versions",
+      description:
+        "List the Versions (audit trail) of one record: every time it was created or edited, " +
+        "who did it and when, newest first. Use this to answer 'who changed this Contact, and when?'. " +
+        "Only Contacts (Beneficiaries) are versioned so far, so record_type must be \"Contact\". " +
+        "Find the Contact's ID first with makerble_list_contacts. " +
+        "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Versions; " +
+        "anything else returns not-found. " +
+        "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
+        "data: [{id, event, action (Created/Edited/Destroyed), user_id, user_name (\"System\" for background jobs such as CSV imports), created_at}]}. " +
+        "One Save can write several Versions a fraction of a second apart. " +
+        "To see what the record looked like in a Version, call makerble_get_version with its id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          record_type: { type: "string", enum: ["Contact"], description: "Type of record. Only \"Contact\" for now." },
+          record_id: { type: "number", description: "The Contact (Beneficiary) ID." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_sync_datetime: { type: "string", description: "Only Versions created after this ISO 8601 datetime." },
+        },
+        required: ["record_type", "record_id"],
+      },
+      handler: (p) => get("/versions", p),
+    },
+
+    {
+      name: "makerble_get_version",
+      description:
+        "Get one Version (audit-trail entry) by ID, including full_object: a complete snapshot of every field " +
+        "of the record as it was saved at that moment (not just the fields that changed). " +
+        "Compare two Versions' full_object to see exactly what changed between them. " +
+        "Get Version IDs from makerble_list_versions. Same permissions as makerble_list_versions.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Version ID." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/versions/${id}`),
     },
 
     {
