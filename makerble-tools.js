@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 39 Makerble MCP tool definitions.
+ * All 40 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -261,6 +261,31 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/beneficiaries", p),
+    },
+
+    {
+      name: "makerble_list_project_contacts",
+      description:
+        "List which Contacts (Beneficiaries) belong to which Projects. Use this to find everyone in a set of " +
+        "projects, e.g. to count the contacts a report covers before looking up their details or stories. " +
+        "Returns the paginated envelope {page, page_size, page_count, total_count, data}; each item is a " +
+        "Project–Contact link with project_id and beneficiary_id (the Contact's ID). A contact in several of " +
+        "the given projects appears once per project. Only projects the signed-in user can see are included. " +
+        "Use makerble_get_contact for a contact's details.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Only include these projects. Omit for every project the user can see.",
+          },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_sync_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/project_beneficiaries", p),
     },
 
     {
