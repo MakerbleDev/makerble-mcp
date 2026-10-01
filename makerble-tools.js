@@ -139,13 +139,13 @@ export function buildTools(api) {
       name: "makerble_list_projects",
       description:
         "List all Projects accessible to the authenticated user. " +
-        "Supports pagination and incremental sync via last_sync_datetime.",
+        "Supports pagination and incremental sync via last_synced_datetime.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/projects", p),
@@ -197,7 +197,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/users", p),
@@ -255,7 +255,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
           charity_id: { type: "number" },
           project_id: { type: "number" },
         },
@@ -324,7 +324,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/beneficiaries/impact_box_data", p),
@@ -340,7 +340,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/beneficiary_categories", p),
@@ -394,7 +394,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/stories", p),
@@ -540,7 +540,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_categories", p),
@@ -587,7 +587,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/project_story_categories", p),
@@ -602,7 +602,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/cases", p),
@@ -649,7 +649,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/custom_field_categories", p),
@@ -666,7 +666,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/changes", p),
@@ -683,7 +683,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
           include_public_library: {
             type: "boolean",
             description:
@@ -724,7 +724,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/outcomes", p),
@@ -750,7 +750,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/outcome_indicators", p),
@@ -767,7 +767,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           story_id: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_changes", p),
@@ -783,7 +783,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           story_id: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_indicator_beneficiaries", p),
@@ -799,7 +799,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/ratio_sets", p),
@@ -816,7 +816,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           ratio_set_ids: { type: "array", items: { type: "number" } },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: ({ ratio_set_ids, ...p }) =>
