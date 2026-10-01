@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 48 Makerble MCP tool definitions.
+ * All 49 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -808,20 +808,55 @@ export function buildTools(api) {
     },
 
     {
-      name: "makerble_set_cohort_tracker_target",
+      name: "makerble_get_cohort_tracker_targets",
       description:
-        "Set a Cohort Tracker's one-off target on a Project (Set Targets): the number of Contacts to reach. " +
-        "It is a level to reach, not a total that adds up across periods.",
+        "Get a Cohort Tracker's targets on a Project or an Album (its Set Targets page): the one-off " +
+        "target and any deadline targets ([{date, number}]). Pass project_id or album_id. For an Album, " +
+        "album_target_type says whether the Album uses manual targets (where Cohort Tracker targets are set) " +
+        "or automatic ones. Requires rights to edit that Project's or Album's targets.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The Cohort Tracker ID" },
           project_id: { type: "number" },
-          target: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
         },
-        required: ["id", "project_id", "target"],
+        required: ["id"],
       },
-      handler: ({ id, project_id, target }) => patch(`/cohort_trackers/${id}/projects/${project_id}`, { target }),
+      handler: ({ id, project_id, album_id }) =>
+        get(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`),
+    },
+
+    {
+      name: "makerble_set_cohort_tracker_targets",
+      description:
+        "Set a Cohort Tracker's targets on a Project or an Album (Set Targets): target is the one-off number " +
+        "of Contacts to reach; deadlines is a list of {date: 'YYYY-MM-DD', number} that REPLACES this " +
+        "tracker's deadline targets there ([] clears them). A target is a level to reach, not a total that " +
+        "adds up across periods, and an Album's is never the sum of its Projects'. Pass project_id or " +
+        "album_id; the tracker must already be on that Project (makerble_add_cohort_tracker_to_project) or " +
+        "on one of the Album's Projects. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          target: { type: "number", description: "One-off target" },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets, replacing any already set for this tracker",
+            items: {
+              type: "object",
+              properties: { date: { type: "string" }, number: { type: "number" } },
+              required: ["date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...targets }) =>
+        patch(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`, targets),
     },
 
     {
