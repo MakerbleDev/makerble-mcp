@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 39 Makerble MCP tool definitions.
+ * All 40 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -528,6 +528,58 @@ export function buildTools(api) {
           story_change_beneficiaries:     story_change_beneficiaries     || [],
           story_indicator_beneficiaries:  story_indicator_beneficiaries  || [],
           custom_fields:                  custom_fields                  || {},
+        }),
+    },
+
+    {
+      name: "makerble_create_draft_story",
+      description:
+        "Save an Answer In Progress (draft Story): a partly completed survey response that a colleague " +
+        "reviews, finishes and publishes in Makerble. Use this instead of makerble_create_story when a person " +
+        "should check the response before it becomes a published Story, e.g. notes you've summarised from a " +
+        "meeting or call. It shows on the organisation's Answers In Progress page. " +
+        "\nWorkflow: (1) makerble_list_projects → project_id. (2) makerble_list_surveys or makerble_get_survey → " +
+        "story_category_id (the Survey). (3) Optionally makerble_list_contacts → beneficiary_ids to tag. (4) Save here. " +
+        "\nReturns draft_story_id. A 403 'Permission denied.' means the signed-in user can't record Stories in that " +
+        "Project: they must be a Project editor, reporter or observer, an organisation editor or reporter, or a " +
+        "worker or manager of the given Event (event_id must belong to the Project).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Project the response belongs to" },
+          story_category_id: { type: "number", description: "Survey (Story Category) being answered" },
+          text: { type: "string", description: "Narrative text of the response. Supports Markdown." },
+          event_id: { type: "number", description: "Optional Event this response is for; must belong to project_id" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to tag",
+          },
+          story_privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "public", "specific_individuals_only"],
+            default: "only_charity_colleagues",
+          },
+          custom_fields: {
+            type: "object",
+            description: "Survey field values: {custom_field_id: value}",
+          },
+        },
+        required: ["project_id", "story_category_id", "text"],
+      },
+      handler: ({ project_id, story_category_id, text, event_id, beneficiary_ids,
+        story_privacy = "only_charity_colleagues", custom_fields }) =>
+        post("/draft_stories", {
+          story: {
+            project_id,
+            story_category_id,
+            text,
+            source_of_story: "api",
+            ...(event_id ? { event_id } : {}),
+          },
+          beneficiaries: beneficiary_ids || [],
+          story_privacy,
+          ...(custom_fields ? { custom_fields } : {}),
         }),
     },
 
