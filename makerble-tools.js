@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 39 Makerble MCP tool definitions.
+ * All 40 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -63,6 +63,7 @@ export function makeApiClient(baseUrl, email, token) {
   return {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
+    del: (path) => request("DELETE", path),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
       const res = await fetch(url, {
@@ -101,7 +102,7 @@ export function makeApiClient(baseUrl, email, token) {
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export function buildTools(api) {
-  const { get, post, postBearer, signIn } = api;
+  const { get, post, del, postBearer, signIn } = api;
 
   return [
     // ── Authentication ────────────────────────────────────────────────────────
@@ -906,6 +907,31 @@ export function buildTools(api) {
       },
       handler: ({ submission_token, ...body }) =>
         postBearer("/referral_submissions", body, submission_token),
+    },
+
+    // ── Event Formats ──────────────────────────────────────────────────────────
+    {
+      name: "makerble_delete_event_format",
+      description:
+        "Permanently delete an Event Format (called Event Category / event_category in the API). " +
+        "An Event Format is a template for events — e.g. Workshops, Classes, Meetings — managed on an " +
+        "organisation's Manage Event Formats page. Only an Organisation Admin of the organisation that " +
+        "owns the Event Format can delete it. Deletion is refused (with the reason in the error) while " +
+        "the Event Format still has any events, or is still added to any project: the user must first " +
+        "delete or move those events, or remove the Event Format from those projects, in Makerble. " +
+        "Default formats (Appointments, Classes, Conferences, Gatherings, Meetings, Other Events, " +
+        "Sessions, Workshops) can be deleted under the same rules. Ask the user for the Event Format's " +
+        "id (it is in the URL of its Edit Settings page: /charities/<org id>/event_categories/<id>/edit) " +
+        "and confirm with them before calling, because this cannot be undone. " +
+        "Returns { id, message } on success.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/event_categories/${id}`),
     },
   ];
 }
