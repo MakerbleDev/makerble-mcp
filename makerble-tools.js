@@ -698,8 +698,10 @@ export function buildTools(api) {
       description:
         "Check Cohort Tracker criteria before saving them: returns how many of the Organisation's Contacts " +
         "currently meet them (before the tracker is placed on a Project or Album), the criteria as they " +
-        "would be stored, and names_projects_or_albums. Rejects criteria a Cohort Tracker can't use. " +
-        "Supported criteria keys (the Contact Filters format): project_ids (+ project_ids_narrow: 'true' " +
+        "would be stored, and names_projects_or_albums. criteria take any key the Contacts page's " +
+        "Filters sidebar sends (the Contact Filters format); keys no filter reads are dropped. These keys " +
+        "follow the Project or Album the tracker is placed on and the reporting period: project_ids " +
+        "(+ project_ids_narrow: 'true' " +
         "to require all), bundle_ids (Albums), narrow_bundle_ids, projects_states_hash ({project_id: " +
         "beneficiary_state_id}), project_beneficiary_states ({project_id: {state_id: {enabled: 'true', " +
         "added_from_date: 'dd/mm/yyyy - dd/mm/yyyy', removed_from_date}}}), project_story_category_ids " +
@@ -707,7 +709,11 @@ export function buildTools(api) {
         "({change_id, from, to}), distance_travelled ({trackers: [{indicator_id, directions: " +
         "['improved'|'no_change'|'worsened']}], same_project}), indicator_comparisons ({indicator_id: " +
         "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
-        "({indicator_id: [sub_ratio_id]}). Use makerble_list_projects, makerble_list_indicators and " +
+        "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
+        "details, e.g. group_ids, beneficiary_types, age_from / age_to ({year, month, day}), " +
+        "date_of_birth_from ('yyyy/mm/dd - yyyy/mm/dd'), created_by_ids, case_owner_ids, open_cases, " +
+        "custom_field_value_hash, changes_hash, indicators_hash, event_ids and flag_hash. " +
+        "Use makerble_list_projects, makerble_list_indicators and " +
         "makerble_list_answer_choices to find the IDs.",
       inputSchema: {
         type: "object",
