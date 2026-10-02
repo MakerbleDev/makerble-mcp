@@ -675,13 +675,20 @@ export function buildTools(api) {
     {
       name: "makerble_list_indicators",
       description:
-        "List all Indicators (scale/binary/value). Linked to Outcomes. Progress Panel cols 3–5.",
+        "List the Indicators (scale/binary/value) the signed-in user can see: their own, and those of every organisation where they are an editor, reporter or observer. Linked to Outcomes. Progress Panel cols 3–5. " +
+        "The Indicator library shared by all organisations (the public library) is left out unless include_public_library is true, the same as the Indicator search in the Makerble app. " +
+        "Set it when looking for an existing Indicator to reuse rather than listing the organisation's own.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Also return public-library Indicators from other organisations. Default false.",
+          },
         },
       },
       handler: (p) => get("/indicators", p),
@@ -689,13 +696,23 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_indicator",
-      description: "Get a single Indicator by ID with full detail.",
+      description:
+        "Get a single Indicator by ID with full detail. Returns not-found for an Indicator the signed-in user cannot see. " +
+        "A public-library Indicator owned by another organisation is only returned when include_public_library is true.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number" } },
+        properties: {
+          id: { type: "number" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Allow a public-library Indicator from another organisation to be returned. Default false.",
+          },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/indicators/${id}`),
+      handler: ({ id, include_public_library }) =>
+        get(`/indicators/${id}`, { include_public_library }),
     },
 
     {
