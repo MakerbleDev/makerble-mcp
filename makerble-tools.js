@@ -782,7 +782,10 @@ export function buildTools(api) {
         properties: { id: { type: "number" } },
         required: ["id"],
       },
-      handler: ({ id }) => del(`/cohort_trackers/${id}`),
+      handler: async ({ id }) => {
+        await del(`/cohort_trackers/${id}`);
+        return { deleted: true, id };
+      },
     },
 
     {
@@ -870,7 +873,10 @@ export function buildTools(api) {
         },
         required: ["id", "project_id"],
       },
-      handler: ({ id, project_id }) => del(`/cohort_trackers/${id}/projects/${project_id}`),
+      handler: async ({ id, project_id }) => {
+        await del(`/cohort_trackers/${id}/projects/${project_id}`);
+        return { removed: true, id, project_id };
+      },
     },
 
     // ── Metrics ────────────────────────────────────────────────────────────────
