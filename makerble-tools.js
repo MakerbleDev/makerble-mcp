@@ -342,8 +342,7 @@ export function buildTools(api) {
         "have been added since; 'pending' = SummaryMaker is writing it (summary may be null or the previous version), " +
         "so wait about 10 seconds and call again; 'failed' = it could not be made, call again with update=true; " +
         "'empty' = there is nothing to summarise yet. " +
-        "\nSet update=true to make a fresh summary (like the 'Update summary' button), e.g. when status is 'stale'. " +
-        "Only works for organisations that have AI enabled (403 otherwise).",
+        "\nSet update=true to make a fresh summary (like the 'Update summary' button), e.g. when status is 'stale'.",
       inputSchema: {
         type: "object",
         properties: {
