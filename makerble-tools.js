@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 42 Makerble MCP tool definitions.
+ * All 43 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -431,6 +431,44 @@ export function buildTools(api) {
       },
       handler: ({ project_ids, ...p }) =>
         get("/stories/story_category_response", { ...p, ...(project_ids ? { project_ids } : {}) }),
+    },
+
+    // ── Media Gallery ─────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_media",
+      description:
+        "List the files in the Media Gallery: every photo, video, audio file and document attached to " +
+        "Stories (Survey Responses / Updates) and to Contacts' bios (Beneficiary profiles) in one organisation " +
+        "(Charity). Only files from Stories and Contacts the user is already allowed to view are returned. " +
+        "Use it to find photos for a newsletter, social post, funder update or Impact Report, or to see what " +
+        "files exist for a Contact or Story. Requires charity_id: read it from a Project in " +
+        "makerble_list_projects (each Project belongs to one organisation). Filters combine with AND: kind (photo, video, " +
+        "audio, document), search (matches the start of words in the file name, Story title, Contact name and " +
+        "caption), source (stories, contacts or both) and sort (newest or oldest by upload date). " +
+        "Returns {page, page_size, page_count, total_count, kind_counts, data}; each item has kind, file_name, " +
+        "content_type, file_size, caption, source_type (story or contact), source_id (Story id or Contact id, " +
+        "for makerble_get_story / makerble_get_contact), source_title, project_id, project_name, uploaded_at " +
+        "and thumbnail_url (photos only). kind_counts gives the number of files of each kind for the same " +
+        "filters, ignoring kind.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Organisation (Charity) id" },
+          kind: { type: "string", enum: ["photo", "video", "audio", "document"] },
+          search: { type: "string", description: "Words to match in file name, Story title, Contact name or caption" },
+          source: {
+            type: "array",
+            items: { type: "string", enum: ["stories", "contacts"] },
+            description: "Which files to include: Story files, Contact bio files, or both (default both)",
+          },
+          sort: { type: "string", enum: ["newest", "oldest"], description: "Default newest" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, maximum 200" },
+          last_synced_datetime: { type: "string", description: "ISO 8601; only files indexed or changed after this time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/media_items", p),
     },
 
     {
