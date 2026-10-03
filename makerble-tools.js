@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 42 Makerble MCP tool definitions.
+ * All 43 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -186,6 +186,48 @@ export function buildTools(api) {
             ...(observer_ids ? { observer_ids } : {}),
           }],
         }),
+    },
+
+    {
+      name: "makerble_get_project_results",
+      description:
+        "Get the figures shown on Projects' Results Canvas (the Results panel on a Project page): one entry per " +
+        "tracker, calculated by Makerble. Use this to answer 'how much did we do?' questions (sessions delivered, " +
+        "people reached, achievements, answers to a choice question, totals and averages) instead of counting " +
+        "Stories yourself. " +
+        "\nTracker types (front-end name, API backend type in brackets): Activity tracker (Change of Activity type) " +
+        "and Engagement tracker (Change of Participation type) give times_recorded and contacts; Achievement tracker " +
+        "(Indicator of Binary type) gives times_recorded and contacts_achieved; Choice tracker (Indicator of Scale " +
+        "type) gives answers: a count and distinct contacts per answer (Sub Ratio); Numerical tracker (Indicator of " +
+        "Value type) gives total, contacts and average_per_contact. " +
+        "\ntimes_recorded counts records, including headcounts and the same Contact recorded more than once, so it " +
+        "is NOT a number of people. contacts / contacts_achieved count distinct Contacts (Beneficiaries) tagged, " +
+        "each person once: use those for 'how many people'. anonymous_count is what was recorded with no Contact " +
+        "tagged. target, target_deadline and percent_of_target appear when the Project has a target: target " +
+        "deadlines dated in the timeframe are added up, otherwise the Project's own target is used. " +
+        "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
+        "(2) Call this tool with start_date / end_date for the period (omit both for all time); Stories count by " +
+        "their date. (3) group_by 'month' for a trend or 'project' to compare Projects; each tracker then has a " +
+        "groups array, with zero rows for months with nothing recorded. " +
+        "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
+        "Returns page, page_size, page_count, total_count, start_date, end_date, project_ids and data (the trackers).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: { type: "array", items: { type: "number" }, description: "Project IDs. Defaults to every Project you can view" },
+          start_date: { type: "string", description: "First Story date to include, YYYY-MM-DD" },
+          end_date: { type: "string", description: "Last Story date to include, YYYY-MM-DD" },
+          tracker_types: {
+            type: "array",
+            items: { type: "string", enum: ["activity", "engagement", "achievement", "choice", "numerical"] },
+            description: "Tracker types to include. Defaults to all",
+          },
+          group_by: { type: "string", enum: ["project", "month"], description: "Split each tracker's figures. Default: one total" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Trackers per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/project_results", p),
     },
 
     // ── Users ─────────────────────────────────────────────────────────────────
