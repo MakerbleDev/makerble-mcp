@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 42 Makerble MCP tool definitions.
+ * All 43 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -328,6 +328,38 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/beneficiaries/impact_box_data", p),
+    },
+
+    {
+      name: "makerble_get_contact_summary",
+      description:
+        "Get the AI summary (made by SummaryMaker) of one Contact (Beneficiary): three sections, " +
+        "'Who', 'Progress' and 'Watch for', written from the Contact's bio and the Stories (Survey Responses / Updates) " +
+        "that the signed-in user is allowed to see. Use it for a quick picture of a Contact before a session or meeting. " +
+        "Every sentence lists its sources: bio=true if it came from the bio, and story_ids for the Stories it came from " +
+        "(fetch one with makerble_get_story to check the detail). " +
+        "\nstatus: 'ready' = the summary is current; 'stale' = an older summary is returned and new_story_count Stories " +
+        "have been added since; 'pending' = SummaryMaker is writing it (summary may be null or the previous version), " +
+        "so wait about 10 seconds and call again; 'failed' = it could not be made, call again with update=true; " +
+        "'empty' = there is nothing to summarise yet. " +
+        "\nSet update=true to make a fresh summary (like the 'Update summary' button), e.g. when status is 'stale'. " +
+        "Only works for organisations that have turned on SummaryMaker in their preferences (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_id: { type: "number", description: "Contact (Beneficiary) ID" },
+          update: {
+            type: "boolean",
+            description: "true to regenerate the summary from the latest bio and Stories",
+            default: false,
+          },
+        },
+        required: ["contact_id"],
+      },
+      handler: ({ contact_id, update }) =>
+        update
+          ? post(`/beneficiaries/${contact_id}/summary`, {})
+          : get(`/beneficiaries/${contact_id}/summary`),
     },
 
     // ── Contact Bio Forms (Beneficiary Categories) ────────────────────────────
