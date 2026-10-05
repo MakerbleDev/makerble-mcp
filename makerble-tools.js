@@ -25,14 +25,19 @@ export function makeApiClient(baseUrl, email, token) {
     let url = `${baseUrl}${path}`;
     if (params) {
       const qs = new URLSearchParams();
-      for (const [k, v] of Object.entries(params)) {
-        if (v === undefined || v === null) continue;
-        if (Array.isArray(v)) {
-          for (const item of v) qs.append(`${k}[]`, String(item));
+      // Arrays become key[]=…; objects (e.g. story_filters) become
+      // key[sub][]=…, the nesting Rails parses back into a hash.
+      const append = (key, value) => {
+        if (value === undefined || value === null) return;
+        if (Array.isArray(value)) {
+          for (const item of value) append(`${key}[]`, item);
+        } else if (typeof value === "object") {
+          for (const [sub, inner] of Object.entries(value)) append(`${key}[${sub}]`, inner);
         } else {
-          qs.append(k, String(v));
+          qs.append(key, String(value));
         }
-      }
+      };
+      for (const [k, v] of Object.entries(params)) append(k, v);
       const qstr = qs.toString();
       if (qstr) url += `?${qstr}`;
     }
@@ -449,7 +454,7 @@ export function buildTools(api) {
         "content_type, file_size, caption, source_type (story or contact), source_id (Story id or Contact id, " +
         "for makerble_get_story / makerble_get_contact), source_title, project_id, project_name, uploaded_at " +
         "and thumbnail_url (photos only). kind_counts gives the number of files of each kind for the same " +
-        "filters, ignoring kind.",
+        "filters, ignoring kind. Story and Contact filters combine with AND, as on a Progress Board.",
       inputSchema: {
         type: "object",
         properties: {
@@ -465,6 +470,26 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, maximum 200" },
           last_synced_datetime: { type: "string", description: "ISO 8601; only files indexed or changed after this time" },
+          story_filters: {
+            type: "object",
+            description:
+              "Timeline (Story) Filters, as on the homepage. Keys (arrays of ids unless noted): project_ids, " +
+              "story_category_ids (Surveys), bundle_ids (Albums), beneficiary_ids (Contacts tagged in the Story), " +
+              "label_ids, outcome_ids, change_ids (Engagement), indicator_ids, user_ids (Authors), charity_ids, " +
+              "created_at_from (Date Happened range, \"YYYY/MM/DD - YYYY/MM/DD\"). Story files must match them. " +
+              "Contact bio files: project_ids matches the Contact's Project memberships; any other key means the " +
+              "Contact must appear in at least one matching Story.",
+            additionalProperties: true,
+          },
+          contact_filters: {
+            type: "object",
+            description:
+              "Contact Filters, as on Manage Contacts. Common keys (arrays of ids): project_ids, group_ids, " +
+              "beneficiary_types (Contact types: 1 Person, 2 Object, 3 Organisation, 4 Animal), " +
+              "beneficiary_state_ids, created_by_ids, bundle_ids. Contact bio files must match them, and Story " +
+              "files must involve at least one matching Contact.",
+            additionalProperties: true,
+          },
         },
         required: ["charity_id"],
       },
