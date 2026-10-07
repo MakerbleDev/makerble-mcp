@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 43 Makerble MCP tool definitions.
+ * All 46 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -25,14 +25,19 @@ export function makeApiClient(baseUrl, email, token) {
     let url = `${baseUrl}${path}`;
     if (params) {
       const qs = new URLSearchParams();
-      for (const [k, v] of Object.entries(params)) {
-        if (v === undefined || v === null) continue;
-        if (Array.isArray(v)) {
-          for (const item of v) qs.append(`${k}[]`, String(item));
+      // Arrays become key[]=…; objects (e.g. story_filters) become
+      // key[sub][]=…, the nesting Rails parses back into a hash.
+      const append = (key, value) => {
+        if (value === undefined || value === null) return;
+        if (Array.isArray(value)) {
+          for (const item of value) append(`${key}[]`, item);
+        } else if (typeof value === "object") {
+          for (const [sub, inner] of Object.entries(value)) append(`${key}[${sub}]`, inner);
         } else {
-          qs.append(k, String(v));
+          qs.append(key, String(value));
         }
-      }
+      };
+      for (const [k, v] of Object.entries(params)) append(k, v);
       const qstr = qs.toString();
       if (qstr) url += `?${qstr}`;
     }
@@ -63,6 +68,7 @@ export function makeApiClient(baseUrl, email, token) {
   return {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
+    del: (path) => request("DELETE", path),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
       const res = await fetch(url, {
@@ -101,7 +107,7 @@ export function makeApiClient(baseUrl, email, token) {
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export function buildTools(api) {
-  const { get, post, postBearer, signIn } = api;
+  const { get, post, del, postBearer, signIn } = api;
 
   return [
     // ── Authentication ────────────────────────────────────────────────────────
@@ -261,6 +267,31 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/beneficiaries", p),
+    },
+
+    {
+      name: "makerble_list_project_contacts",
+      description:
+        "List which Contacts (Beneficiaries) belong to which Projects. Use this to find everyone in a set of " +
+        "projects, e.g. to count the contacts a report covers before looking up their details or stories. " +
+        "Returns the paginated envelope {page, page_size, page_count, total_count, data}; each item is a " +
+        "Project–Contact link with project_id and beneficiary_id (the Contact's ID). A contact in several of " +
+        "the given projects appears once per project. Only projects the signed-in user can see are included. " +
+        "Use makerble_get_contact for a contact's details.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Only include these projects. Omit for every project the user can see.",
+          },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_sync_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/project_beneficiaries", p),
     },
 
     {
@@ -431,6 +462,64 @@ export function buildTools(api) {
       },
       handler: ({ project_ids, ...p }) =>
         get("/stories/story_category_response", { ...p, ...(project_ids ? { project_ids } : {}) }),
+    },
+
+    // ── Media Gallery ─────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_media",
+      description:
+        "List the files in the Media Gallery: every photo, video, audio file and document attached to " +
+        "Stories (Survey Responses / Updates) and to Contacts' bios (Beneficiary profiles) in one organisation " +
+        "(Charity). Only files from Stories and Contacts the user is already allowed to view are returned. " +
+        "Use it to find photos for a newsletter, social post, funder update or Impact Report, or to see what " +
+        "files exist for a Contact or Story. Requires charity_id: read it from a Project in " +
+        "makerble_list_projects (each Project belongs to one organisation). Filters combine with AND: kind (photo, video, " +
+        "audio, document), search (matches the start of words in the file name, Story title, Contact name and " +
+        "caption), source (stories, contacts or both) and sort (newest or oldest by upload date). " +
+        "Returns {page, page_size, page_count, total_count, kind_counts, data}; each item has kind, file_name, " +
+        "content_type, file_size, caption, source_type (story or contact), source_id (Story id or Contact id, " +
+        "for makerble_get_story / makerble_get_contact), source_title, project_id, project_name, uploaded_at " +
+        "and thumbnail_url (photos only). kind_counts gives the number of files of each kind for the same " +
+        "filters, ignoring kind. Story and Contact filters combine with AND, as on a Progress Board.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Organisation (Charity) id" },
+          kind: { type: "string", enum: ["photo", "video", "audio", "document"] },
+          search: { type: "string", description: "Words to match in file name, Story title, Contact name or caption" },
+          source: {
+            type: "array",
+            items: { type: "string", enum: ["stories", "contacts"] },
+            description: "Which files to include: Story files, Contact bio files, or both (default both)",
+          },
+          sort: { type: "string", enum: ["newest", "oldest"], description: "Default newest" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, maximum 200" },
+          last_synced_datetime: { type: "string", description: "ISO 8601; only files indexed or changed after this time" },
+          story_filters: {
+            type: "object",
+            description:
+              "Timeline (Story) Filters, as on the homepage. Keys (arrays of ids unless noted): project_ids, " +
+              "story_category_ids (Surveys), bundle_ids (Albums), beneficiary_ids (Contacts tagged in the Story), " +
+              "label_ids, outcome_ids, change_ids (Engagement), indicator_ids, user_ids (Authors), charity_ids, " +
+              "created_at_from (Date Happened range, \"YYYY/MM/DD - YYYY/MM/DD\"). Story files must match them. " +
+              "Contact bio files: project_ids matches the Contact's Project memberships; any other key means the " +
+              "Contact must appear in at least one matching Story.",
+            additionalProperties: true,
+          },
+          contact_filters: {
+            type: "object",
+            description:
+              "Contact Filters, as on Manage Contacts. Common keys (arrays of ids): project_ids, group_ids, " +
+              "beneficiary_types (Contact types: 1 Person, 2 Object, 3 Organisation, 4 Animal), " +
+              "beneficiary_state_ids, created_by_ids, bundle_ids. Contact bio files must match them, and Story " +
+              "files must involve at least one matching Contact.",
+            additionalProperties: true,
+          },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/media_items", p),
     },
 
     {
@@ -1040,6 +1129,31 @@ export function buildTools(api) {
       },
       handler: ({ submission_token, ...body }) =>
         postBearer("/referral_submissions", body, submission_token),
+    },
+
+    // ── Event Formats ──────────────────────────────────────────────────────────
+    {
+      name: "makerble_delete_event_format",
+      description:
+        "Permanently delete an Event Format (called Event Category / event_category in the API). " +
+        "An Event Format is a template for events — e.g. Workshops, Classes, Meetings — managed on an " +
+        "organisation's Manage Event Formats page. Only an Organisation Admin of the organisation that " +
+        "owns the Event Format can delete it. Deletion is refused (with the reason in the error) while " +
+        "the Event Format still has any events, or is still added to any project: the user must first " +
+        "delete or move those events, or remove the Event Format from those projects, in Makerble. " +
+        "Default formats (Appointments, Classes, Conferences, Gatherings, Meetings, Other Events, " +
+        "Sessions, Workshops) can be deleted under the same rules. Ask the user for the Event Format's " +
+        "id (it is in the URL of its Edit Settings page: /charities/<org id>/event_categories/<id>/edit) " +
+        "and confirm with them before calling, because this cannot be undone. " +
+        "Returns { id, message } on success.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/event_categories/${id}`),
     },
   ];
 }
