@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 40 Makerble MCP tool definitions.
+ * All 43 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -140,13 +140,13 @@ export function buildTools(api) {
       name: "makerble_list_projects",
       description:
         "List all Projects accessible to the authenticated user. " +
-        "Supports pagination and incremental sync via last_sync_datetime.",
+        "Supports pagination and incremental sync via last_synced_datetime.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/projects", p),
@@ -198,7 +198,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/users", p),
@@ -256,7 +256,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
           charity_id: { type: "number" },
           project_id: { type: "number" },
         },
@@ -325,7 +325,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/beneficiaries/impact_box_data", p),
@@ -341,7 +341,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/beneficiary_categories", p),
@@ -395,7 +395,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/stories", p),
@@ -541,7 +541,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_categories", p),
@@ -588,10 +588,92 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/project_story_categories", p),
+    },
+
+    {
+      name: "makerble_list_survey_waves",
+      description:
+        "List the Waves of a Survey Campaign (Project Story Category). A Wave is a named round of a " +
+        "longitudinal survey (e.g. Baseline, Midline, Exit). Use this to find the send_survey_wave_id " +
+        "to pass to makerble_create_survey_links when the Survey Campaign uses Waves. " +
+        "Returns an empty list when it doesn't. Get project_story_category_id from makerble_list_survey_campaigns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id, ...p }) =>
+        get(`/project_story_categories/${project_story_category_id}/survey_waves`, p),
+    },
+
+    {
+      name: "makerble_create_survey_links",
+      description:
+        "Generate personal survey links (Survey Invitation links / survey tokens) for Contacts (Beneficiaries) " +
+        "in a Survey Campaign (Project Story Category). THIS DOES NOT SEND ANYTHING: no email or SMS goes out. " +
+        "It returns one URL per Contact, which you can share yourself or open to fill in the survey on the " +
+        "Contact's behalf (e.g. during a phone interview). Each response submitted through the link is recorded " +
+        "against that Contact. " +
+        "\nWorkflow: (1) makerble_list_survey_campaigns → project_story_category_id. " +
+        "(2) If you only need an existing link, call makerble_list_survey_links with beneficiary_id first and reuse it. " +
+        "(3) If the Survey Campaign uses Waves, makerble_list_survey_waves → send_survey_wave_id. " +
+        "(4) Call this tool. " +
+        "\nRecipients: beneficiary_ids must be Contacts already in the Survey Campaign's Project. emails can be any " +
+        "address: it is matched to an existing Contact of the organisation, or a new Contact is created. " +
+        "At most 200 beneficiary_ids + emails per call. " +
+        "\nlink_expiry: 'use_once' (default) — the link stops working after one response; " +
+        "'evergreen' — the link stays active for repeat responses. " +
+        "Requires Project Editor or Organisation Editor access. " +
+        "Returns send_survey_id and data: [{beneficiary_id, email, survey_token, survey_url, link_expiry, " +
+        "is_anonymised, send_survey_wave_id, expired, created_at}].",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          beneficiary_ids: { type: "array", items: { type: "number" }, description: "Contact IDs in the Survey Campaign's Project" },
+          emails: { type: "array", items: { type: "string" }, description: "Email addresses; matched to or creating Contacts. Nothing is emailed." },
+          send_survey_wave_id: { type: "number", description: "Optional Wave ID from makerble_list_survey_waves" },
+          link_expiry: { type: "string", enum: ["use_once", "evergreen"], default: "use_once" },
+          is_anonymised: { type: "boolean", default: false, description: "Record responses anonymously" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id, ...body }) =>
+        post(`/project_story_categories/${project_story_category_id}/survey_links`, body),
+    },
+
+    {
+      name: "makerble_list_survey_links",
+      description:
+        "List existing personal survey links (Survey Invitation links / survey tokens) for a Survey Campaign " +
+        "(Project Story Category). Use it to find a Contact's (Beneficiary's) existing link and reuse it instead " +
+        "of generating a new one with makerble_create_survey_links. Check `expired`: a 'use_once' link that has " +
+        "already been answered is expired and no longer works. " +
+        "Filter by beneficiary_id and/or send_survey_wave_id. Requires Project Editor or Organisation Editor access. " +
+        "Returns {page, page_size, page_count, total_count, data: [{beneficiary_id, email, survey_token, survey_url, " +
+        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at}]}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          beneficiary_id: { type: "number", description: "Only this Contact's links" },
+          send_survey_wave_id: { type: "number", description: "Only links for this Wave" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id, ...p }) =>
+        get(`/project_story_categories/${project_story_category_id}/survey_links`, p),
     },
 
     // ── Cases ──────────────────────────────────────────────────────────────────
@@ -603,7 +685,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/cases", p),
@@ -650,7 +732,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/custom_field_categories", p),
@@ -667,7 +749,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/changes", p),
@@ -676,13 +758,20 @@ export function buildTools(api) {
     {
       name: "makerble_list_indicators",
       description:
-        "List all Indicators (scale/binary/value). Linked to Outcomes. Progress Panel cols 3–5.",
+        "List the Indicators (scale/binary/value) the signed-in user can see: their own, and those of every organisation where they are an editor, reporter or observer. Linked to Outcomes. Progress Panel cols 3–5. " +
+        "The Indicator library shared by all organisations (the public library) is left out unless include_public_library is true, the same as the Indicator search in the Makerble app. " +
+        "Set it when looking for an existing Indicator to reuse rather than listing the organisation's own.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Also return public-library Indicators from other organisations. Default false.",
+          },
         },
       },
       handler: (p) => get("/indicators", p),
@@ -690,13 +779,23 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_indicator",
-      description: "Get a single Indicator by ID with full detail.",
+      description:
+        "Get a single Indicator by ID with full detail. Returns not-found for an Indicator the signed-in user cannot see. " +
+        "A public-library Indicator owned by another organisation is only returned when include_public_library is true.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number" } },
+        properties: {
+          id: { type: "number" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Allow a public-library Indicator from another organisation to be returned. Default false.",
+          },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/indicators/${id}`),
+      handler: ({ id, include_public_library }) =>
+        get(`/indicators/${id}`, { include_public_library }),
     },
 
     {
@@ -708,7 +807,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/outcomes", p),
@@ -734,7 +833,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/outcome_indicators", p),
@@ -751,7 +850,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           story_id: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_changes", p),
@@ -767,7 +866,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           story_id: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_indicator_beneficiaries", p),
@@ -783,7 +882,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/ratio_sets", p),
@@ -800,7 +899,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           ratio_set_ids: { type: "array", items: { type: "number" } },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: ({ ratio_set_ids, ...p }) =>
