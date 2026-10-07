@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 46 Makerble MCP tool definitions.
+ * All 47 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -520,6 +520,25 @@ export function buildTools(api) {
         required: ["charity_id"],
       },
       handler: (p) => get("/media_items", p),
+    },
+
+    {
+      name: "makerble_get_media",
+      description:
+        "Get one file from the Media Gallery by its id (from makerble_list_media), with a download link. " +
+        "Use it when the user wants to download, open or share a specific photo, video, audio file or document " +
+        "attached to a Story (Survey Response / Update) or a Contact's bio (Beneficiary profile). Permissions are " +
+        "checked again: the user must still be able to view the Story or Contact. Returns the same fields as " +
+        "makerble_list_media plus field_name (where the file sits: \"Profile picture\", \"<field> (file field)\", " +
+        "\"Story attachment\" or \"Contact attachment\"), download_url (a signed link that downloads the file) and " +
+        "download_url_expires_in (seconds, usually 300). The link expires quickly: call this tool again for a fresh " +
+        "one rather than storing it.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Media item id from makerble_list_media" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/media_items/${id}`),
     },
 
     {

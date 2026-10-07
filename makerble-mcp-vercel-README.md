@@ -1,6 +1,6 @@
 # Makerble MCP Server — Vercel Deployment
 
-Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **46 tools** covering the full Makerble API.
+Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **47 tools** covering the full Makerble API.
 
 Non-technical users get their personal link from **`/connect`** — no curl, no config files, no tokens to hunt down.
 
