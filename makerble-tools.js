@@ -448,20 +448,25 @@ export function buildTools(api) {
       name: "makerble_get_story_survey_responses",
       description:
         "Get Stories with full named survey response data — indicator names, change names, custom field values. " +
-        "Ideal for reporting. Filter by story_category_id, project_ids, start_date, end_date.",
+        "Ideal for reporting. Filter by story_category_ids (Survey / Story Category IDs), project_ids, start_date, end_date. " +
+        "Only Surveys the user can access are returned.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          story_category_id: { type: "number" },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Survey (Story Category) IDs" },
           project_ids: { type: "array", items: { type: "number" } },
           start_date: { type: "string", description: "YYYY-MM-DD" },
           end_date: { type: "string", description: "YYYY-MM-DD" },
         },
       },
-      handler: ({ project_ids, ...p }) =>
-        get("/stories/story_category_response", { ...p, ...(project_ids ? { project_ids } : {}) }),
+      handler: ({ project_ids, story_category_ids, ...p }) =>
+        get("/stories/story_category_response", {
+          ...p,
+          ...(project_ids ? { project_ids } : {}),
+          ...(story_category_ids ? { story_category_ids } : {}),
+        }),
     },
 
     // ── Media Gallery ─────────────────────────────────────────────────────────
