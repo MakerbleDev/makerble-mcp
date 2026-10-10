@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 47 Makerble MCP tool definitions.
+ * All 57 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -68,6 +68,7 @@ export function makeApiClient(baseUrl, email, token) {
   return {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
+    patch: (path, body) => request("PATCH", path, body),
     del: (path) => request("DELETE", path),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
@@ -107,7 +108,7 @@ export function makeApiClient(baseUrl, email, token) {
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export function buildTools(api) {
-  const { get, post, del, postBearer, signIn } = api;
+  const { get, post, patch, del, postBearer, signIn } = api;
 
   return [
     // ── Authentication ────────────────────────────────────────────────────────
@@ -918,6 +919,234 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/custom_field_categories", p),
+    },
+
+    // ── Cohort Trackers ───────────────────────────────────────────────────────
+    {
+      name: "makerble_list_cohort_trackers",
+      description:
+        "List an Organisation's Cohort Trackers. A Cohort Tracker is a metric that counts the Contacts " +
+        "(beneficiaries) in a Project or Album who meet a set of Contact Filter criteria, e.g. " +
+        "'Children attending 75%+'. Returns each tracker's name, membership ('ever_enrolled' or " +
+        "'currently_enrolled') and criteria. Only an Organisation's editors and reporters, and its " +
+        "project managers, can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_sync_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/cohort_trackers", p),
+    },
+
+    {
+      name: "makerble_get_cohort_tracker",
+      description:
+        "Get one Cohort Tracker by ID, with where it is used (usage: projects, albums, templates) and " +
+        "names_projects_or_albums, which is true when its criteria point at specific Projects or Albums " +
+        "(so it counts against those same ones wherever it is placed).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/cohort_trackers/${id}`),
+    },
+
+    {
+      name: "makerble_preview_cohort_tracker",
+      description:
+        "Check Cohort Tracker criteria before saving them: returns how many of the Organisation's Contacts " +
+        "currently meet them (before the tracker is placed on a Project or Album), the criteria as they " +
+        "would be stored, and names_projects_or_albums. criteria take any key the Contacts page's " +
+        "Filters sidebar sends (the Contact Filters format); keys no filter reads are dropped. These keys " +
+        "follow the Project or Album the tracker is placed on and the reporting period: project_ids " +
+        "(+ project_ids_narrow: 'true' " +
+        "to require all), bundle_ids (Albums), narrow_bundle_ids, projects_states_hash ({project_id: " +
+        "beneficiary_state_id}), project_beneficiary_states ({project_id: {state_id: {enabled: 'true', " +
+        "added_from_date: 'dd/mm/yyyy - dd/mm/yyyy', removed_from_date}}}), project_story_category_ids " +
+        "(Survey Campaigns completed) with project_story_category_filter_data, attendance_rate " +
+        "({change_id, from, to}), distance_travelled ({trackers: [{indicator_id, directions: " +
+        "['improved'|'no_change'|'worsened']}], same_project}), indicator_comparisons ({indicator_id: " +
+        "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
+        "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
+        "details, e.g. group_ids, beneficiary_types, age_from / age_to ({year, month, day}), " +
+        "date_of_birth_from ('yyyy/mm/dd - yyyy/mm/dd'), created_by_ids, case_owner_ids, open_cases, " +
+        "custom_field_value_hash, changes_hash, indicators_hash, event_ids and flag_hash. " +
+        "Use makerble_list_projects, makerble_list_indicators and " +
+        "makerble_list_answer_choices to find the IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          criteria: { type: "object", description: "Contact Filter criteria, see the description" },
+          membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, criteria, membership }) =>
+        post("/cohort_trackers/preview", {
+          charity_id,
+          cohort_tracker: { ...(criteria ? { criteria } : {}), ...(membership ? { membership } : {}) },
+        }),
+    },
+
+    {
+      name: "makerble_create_cohort_tracker",
+      description:
+        "Create a Cohort Tracker: a metric counting the Contacts in a Project or Album who meet criteria. " +
+        "Every tracker counts only members of the Project or Album it is placed on: membership " +
+        "'ever_enrolled' (default: anyone whose status History shows them Enrolled at any time) or " +
+        "'currently_enrolled' (their current Project State). criteria add further conditions (see " +
+        "makerble_preview_cohort_tracker for the keys). Requires an editor or reporter of the Organisation." +
+        "\nWorkflow: (1) makerble_preview_cohort_tracker to check the criteria and the count. " +
+        "(2) makerble_create_cohort_tracker. (3) makerble_add_cohort_tracker_to_project to place it in " +
+        "a column of a Project's Impact Scorecard, optionally with a target. Albums pick it up from " +
+        "their Projects automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "Shown next to the result, e.g. 'Children attending 75%+'" },
+          description: { type: "string" },
+          membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
+          criteria: { type: "object", description: "Contact Filter criteria" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: ({ charity_id, ...cohort_tracker }) =>
+        post("/cohort_trackers", { cohort_tracker: { charity_id, ...cohort_tracker } }),
+    },
+
+    {
+      name: "makerble_update_cohort_tracker",
+      description:
+        "Update a Cohort Tracker's name, description, membership or criteria. Only the fields sent change. " +
+        "Changes apply everywhere it is used (see makerble_get_cohort_tracker usage). Requires an " +
+        "Organisation editor, or the reporter who created it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          name: { type: "string" },
+          description: { type: "string" },
+          membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
+          criteria: { type: "object", description: "Replaces the stored criteria" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...cohort_tracker }) => patch(`/cohort_trackers/${id}`, { cohort_tracker }),
+    },
+
+    {
+      name: "makerble_delete_cohort_tracker",
+      description:
+        "Delete a Cohort Tracker. Refused while it is used on any Project, Album or Scorecard Template; " +
+        "remove it from those first.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: async ({ id }) => {
+        await del(`/cohort_trackers/${id}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_add_cohort_tracker_to_project",
+      description:
+        "Place a Cohort Tracker in a column of a Project's Impact Scorecard (Edit Project Metrics), " +
+        "optionally with a one-off target (a number of Contacts to reach). Columns: activities, " +
+        "engagement, potential (short-term outcomes), behaviour (medium-term), growth (long-term). " +
+        "The tracker and Project must belong to the same Organisation, and you need rights to edit the " +
+        "Project's metrics. Returns the column and target.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          column: { type: "string", enum: ["activities", "engagement", "potential", "behaviour", "growth"] },
+          target: { type: "number", description: "Optional one-off target" },
+        },
+        required: ["id", "project_id", "column"],
+      },
+      handler: ({ id, project_id, column, target }) =>
+        post(`/cohort_trackers/${id}/projects/${project_id}`, { column, ...(target !== undefined ? { target } : {}) }),
+    },
+
+    {
+      name: "makerble_get_cohort_tracker_targets",
+      description:
+        "Get a Cohort Tracker's targets on a Project or an Album (its Set Targets page): the one-off " +
+        "target and any deadline targets ([{date, number}]). Pass project_id or album_id. For an Album, " +
+        "album_target_type says whether the Album uses manual targets (where Cohort Tracker targets are set) " +
+        "or automatic ones. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id }) =>
+        get(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`),
+    },
+
+    {
+      name: "makerble_set_cohort_tracker_targets",
+      description:
+        "Set a Cohort Tracker's targets on a Project or an Album (Set Targets): target is the one-off number " +
+        "of Contacts to reach; deadlines is a list of {date: 'YYYY-MM-DD', number} that REPLACES this " +
+        "tracker's deadline targets there ([] clears them). A target is a level to reach, not a total that " +
+        "adds up across periods, and an Album's is never the sum of its Projects'. Pass project_id or " +
+        "album_id; the tracker must already be on that Project (makerble_add_cohort_tracker_to_project) or " +
+        "on one of the Album's Projects. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          target: { type: "number", description: "One-off target" },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets, replacing any already set for this tracker",
+            items: {
+              type: "object",
+              properties: { date: { type: "string" }, number: { type: "number" } },
+              required: ["date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...targets }) =>
+        patch(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_remove_cohort_tracker_from_project",
+      description: "Remove a Cohort Tracker from a Project's Impact Scorecard, and its Albums if no other Project in them uses it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: async ({ id, project_id }) => {
+        await del(`/cohort_trackers/${id}/projects/${project_id}`);
+        return { removed: true, id, project_id };
+      },
     },
 
     // ── Metrics ────────────────────────────────────────────────────────────────
