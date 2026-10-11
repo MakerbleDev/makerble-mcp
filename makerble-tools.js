@@ -1456,8 +1456,9 @@ export function buildTools(api) {
         "updated, or an import finishes. Returns each endpoint's url, description, event_types, active " +
         "(false = paused), disabled_at (set when Makerble switched it off after repeated failed " +
         "deliveries), failure_count and last_success_at. Secrets are never returned here. Only the " +
-        "Organisation's admins can use the webhook tools, and only once Makerble has turned webhooks on " +
-        "for the Organisation (otherwise the API answers 'Webhooks are not turned on for this organisation').",
+        "Organisation's admins can use the webhook tools, and only once an admin has ticked 'Turn on " +
+        "Webhooks' in the Organisation's Settings (Preferences) page in Makerble (otherwise the API answers " +
+        "'Webhooks are not turned on for this organisation'; tell the user an admin can turn them on there).",
       inputSchema: {
         type: "object",
         properties: {
