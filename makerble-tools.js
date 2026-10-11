@@ -1454,9 +1454,12 @@ export function buildTools(api) {
         "another system (a CRM such as Dynamics or Salesforce, Zapier, a data warehouse) that Makerble " +
         "sends a signed JSON POST to whenever a Contact (beneficiary), Story or Project is created or " +
         "updated, or an import finishes. Returns each endpoint's url, description, event_types, active " +
-        "(false = paused), disabled_at (set when Makerble switched it off after repeated failed " +
-        "deliveries), failure_count and last_success_at. Secrets are never returned here. Only the " +
-        "Organisation's admins can use the webhook tools, and only once an admin has ticked 'Turn on " +
+        "(false = paused), source, disabled_at (set when Makerble switched it off after repeated failed " +
+        "deliveries), failure_count and last_success_at. source is 'manual' for an endpoint someone added " +
+        "by hand, or 'power_automate', 'zapier' or 'dynamics' for one an automation platform created for a " +
+        "flow (its description is usually the flow's name). Secrets are never returned here. Only the " +
+        "Organisation's admins can use the webhook tools (anyone else gets 'Only an Organisation Admin can " +
+        "manage Webhooks'), and only once an admin has ticked 'Turn on " +
         "Webhooks' in the Organisation's Settings (Preferences) page in Makerble (otherwise the API answers " +
         "'Webhooks are not turned on for this organisation'; tell the user an admin can turn them on there).",
       inputSchema: {
@@ -1479,7 +1482,8 @@ export function buildTools(api) {
         "Events: contact.created, contact.updated (includes changed_fields), story.created, story.updated, " +
         "project.created, project.updated, import.completed (one event per finished spreadsheet import " +
         "instead of one per row). Leave event_types out to send every event. The url must be HTTPS and " +
-        "reachable from the internet. An Organisation can have at most 10 endpoints. The response includes " +
+        "reachable from the internet. An Organisation can have at most 10 endpoints added this way (endpoints " +
+        "created by automation platforms such as Power Automate have a separate limit). The response includes " +
         "`secret` (whsec_…), which the receiving system needs to verify the X-Makerble-Signature header: " +
         "it is shown only this once, so give it to the user straight away and tell them to store it safely. " +
         "Then call makerble_send_test_webhook to check the receiver works.",
@@ -1509,7 +1513,9 @@ export function buildTools(api) {
         "resume it (active: true). Resuming also turns back on an endpoint that Makerble switched off after " +
         "repeated failed deliveries (disabled_at set), and resets its failure_count; check the receiver " +
         "works first with makerble_send_test_webhook. Changes made while an endpoint was paused or " +
-        "switched off are not sent afterwards. Only send the fields to change.",
+        "switched off are not sent afterwards. Only send the fields to change. An endpoint whose source is not " +
+        "'manual' belongs to an automation platform's flow: only pause or resume it here, and change it in " +
+        "that flow instead.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1529,7 +1535,9 @@ export function buildTools(api) {
       description:
         "Delete a webhook endpoint and its delivery log. Makerble stops sending to it at once. This " +
         "cannot be undone, so confirm with the user first; to stop sending for a while, pause it with " +
-        "makerble_update_webhook_endpoint (active: false) instead.",
+        "makerble_update_webhook_endpoint (active: false) instead. Deleting an endpoint that has already " +
+        "gone also succeeds. If its source is not 'manual', the automation platform's flow stops " +
+        "triggering, so tell the user to delete or fix the flow too.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number", description: "The webhook endpoint ID" } },
