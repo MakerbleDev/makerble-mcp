@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 41 Makerble MCP tool definitions.
+ * All 60 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -25,14 +25,19 @@ export function makeApiClient(baseUrl, email, token) {
     let url = `${baseUrl}${path}`;
     if (params) {
       const qs = new URLSearchParams();
-      for (const [k, v] of Object.entries(params)) {
-        if (v === undefined || v === null) continue;
-        if (Array.isArray(v)) {
-          for (const item of v) qs.append(`${k}[]`, String(item));
+      // Arrays become key[]=…; objects (e.g. story_filters) become
+      // key[sub][]=…, the nesting Rails parses back into a hash.
+      const append = (key, value) => {
+        if (value === undefined || value === null) return;
+        if (Array.isArray(value)) {
+          for (const item of value) append(`${key}[]`, item);
+        } else if (typeof value === "object") {
+          for (const [sub, inner] of Object.entries(value)) append(`${key}[${sub}]`, inner);
         } else {
-          qs.append(k, String(v));
+          qs.append(key, String(value));
         }
-      }
+      };
+      for (const [k, v] of Object.entries(params)) append(k, v);
       const qstr = qs.toString();
       if (qstr) url += `?${qstr}`;
     }
@@ -63,6 +68,8 @@ export function makeApiClient(baseUrl, email, token) {
   return {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
+    patch: (path, body) => request("PATCH", path, body),
+    del: (path) => request("DELETE", path),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
       const res = await fetch(url, {
@@ -101,7 +108,7 @@ export function makeApiClient(baseUrl, email, token) {
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export function buildTools(api) {
-  const { get, post, postBearer, signIn } = api;
+  const { get, post, patch, del, postBearer, signIn } = api;
 
   return [
     // ── Authentication ────────────────────────────────────────────────────────
@@ -139,13 +146,13 @@ export function buildTools(api) {
       name: "makerble_list_projects",
       description:
         "List all Projects accessible to the authenticated user. " +
-        "Supports pagination and incremental sync via last_sync_datetime.",
+        "Supports pagination and incremental sync via last_synced_datetime.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/projects", p),
@@ -188,6 +195,48 @@ export function buildTools(api) {
         }),
     },
 
+    {
+      name: "makerble_get_project_results",
+      description:
+        "Get the figures shown on Projects' Results Canvas (the Results panel on a Project page): one entry per " +
+        "tracker, calculated by Makerble. Use this to answer 'how much did we do?' questions (sessions delivered, " +
+        "people reached, achievements, answers to a choice question, totals and averages) instead of counting " +
+        "Stories yourself. " +
+        "\nTracker types (front-end name, API backend type in brackets): Activity tracker (Change of Activity type) " +
+        "and Engagement tracker (Change of Participation type) give times_recorded and contacts; Achievement tracker " +
+        "(Indicator of Binary type) gives times_recorded and contacts_achieved; Choice tracker (Indicator of Scale " +
+        "type) gives answers: a count and distinct contacts per answer (Sub Ratio); Numerical tracker (Indicator of " +
+        "Value type) gives total, contacts and average_per_contact. " +
+        "\ntimes_recorded counts records, including headcounts and the same Contact recorded more than once, so it " +
+        "is NOT a number of people. contacts / contacts_achieved count distinct Contacts (Beneficiaries) tagged, " +
+        "each person once: use those for 'how many people'. anonymous_count is what was recorded with no Contact " +
+        "tagged. target, target_deadline and percent_of_target appear when the Project has a target: target " +
+        "deadlines dated in the timeframe are added up, otherwise the Project's own target is used. " +
+        "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
+        "(2) Call this tool with start_date / end_date for the period (omit both for all time); Stories count by " +
+        "their date. (3) group_by 'month' for a trend or 'project' to compare Projects; each tracker then has a " +
+        "groups array, with zero rows for months with nothing recorded. " +
+        "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
+        "Returns page, page_size, page_count, total_count, start_date, end_date, project_ids and data (the trackers).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: { type: "array", items: { type: "number" }, description: "Project IDs. Defaults to every Project you can view" },
+          start_date: { type: "string", description: "First Story date to include, YYYY-MM-DD" },
+          end_date: { type: "string", description: "Last Story date to include, YYYY-MM-DD" },
+          tracker_types: {
+            type: "array",
+            items: { type: "string", enum: ["activity", "engagement", "achievement", "choice", "numerical"] },
+            description: "Tracker types to include. Defaults to all",
+          },
+          group_by: { type: "string", enum: ["project", "month"], description: "Split each tracker's figures. Default: one total" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Trackers per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/project_results", p),
+    },
+
     // ── Users ─────────────────────────────────────────────────────────────────
     {
       name: "makerble_list_users",
@@ -197,7 +246,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/users", p),
@@ -255,12 +304,37 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
           charity_id: { type: "number" },
           project_id: { type: "number" },
         },
       },
       handler: (p) => get("/beneficiaries", p),
+    },
+
+    {
+      name: "makerble_list_project_contacts",
+      description:
+        "List which Contacts (Beneficiaries) belong to which Projects. Use this to find everyone in a set of " +
+        "projects, e.g. to count the contacts a report covers before looking up their details or stories. " +
+        "Returns the paginated envelope {page, page_size, page_count, total_count, data}; each item is a " +
+        "Project–Contact link with project_id and beneficiary_id (the Contact's ID). A contact in several of " +
+        "the given projects appears once per project. Only projects the signed-in user can see are included. " +
+        "Use makerble_get_contact for a contact's details.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Only include these projects. Omit for every project the user can see.",
+          },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_sync_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/project_beneficiaries", p),
     },
 
     {
@@ -367,7 +441,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/beneficiaries/impact_box_data", p),
@@ -383,7 +457,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/beneficiary_categories", p),
@@ -437,7 +511,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/stories", p),
@@ -474,6 +548,83 @@ export function buildTools(api) {
       },
       handler: ({ project_ids, ...p }) =>
         get("/stories/story_category_response", { ...p, ...(project_ids ? { project_ids } : {}) }),
+    },
+
+    // ── Media Gallery ─────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_media",
+      description:
+        "List the files in the Media Gallery: every photo, video, audio file and document attached to " +
+        "Stories (Survey Responses / Updates) and to Contacts' bios (Beneficiary profiles) in one organisation " +
+        "(Charity). Only files from Stories and Contacts the user is already allowed to view are returned. " +
+        "Use it to find photos for a newsletter, social post, funder update or Impact Report, or to see what " +
+        "files exist for a Contact or Story. Requires charity_id: read it from a Project in " +
+        "makerble_list_projects (each Project belongs to one organisation). Filters combine with AND: kind (photo, video, " +
+        "audio, document), search (matches the start of words in the file name, Story title, Contact name and " +
+        "caption), source (stories, contacts or both) and sort (newest or oldest by upload date). " +
+        "Returns {page, page_size, page_count, total_count, kind_counts, data}; each item has kind, file_name, " +
+        "content_type, file_size, caption, source_type (story or contact), source_id (Story id or Contact id, " +
+        "for makerble_get_story / makerble_get_contact), source_title, project_id, project_name, uploaded_at " +
+        "and thumbnail_url (photos only). kind_counts gives the number of files of each kind for the same " +
+        "filters, ignoring kind. Story and Contact filters combine with AND, as on a Progress Board.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Organisation (Charity) id" },
+          kind: { type: "string", enum: ["photo", "video", "audio", "document"] },
+          search: { type: "string", description: "Words to match in file name, Story title, Contact name or caption" },
+          source: {
+            type: "array",
+            items: { type: "string", enum: ["stories", "contacts"] },
+            description: "Which files to include: Story files, Contact bio files, or both (default both)",
+          },
+          sort: { type: "string", enum: ["newest", "oldest"], description: "Default newest" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, maximum 200" },
+          last_synced_datetime: { type: "string", description: "ISO 8601; only files indexed or changed after this time" },
+          story_filters: {
+            type: "object",
+            description:
+              "Timeline (Story) Filters, as on the homepage. Keys (arrays of ids unless noted): project_ids, " +
+              "story_category_ids (Surveys), bundle_ids (Albums), beneficiary_ids (Contacts tagged in the Story), " +
+              "label_ids, outcome_ids, change_ids (Engagement), indicator_ids, user_ids (Authors), charity_ids, " +
+              "created_at_from (Date Happened range, \"YYYY/MM/DD - YYYY/MM/DD\"). Story files must match them. " +
+              "Contact bio files: project_ids matches the Contact's Project memberships; any other key means the " +
+              "Contact must appear in at least one matching Story.",
+            additionalProperties: true,
+          },
+          contact_filters: {
+            type: "object",
+            description:
+              "Contact Filters, as on Manage Contacts. Common keys (arrays of ids): project_ids, group_ids, " +
+              "beneficiary_types (Contact types: 1 Person, 2 Object, 3 Organisation, 4 Animal), " +
+              "beneficiary_state_ids, created_by_ids, bundle_ids. Contact bio files must match them, and Story " +
+              "files must involve at least one matching Contact.",
+            additionalProperties: true,
+          },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/media_items", p),
+    },
+
+    {
+      name: "makerble_get_media",
+      description:
+        "Get one file from the Media Gallery by its id (from makerble_list_media), with a download link. " +
+        "Use it when the user wants to download, open or share a specific photo, video, audio file or document " +
+        "attached to a Story (Survey Response / Update) or a Contact's bio (Beneficiary profile). Permissions are " +
+        "checked again: the user must still be able to view the Story or Contact. Returns the same fields as " +
+        "makerble_list_media plus field_name (where the file sits: \"Profile picture\", \"<field> (file field)\", " +
+        "\"Story attachment\" or \"Contact attachment\"), download_url (a signed link that downloads the file) and " +
+        "download_url_expires_in (seconds, usually 300). The link expires quickly: call this tool again for a fresh " +
+        "one rather than storing it.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Media item id from makerble_list_media" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/media_items/${id}`),
     },
 
     {
@@ -574,6 +725,58 @@ export function buildTools(api) {
         }),
     },
 
+    {
+      name: "makerble_create_draft_story",
+      description:
+        "Save an Answer In Progress (draft Story): a partly completed survey response that a colleague " +
+        "reviews, finishes and publishes in Makerble. Use this instead of makerble_create_story when a person " +
+        "should check the response before it becomes a published Story, e.g. notes you've summarised from a " +
+        "meeting or call. It shows on the organisation's Answers In Progress page. " +
+        "\nWorkflow: (1) makerble_list_projects → project_id. (2) makerble_list_surveys or makerble_get_survey → " +
+        "story_category_id (the Survey). (3) Optionally makerble_list_contacts → beneficiary_ids to tag. (4) Save here. " +
+        "\nReturns draft_story_id. A 403 'Permission denied.' means the signed-in user can't record Stories in that " +
+        "Project: they must be a Project editor, reporter or observer, an organisation editor or reporter, or a " +
+        "worker or manager of the given Event (event_id must belong to the Project).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "Project the response belongs to" },
+          story_category_id: { type: "number", description: "Survey (Story Category) being answered" },
+          text: { type: "string", description: "Narrative text of the response. Supports Markdown." },
+          event_id: { type: "number", description: "Optional Event this response is for; must belong to project_id" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to tag",
+          },
+          story_privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "public", "specific_individuals_only"],
+            default: "only_charity_colleagues",
+          },
+          custom_fields: {
+            type: "object",
+            description: "Survey field values: {custom_field_id: value}",
+          },
+        },
+        required: ["project_id", "story_category_id", "text"],
+      },
+      handler: ({ project_id, story_category_id, text, event_id, beneficiary_ids,
+        story_privacy = "only_charity_colleagues", custom_fields }) =>
+        post("/draft_stories", {
+          story: {
+            project_id,
+            story_category_id,
+            text,
+            source_of_story: "api",
+            ...(event_id ? { event_id } : {}),
+          },
+          beneficiaries: beneficiary_ids || [],
+          story_privacy,
+          ...(custom_fields ? { custom_fields } : {}),
+        }),
+    },
+
     // ── Surveys (Story Categories) ─────────────────────────────────────────────
     {
       name: "makerble_list_surveys",
@@ -583,7 +786,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_categories", p),
@@ -630,10 +833,92 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/project_story_categories", p),
+    },
+
+    {
+      name: "makerble_list_survey_waves",
+      description:
+        "List the Waves of a Survey Campaign (Project Story Category). A Wave is a named round of a " +
+        "longitudinal survey (e.g. Baseline, Midline, Exit). Use this to find the send_survey_wave_id " +
+        "to pass to makerble_create_survey_links when the Survey Campaign uses Waves. " +
+        "Returns an empty list when it doesn't. Get project_story_category_id from makerble_list_survey_campaigns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id, ...p }) =>
+        get(`/project_story_categories/${project_story_category_id}/survey_waves`, p),
+    },
+
+    {
+      name: "makerble_create_survey_links",
+      description:
+        "Generate personal survey links (Survey Invitation links / survey tokens) for Contacts (Beneficiaries) " +
+        "in a Survey Campaign (Project Story Category). THIS DOES NOT SEND ANYTHING: no email or SMS goes out. " +
+        "It returns one URL per Contact, which you can share yourself or open to fill in the survey on the " +
+        "Contact's behalf (e.g. during a phone interview). Each response submitted through the link is recorded " +
+        "against that Contact. " +
+        "\nWorkflow: (1) makerble_list_survey_campaigns → project_story_category_id. " +
+        "(2) If you only need an existing link, call makerble_list_survey_links with beneficiary_id first and reuse it. " +
+        "(3) If the Survey Campaign uses Waves, makerble_list_survey_waves → send_survey_wave_id. " +
+        "(4) Call this tool. " +
+        "\nRecipients: beneficiary_ids must be Contacts already in the Survey Campaign's Project. emails can be any " +
+        "address: it is matched to an existing Contact of the organisation, or a new Contact is created. " +
+        "At most 200 beneficiary_ids + emails per call. " +
+        "\nlink_expiry: 'use_once' (default) — the link stops working after one response; " +
+        "'evergreen' — the link stays active for repeat responses. " +
+        "Requires Project Editor or Organisation Editor access. " +
+        "Returns send_survey_id and data: [{beneficiary_id, email, survey_token, survey_url, link_expiry, " +
+        "is_anonymised, send_survey_wave_id, expired, created_at}].",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          beneficiary_ids: { type: "array", items: { type: "number" }, description: "Contact IDs in the Survey Campaign's Project" },
+          emails: { type: "array", items: { type: "string" }, description: "Email addresses; matched to or creating Contacts. Nothing is emailed." },
+          send_survey_wave_id: { type: "number", description: "Optional Wave ID from makerble_list_survey_waves" },
+          link_expiry: { type: "string", enum: ["use_once", "evergreen"], default: "use_once" },
+          is_anonymised: { type: "boolean", default: false, description: "Record responses anonymously" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id, ...body }) =>
+        post(`/project_story_categories/${project_story_category_id}/survey_links`, body),
+    },
+
+    {
+      name: "makerble_list_survey_links",
+      description:
+        "List existing personal survey links (Survey Invitation links / survey tokens) for a Survey Campaign " +
+        "(Project Story Category). Use it to find a Contact's (Beneficiary's) existing link and reuse it instead " +
+        "of generating a new one with makerble_create_survey_links. Check `expired`: a 'use_once' link that has " +
+        "already been answered is expired and no longer works. " +
+        "Filter by beneficiary_id and/or send_survey_wave_id. Requires Project Editor or Organisation Editor access. " +
+        "Returns {page, page_size, page_count, total_count, data: [{beneficiary_id, email, survey_token, survey_url, " +
+        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at}]}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          beneficiary_id: { type: "number", description: "Only this Contact's links" },
+          send_survey_wave_id: { type: "number", description: "Only links for this Wave" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id, ...p }) =>
+        get(`/project_story_categories/${project_story_category_id}/survey_links`, p),
     },
 
     // ── Cases ──────────────────────────────────────────────────────────────────
@@ -645,7 +930,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/cases", p),
@@ -692,10 +977,238 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/custom_field_categories", p),
+    },
+
+    // ── Cohort Trackers ───────────────────────────────────────────────────────
+    {
+      name: "makerble_list_cohort_trackers",
+      description:
+        "List an Organisation's Cohort Trackers. A Cohort Tracker is a metric that counts the Contacts " +
+        "(beneficiaries) in a Project or Album who meet a set of Contact Filter criteria, e.g. " +
+        "'Children attending 75%+'. Returns each tracker's name, membership ('ever_enrolled' or " +
+        "'currently_enrolled') and criteria. Only an Organisation's editors and reporters, and its " +
+        "project managers, can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_sync_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/cohort_trackers", p),
+    },
+
+    {
+      name: "makerble_get_cohort_tracker",
+      description:
+        "Get one Cohort Tracker by ID, with where it is used (usage: projects, albums, templates) and " +
+        "names_projects_or_albums, which is true when its criteria point at specific Projects or Albums " +
+        "(so it counts against those same ones wherever it is placed).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/cohort_trackers/${id}`),
+    },
+
+    {
+      name: "makerble_preview_cohort_tracker",
+      description:
+        "Check Cohort Tracker criteria before saving them: returns how many of the Organisation's Contacts " +
+        "currently meet them (before the tracker is placed on a Project or Album), the criteria as they " +
+        "would be stored, and names_projects_or_albums. criteria take any key the Contacts page's " +
+        "Filters sidebar sends (the Contact Filters format); keys no filter reads are dropped. These keys " +
+        "follow the Project or Album the tracker is placed on and the reporting period: project_ids " +
+        "(+ project_ids_narrow: 'true' " +
+        "to require all), bundle_ids (Albums), narrow_bundle_ids, projects_states_hash ({project_id: " +
+        "beneficiary_state_id}), project_beneficiary_states ({project_id: {state_id: {enabled: 'true', " +
+        "added_from_date: 'dd/mm/yyyy - dd/mm/yyyy', removed_from_date}}}), project_story_category_ids " +
+        "(Survey Campaigns completed) with project_story_category_filter_data, attendance_rate " +
+        "({change_id, from, to}), distance_travelled ({trackers: [{indicator_id, directions: " +
+        "['improved'|'no_change'|'worsened']}], same_project}), indicator_comparisons ({indicator_id: " +
+        "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
+        "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
+        "details, e.g. group_ids, beneficiary_types, age_from / age_to ({year, month, day}), " +
+        "date_of_birth_from ('yyyy/mm/dd - yyyy/mm/dd'), created_by_ids, case_owner_ids, open_cases, " +
+        "custom_field_value_hash, changes_hash, indicators_hash, event_ids and flag_hash. " +
+        "Use makerble_list_projects, makerble_list_indicators and " +
+        "makerble_list_answer_choices to find the IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          criteria: { type: "object", description: "Contact Filter criteria, see the description" },
+          membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, criteria, membership }) =>
+        post("/cohort_trackers/preview", {
+          charity_id,
+          cohort_tracker: { ...(criteria ? { criteria } : {}), ...(membership ? { membership } : {}) },
+        }),
+    },
+
+    {
+      name: "makerble_create_cohort_tracker",
+      description:
+        "Create a Cohort Tracker: a metric counting the Contacts in a Project or Album who meet criteria. " +
+        "Every tracker counts only members of the Project or Album it is placed on: membership " +
+        "'ever_enrolled' (default: anyone whose status History shows them Enrolled at any time) or " +
+        "'currently_enrolled' (their current Project State). criteria add further conditions (see " +
+        "makerble_preview_cohort_tracker for the keys). Requires an editor or reporter of the Organisation." +
+        "\nWorkflow: (1) makerble_preview_cohort_tracker to check the criteria and the count. " +
+        "(2) makerble_create_cohort_tracker. (3) makerble_add_cohort_tracker_to_project to place it in " +
+        "a column of a Project's Impact Scorecard, optionally with a target. Albums pick it up from " +
+        "their Projects automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "Shown next to the result, e.g. 'Children attending 75%+'" },
+          description: { type: "string" },
+          membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
+          criteria: { type: "object", description: "Contact Filter criteria" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: ({ charity_id, ...cohort_tracker }) =>
+        post("/cohort_trackers", { cohort_tracker: { charity_id, ...cohort_tracker } }),
+    },
+
+    {
+      name: "makerble_update_cohort_tracker",
+      description:
+        "Update a Cohort Tracker's name, description, membership or criteria. Only the fields sent change. " +
+        "Changes apply everywhere it is used (see makerble_get_cohort_tracker usage). Requires an " +
+        "Organisation editor, or the reporter who created it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          name: { type: "string" },
+          description: { type: "string" },
+          membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
+          criteria: { type: "object", description: "Replaces the stored criteria" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...cohort_tracker }) => patch(`/cohort_trackers/${id}`, { cohort_tracker }),
+    },
+
+    {
+      name: "makerble_delete_cohort_tracker",
+      description:
+        "Delete a Cohort Tracker. Refused while it is used on any Project, Album or Scorecard Template; " +
+        "remove it from those first.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: async ({ id }) => {
+        await del(`/cohort_trackers/${id}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_add_cohort_tracker_to_project",
+      description:
+        "Place a Cohort Tracker in a column of a Project's Impact Scorecard (Edit Project Metrics), " +
+        "optionally with a one-off target (a number of Contacts to reach). Columns: activities, " +
+        "engagement, potential (short-term outcomes), behaviour (medium-term), growth (long-term). " +
+        "The tracker and Project must belong to the same Organisation, and you need rights to edit the " +
+        "Project's metrics. Returns the column and target.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          column: { type: "string", enum: ["activities", "engagement", "potential", "behaviour", "growth"] },
+          target: { type: "number", description: "Optional one-off target" },
+        },
+        required: ["id", "project_id", "column"],
+      },
+      handler: ({ id, project_id, column, target }) =>
+        post(`/cohort_trackers/${id}/projects/${project_id}`, { column, ...(target !== undefined ? { target } : {}) }),
+    },
+
+    {
+      name: "makerble_get_cohort_tracker_targets",
+      description:
+        "Get a Cohort Tracker's targets on a Project or an Album (its Set Targets page): the one-off " +
+        "target and any deadline targets ([{date, number}]). Pass project_id or album_id. For an Album, " +
+        "album_target_type says whether the Album uses manual targets (where Cohort Tracker targets are set) " +
+        "or automatic ones. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id }) =>
+        get(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`),
+    },
+
+    {
+      name: "makerble_set_cohort_tracker_targets",
+      description:
+        "Set a Cohort Tracker's targets on a Project or an Album (Set Targets): target is the one-off number " +
+        "of Contacts to reach; deadlines is a list of {date: 'YYYY-MM-DD', number} that REPLACES this " +
+        "tracker's deadline targets there ([] clears them). A target is a level to reach, not a total that " +
+        "adds up across periods, and an Album's is never the sum of its Projects'. Pass project_id or " +
+        "album_id; the tracker must already be on that Project (makerble_add_cohort_tracker_to_project) or " +
+        "on one of the Album's Projects. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          target: { type: "number", description: "One-off target" },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets, replacing any already set for this tracker",
+            items: {
+              type: "object",
+              properties: { date: { type: "string" }, number: { type: "number" } },
+              required: ["date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...targets }) =>
+        patch(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_remove_cohort_tracker_from_project",
+      description: "Remove a Cohort Tracker from a Project's Impact Scorecard, and its Albums if no other Project in them uses it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: async ({ id, project_id }) => {
+        await del(`/cohort_trackers/${id}/projects/${project_id}`);
+        return { removed: true, id, project_id };
+      },
     },
 
     // ── Metrics ────────────────────────────────────────────────────────────────
@@ -709,7 +1222,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/changes", p),
@@ -718,13 +1231,20 @@ export function buildTools(api) {
     {
       name: "makerble_list_indicators",
       description:
-        "List all Indicators (scale/binary/value). Linked to Outcomes. Progress Panel cols 3–5.",
+        "List the Indicators (scale/binary/value) the signed-in user can see: their own, and those of every organisation where they are an editor, reporter or observer. Linked to Outcomes. Progress Panel cols 3–5. " +
+        "The Indicator library shared by all organisations (the public library) is left out unless include_public_library is true, the same as the Indicator search in the Makerble app. " +
+        "Set it when looking for an existing Indicator to reuse rather than listing the organisation's own.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Also return public-library Indicators from other organisations. Default false.",
+          },
         },
       },
       handler: (p) => get("/indicators", p),
@@ -732,13 +1252,23 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_indicator",
-      description: "Get a single Indicator by ID with full detail.",
+      description:
+        "Get a single Indicator by ID with full detail. Returns not-found for an Indicator the signed-in user cannot see. " +
+        "A public-library Indicator owned by another organisation is only returned when include_public_library is true.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number" } },
+        properties: {
+          id: { type: "number" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Allow a public-library Indicator from another organisation to be returned. Default false.",
+          },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/indicators/${id}`),
+      handler: ({ id, include_public_library }) =>
+        get(`/indicators/${id}`, { include_public_library }),
     },
 
     {
@@ -750,7 +1280,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/outcomes", p),
@@ -776,7 +1306,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/outcome_indicators", p),
@@ -793,7 +1323,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           story_id: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_changes", p),
@@ -809,7 +1339,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           story_id: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/story_indicator_beneficiaries", p),
@@ -825,7 +1355,7 @@ export function buildTools(api) {
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: (p) => get("/ratio_sets", p),
@@ -842,7 +1372,7 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number" },
           ratio_set_ids: { type: "array", items: { type: "number" } },
-          last_sync_datetime: { type: "string" },
+          last_synced_datetime: { type: "string" },
         },
       },
       handler: ({ ratio_set_ids, ...p }) =>
@@ -932,6 +1462,31 @@ export function buildTools(api) {
       },
       handler: ({ submission_token, ...body }) =>
         postBearer("/referral_submissions", body, submission_token),
+    },
+
+    // ── Event Formats ──────────────────────────────────────────────────────────
+    {
+      name: "makerble_delete_event_format",
+      description:
+        "Permanently delete an Event Format (called Event Category / event_category in the API). " +
+        "An Event Format is a template for events — e.g. Workshops, Classes, Meetings — managed on an " +
+        "organisation's Manage Event Formats page. Only an Organisation Admin of the organisation that " +
+        "owns the Event Format can delete it. Deletion is refused (with the reason in the error) while " +
+        "the Event Format still has any events, or is still added to any project: the user must first " +
+        "delete or move those events, or remove the Event Format from those projects, in Makerble. " +
+        "Default formats (Appointments, Classes, Conferences, Gatherings, Meetings, Other Events, " +
+        "Sessions, Workshops) can be deleted under the same rules. Ask the user for the Event Format's " +
+        "id (it is in the URL of its Edit Settings page: /charities/<org id>/event_categories/<id>/edit) " +
+        "and confirm with them before calling, because this cannot be undone. " +
+        "Returns { id, message } on success.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/event_categories/${id}`),
     },
   ];
 }
