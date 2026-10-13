@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 60 Makerble MCP tool definitions.
+ * All 70 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1207,6 +1207,228 @@ export function buildTools(api) {
       },
       handler: async ({ id, project_id }) => {
         await del(`/cohort_trackers/${id}/projects/${project_id}`);
+        return { removed: true, id, project_id };
+      },
+    },
+
+    // ── Workflow Trackers ─────────────────────────────────────────────────────
+    {
+      name: "makerble_list_workflow_trackers",
+      description:
+        "List an Organisation's Workflow Trackers. A Workflow Tracker is a metric that counts records " +
+        "Makerble's own features create, rather than Contacts tagged in updates. Its source says what it " +
+        "counts: 'signpostings' (Signpostings made from a Project) or 'internal_referrals' (Contacts in a " +
+        "Project added to another of the Organisation's Projects). count_mode is 'items' (each signposting " +
+        "or referral; result_kind 'additive', adds up across periods) or 'contacts' (each Contact once; " +
+        "result_kind 'snapshot'). Only an Organisation's editors and reporters, and its project managers, " +
+        "can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/workflow_trackers", p),
+    },
+
+    {
+      name: "makerble_get_workflow_tracker",
+      description:
+        "Get one Workflow Tracker by ID: its source, count_mode, result_kind, settings and where it is used " +
+        "(usage: projects, albums, templates).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/workflow_trackers/${id}`),
+    },
+
+    {
+      name: "makerble_preview_workflow_tracker",
+      description:
+        "Check what a Workflow Tracker would count before saving it: returns its result on one of the " +
+        "Organisation's Projects for the current period (ending at the Project's next deadline, or today), " +
+        "Year to Date and All-time, and the latest records it counts (Contact name, who they were " +
+        "signposted to or which Project they were referred to, and when). Takes the same source, " +
+        "count_mode and settings as makerble_create_workflow_tracker.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "The Project to preview the result on" },
+          source: { type: "string", enum: ["signpostings", "internal_referrals"] },
+          count_mode: { type: "string", enum: ["items", "contacts"] },
+          settings: { type: "object", description: "See makerble_create_workflow_tracker" },
+        },
+        required: ["charity_id", "project_id", "source"],
+      },
+      handler: ({ charity_id, project_id, ...workflow_tracker }) =>
+        post("/workflow_trackers/preview", { charity_id, project_id, workflow_tracker }),
+    },
+
+    {
+      name: "makerble_create_workflow_tracker",
+      description:
+        "Create a Workflow Tracker: a metric counting records Makerble creates as a team works. source: " +
+        "'signpostings' counts Signpostings made from the Project (or an Album's Projects) it is placed on; " +
+        "one signposting counts once whether it names the Organisation signposted to, the Person, or both, " +
+        "and signpostings saved without a Project are not counted anywhere. 'internal_referrals' counts " +
+        "Contacts in the Project who are added to another of the Organisation's Projects, dated by the " +
+        "Status in Projects history; settings choose which Projects count: {destinations: 'any'} (any " +
+        "other Project), {destinations: 'only', project_ids: [...]} or {destinations: 'except', " +
+        "project_ids: [...]} (default 'except' with none listed). count_mode 'items' (default) counts each " +
+        "signposting or referral and adds up across periods; 'contacts' counts each Contact once and is a " +
+        "snapshot. Requires an editor or reporter of the Organisation." +
+        "\nWorkflow: (1) makerble_list_projects for Project IDs. (2) makerble_preview_workflow_tracker to " +
+        "check the count. (3) makerble_create_workflow_tracker. (4) makerble_add_workflow_tracker_to_project " +
+        "to place it in a column of a Project's Impact Scorecard, optionally with a target. Albums pick it " +
+        "up from their Projects automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "Shown next to the result, e.g. 'Signpostings made'" },
+          description: { type: "string" },
+          source: { type: "string", enum: ["signpostings", "internal_referrals"] },
+          count_mode: { type: "string", enum: ["items", "contacts"] },
+          settings: {
+            type: "object",
+            description: "internal_referrals only: {destinations: 'any'|'only'|'except', project_ids: [number]}",
+          },
+        },
+        required: ["charity_id", "name", "source"],
+      },
+      handler: ({ charity_id, ...workflow_tracker }) =>
+        post("/workflow_trackers", { workflow_tracker: { charity_id, ...workflow_tracker } }),
+    },
+
+    {
+      name: "makerble_update_workflow_tracker",
+      description:
+        "Update a Workflow Tracker's name, description, source, count_mode or settings. Only the fields sent " +
+        "change. Changes apply everywhere it is used (see makerble_get_workflow_tracker usage). Requires an " +
+        "Organisation editor, or the reporter who created it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          name: { type: "string" },
+          description: { type: "string" },
+          source: { type: "string", enum: ["signpostings", "internal_referrals"] },
+          count_mode: { type: "string", enum: ["items", "contacts"] },
+          settings: { type: "object", description: "Replaces the stored settings" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...workflow_tracker }) => patch(`/workflow_trackers/${id}`, { workflow_tracker }),
+    },
+
+    {
+      name: "makerble_delete_workflow_tracker",
+      description:
+        "Delete a Workflow Tracker. Refused while it is used on any Project, Album or Scorecard Template; " +
+        "remove it from those first.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: async ({ id }) => {
+        await del(`/workflow_trackers/${id}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_add_workflow_tracker_to_project",
+      description:
+        "Place a Workflow Tracker in a column of a Project's Impact Scorecard (Edit Project Metrics), " +
+        "optionally with a one-off target. Columns: activities, engagement, potential (short-term " +
+        "outcomes), behaviour (medium-term), growth (long-term). The tracker and Project must belong to " +
+        "the same Organisation, and you need rights to edit the Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Workflow Tracker ID" },
+          project_id: { type: "number" },
+          column: { type: "string", enum: ["activities", "engagement", "potential", "behaviour", "growth"] },
+          target: { type: "number", description: "Optional one-off target" },
+        },
+        required: ["id", "project_id", "column"],
+      },
+      handler: ({ id, project_id, column, target }) =>
+        post(`/workflow_trackers/${id}/projects/${project_id}`, { column, ...(target !== undefined ? { target } : {}) }),
+    },
+
+    {
+      name: "makerble_get_workflow_tracker_targets",
+      description:
+        "Get a Workflow Tracker's targets on a Project or an Album (its Set Targets page): the one-off " +
+        "target and any deadline targets ([{date, number}]). Pass project_id or album_id. Requires rights to " +
+        "edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Workflow Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id }) =>
+        get(album_id ? `/workflow_trackers/${id}/albums/${album_id}` : `/workflow_trackers/${id}/projects/${project_id}`),
+    },
+
+    {
+      name: "makerble_set_workflow_tracker_targets",
+      description:
+        "Set a Workflow Tracker's targets on a Project or an Album (Set Targets): target is the one-off " +
+        "number; deadlines is a list of {date: 'YYYY-MM-DD', number} that REPLACES this tracker's deadline " +
+        "targets there ([] clears them). A tracker counting items adds its targets up across deadlines; one " +
+        "counting each Contact once (a snapshot) uses each deadline's target on its own. An Album's target " +
+        "is never the sum of its Projects'. The tracker must already be on that Project or one of the " +
+        "Album's Projects. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Workflow Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          target: { type: "number", description: "One-off target" },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets, replacing any already set for this tracker",
+            items: {
+              type: "object",
+              properties: { date: { type: "string" }, number: { type: "number" } },
+              required: ["date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...targets }) =>
+        patch(album_id ? `/workflow_trackers/${id}/albums/${album_id}` : `/workflow_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_remove_workflow_tracker_from_project",
+      description: "Remove a Workflow Tracker from a Project's Impact Scorecard, and its Albums if no other Project in them uses it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Workflow Tracker ID" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: async ({ id, project_id }) => {
+        await del(`/workflow_trackers/${id}/projects/${project_id}`);
         return { removed: true, id, project_id };
       },
     },
