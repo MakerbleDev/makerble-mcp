@@ -1068,7 +1068,8 @@ export function buildTools(api) {
         "\nWorkflow: (1) makerble_preview_cohort_tracker to check the criteria and the count. " +
         "(2) makerble_create_cohort_tracker. (3) makerble_add_cohort_tracker_to_project to place it in " +
         "a column of a Project's Impact Scorecard, optionally with a target. Albums pick it up from " +
-        "their Projects automatically.",
+        "their Projects automatically. To show the result as a percentage (e.g. '68% Children attending " +
+        "75%+', shown with '34 of 50 contacts in this project'), set result_type 'percentage' and a denominator.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1077,6 +1078,20 @@ export function buildTools(api) {
           description: { type: "string" },
           membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
           criteria: { type: "object", description: "Contact Filter criteria" },
+          result_type: {
+            type: "string",
+            enum: ["number", "percentage"],
+            description: "'number' (default): a number of Contacts. 'percentage': a percentage of the denominator",
+          },
+          denominator: {
+            type: "string",
+            enum: ["members", "enough_data"],
+            description:
+              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album) or " +
+              "'enough_data' (Contacts with enough data: invited to an event for Attendance Rate, two or more " +
+              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion). " +
+              "'enough_data' is recommended for improvement or attendance, so Contacts without data don't lower it",
+          },
         },
         required: ["charity_id", "name"],
       },
@@ -1087,9 +1102,12 @@ export function buildTools(api) {
     {
       name: "makerble_update_cohort_tracker",
       description:
-        "Update a Cohort Tracker's name, description, membership or criteria. Only the fields sent change. " +
-        "Changes apply everywhere it is used (see makerble_get_cohort_tracker usage). Requires an " +
-        "Organisation editor, or the reporter who created it.",
+        "Update a Cohort Tracker's name, description, membership, criteria, result_type or denominator. Only " +
+        "the fields sent change. Changes apply everywhere it is used (see makerble_get_cohort_tracker usage). " +
+        "Requires an Organisation editor, or the reporter who created it. Switching result_type between " +
+        "'number' and 'percentage' CLEARS all the tracker's targets on every Project and Album, so the API " +
+        "refuses it with an error naming how many targets would go unless confirm_clear_targets is true. Ask " +
+        "the user before confirming.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1098,10 +1116,32 @@ export function buildTools(api) {
           description: { type: "string" },
           membership: { type: "string", enum: ["ever_enrolled", "currently_enrolled"] },
           criteria: { type: "object", description: "Replaces the stored criteria" },
+          result_type: {
+            type: "string",
+            enum: ["number", "percentage"],
+            description: "'number' (default): a number of Contacts. 'percentage': a percentage of the denominator",
+          },
+          denominator: {
+            type: "string",
+            enum: ["members", "enough_data"],
+            description:
+              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album) or " +
+              "'enough_data' (Contacts with enough data: invited to an event for Attendance Rate, two or more " +
+              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion). " +
+              "'enough_data' is recommended for improvement or attendance, so Contacts without data don't lower it",
+          },
+          confirm_clear_targets: {
+            type: "boolean",
+            description: "Confirms clearing the tracker's targets when result_type changes",
+          },
         },
         required: ["id"],
       },
-      handler: ({ id, ...cohort_tracker }) => patch(`/cohort_trackers/${id}`, { cohort_tracker }),
+      handler: ({ id, confirm_clear_targets, ...cohort_tracker }) =>
+        patch(`/cohort_trackers/${id}`, {
+          cohort_tracker,
+          ...(confirm_clear_targets !== undefined ? { confirm_clear_targets } : {}),
+        }),
     },
 
     {
@@ -1170,14 +1210,16 @@ export function buildTools(api) {
         "tracker's deadline targets there ([] clears them). A target is a level to reach, not a total that " +
         "adds up across periods, and an Album's is never the sum of its Projects'. Pass project_id or " +
         "album_id; the tracker must already be on that Project (makerble_add_cohort_tracker_to_project) or " +
-        "on one of the Album's Projects. Requires rights to edit that Project's or Album's targets.",
+        "on one of the Album's Projects. Requires rights to edit that Project's or Album's targets. For a " +
+        "percentage tracker (result_type 'percentage') the target and each deadline number are a whole " +
+        "percentage from 0 to 100.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The Cohort Tracker ID" },
           project_id: { type: "number" },
           album_id: { type: "number", description: "The Album (Bundle) ID" },
-          target: { type: "number", description: "One-off target" },
+          target: { type: "number", description: "One-off target: a number of Contacts, or 0-100 for a percentage tracker" },
           deadlines: {
             type: "array",
             description: "Deadline targets, replacing any already set for this tracker",
@@ -1210,7 +1252,11 @@ export function buildTools(api) {
         "target on the window's last day, else the one-off target, or null), starts_on, ends_on, and a paginated " +
         "list of Contacts (data: [{id, name, qualifying_value}], alphabetically). qualifying_value is the value " +
         "that qualified the Contact where there is one, named by qualifying_value_label (e.g. 'Attendance rate', " +
-        "a percentage). A Contact you may not read is listed as {restricted: true} with no details. Pass " +
+        "a percentage). A Contact you may not read is listed as {restricted: true} with no details. For a " +
+        "percentage tracker (result_type 'percentage') it also returns denominator ('members' or 'enough_data'), " +
+        "denominator_count and percentage (a whole number, or null when denominator_count is 0, shown as '–'); " +
+        "the cohort is always within the denominator, and cohort 'not_in' lists the Contacts in the " +
+        "denominator who are not in the cohort (the popup's Not in cohort tab). Pass " +
         "project_id or album_id; the tracker must be on that Project, or on one of the Album's Projects. Find " +
         "trackers with makerble_list_cohort_trackers.",
       inputSchema: {
@@ -1223,6 +1269,11 @@ export function buildTools(api) {
           as_of: { type: "string", description: "The deadline the window ends on, YYYY-MM-DD" },
           page: { type: "number" },
           per_page: { type: "number", description: "Contacts per page, default 10, max 200" },
+          cohort: {
+            type: "string",
+            enum: ["in", "not_in"],
+            description: "Which Contacts to list: 'in' (default) the cohort; 'not_in', for a percentage, the rest of the denominator",
+          },
         },
         required: ["id"],
       },
