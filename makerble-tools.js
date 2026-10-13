@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 60 Makerble MCP tool definitions.
+ * All 66 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1209,6 +1209,158 @@ export function buildTools(api) {
         await del(`/cohort_trackers/${id}/projects/${project_id}`);
         return { removed: true, id, project_id };
       },
+    },
+
+    // ── Filtered versions of metrics (CP-8438) ─────────────────────────────────
+    {
+      name: "makerble_list_filtered_metrics",
+      description:
+        "List the filtered versions of metrics on a Project's or Album's Results Canvas. A filtered version " +
+        "counts a standard metric (a Change: Activity or Engagement tracker; or an Indicator: Choice, " +
+        "Achievement or Numerical tracker) again for only some responses and Contacts, e.g. 'Session " +
+        "attendances — Female, under 21'. It counts attendances (or answers), not Contacts: use a Cohort " +
+        "Tracker to count Contacts. Each item gives parent_type and parent_id (the metric it filters), " +
+        "outcome_id (an Indicator's version sits under that Outcome), response_criteria and " +
+        "contact_criteria. Pass project_id or album_id; an Album shows every filtered version on its " +
+        "Projects. Paginated.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+        },
+      },
+      handler: ({ project_id, album_id, page, per_page }) =>
+        get(album_id ? `/albums/${album_id}/filtered_metrics` : `/projects/${project_id}/filtered_metrics`, { page, per_page }),
+    },
+
+    {
+      name: "makerble_preview_filtered_metric",
+      description:
+        "Check a filtered version's filters before adding it: returns count (how many of the metric's " +
+        "tagged responses on the Project currently pass the filters, e.g. attendances) and total (how " +
+        "many there are with no filters). Takes the same parent_type, parent_id, response_criteria and " +
+        "contact_criteria as makerble_create_filtered_metric.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          parent_type: { type: "string", enum: ["Change", "Indicator"] },
+          parent_id: { type: "number" },
+          response_criteria: { type: "object", description: "See makerble_create_filtered_metric" },
+          contact_criteria: { type: "object", description: "See makerble_create_filtered_metric" },
+        },
+        required: ["project_id", "parent_type", "parent_id"],
+      },
+      handler: ({ project_id, ...filtered_metric }) =>
+        post(`/projects/${project_id}/filtered_metrics/preview`, { filtered_metric }),
+    },
+
+    {
+      name: "makerble_create_filtered_metric",
+      description:
+        "Add a filtered version of a metric to a Project (Edit Project Metrics > Add filtered version). " +
+        "It becomes its own row on the Results Canvas and Set Targets, and appears on the Project's Albums. " +
+        "Workflow: 1) makerble_get_project_results to see the Project's trackers and their IDs; the metric must already be on " +
+        "the Project (a Change in a column, or an Indicator under one of its Outcomes). 2) Build the " +
+        "filters. response_criteria (about the response/story the metric was recorded in) takes: " +
+        "story_category_ids (Surveys), wave_ids (Intervals, e.g. Baseline; see makerble_list_survey_waves), " +
+        "date_range ('dd/mm/yyyy - dd/mm/yyyy', the Date Happened; either end optional), label_ids and " +
+        "author_ids (User IDs). contact_criteria (about the Contacts tagged in it) takes any key the Contacts " +
+        "Filters sidebar sends, as for makerble_preview_cohort_tracker: e.g. sub_ratio_ids (a select Bio " +
+        "field option such as Gender), age_from / age_to ({year, month, day}; age is worked out at the date " +
+        "of each response), custom_field_value_hash, bundle_ids (Contacts also in a Project of these " +
+        "Albums), project_ids. Other Bio fields use the Contact's current value; answer-based and attendance " +
+        "criteria are judged at the end of each reporting period. 3) Optionally check with " +
+        "makerble_preview_filtered_metric. 4) Create, with a display_name such as 'Session attendances — " +
+        "Female, under 21'. A Change's version goes in its parent's column unless column is given; an " +
+        "Indicator's goes under its parent's Outcome. Requires rights to edit the Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          parent_type: { type: "string", enum: ["Change", "Indicator"], description: "The kind of metric being filtered" },
+          parent_id: { type: "number", description: "The Change or Indicator ID" },
+          display_name: { type: "string" },
+          column: {
+            type: "string",
+            enum: ["activities", "engagement", "potential", "behaviour", "growth"],
+            description: "Changes only; defaults to the parent's column",
+          },
+          response_criteria: { type: "object", description: "Response Filters, see the description" },
+          contact_criteria: { type: "object", description: "Contact Filters, see the description" },
+        },
+        required: ["project_id", "parent_type", "parent_id", "display_name"],
+      },
+      handler: ({ project_id, ...filtered_metric }) =>
+        post(`/projects/${project_id}/filtered_metrics`, { filtered_metric }),
+    },
+
+    {
+      name: "makerble_update_filtered_metric",
+      description:
+        "Rename a filtered version or replace its filters. response_criteria and contact_criteria, when " +
+        "given, replace the stored ones ({} clears them). The metric it filters can't be changed. The " +
+        "change applies on every Project and Scorecard Template it is on. Requires rights to edit the " +
+        "Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          id: { type: "number", description: "The filtered version's ID" },
+          display_name: { type: "string" },
+          response_criteria: { type: "object" },
+          contact_criteria: { type: "object" },
+        },
+        required: ["project_id", "id"],
+      },
+      handler: ({ project_id, id, ...filtered_metric }) =>
+        patch(`/projects/${project_id}/filtered_metrics/${id}`, { filtered_metric }),
+    },
+
+    {
+      name: "makerble_remove_filtered_metric",
+      description:
+        "Remove a filtered version from a Project (and its Albums). It is deleted once it is on no other " +
+        "Project or Scorecard Template.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          id: { type: "number", description: "The filtered version's ID" },
+        },
+        required: ["project_id", "id"],
+      },
+      handler: async ({ project_id, id }) => {
+        await del(`/projects/${project_id}/filtered_metrics/${id}`);
+        return { removed: true, id, project_id };
+      },
+    },
+
+    {
+      name: "makerble_get_filtered_metric_results",
+      description:
+        "Get a filtered version's result on a Project or Album, as the Results Canvas shows it: number " +
+        "(count of matching attendances or answers; a Numerical tracker's total) and unit, for a timeframe " +
+        "ending at as_of. timeframe: period (since the previous Target Deadline), year_to_date (since the " +
+        "Year Start) or all_time (default). as_of defaults to the next Target Deadline, or today. " +
+        "Requires the right to see that Project's or Album's results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The filtered version's ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          timeframe: { type: "string", enum: ["period", "year_to_date", "all_time"] },
+          as_of: { type: "string", description: "YYYY-MM-DD" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, timeframe, as_of }) =>
+        get(album_id ? `/albums/${album_id}/filtered_metrics/${id}/results` : `/projects/${project_id}/filtered_metrics/${id}/results`,
+            { timeframe, as_of }),
     },
 
     // ── Metrics ────────────────────────────────────────────────────────────────
