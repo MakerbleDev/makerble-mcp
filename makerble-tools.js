@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 60 Makerble MCP tool definitions.
+ * All 61 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1192,6 +1192,42 @@ export function buildTools(api) {
       },
       handler: ({ id, project_id, album_id, ...targets }) =>
         patch(album_id ? `/cohort_trackers/${id}/albums/${album_id}` : `/cohort_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_get_cohort_tracker_results",
+      description:
+        "Get a Cohort Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the Contacts " +
+        "(Beneficiaries) behind it. The result is a count of distinct Contacts who meet the tracker's membership " +
+        "setting and all its criteria, counting only stories, events and survey responses saved in that Project " +
+        "(or the Album's Projects) and dated in the window. On an Album a Contact is counted once, however many of " +
+        "its Projects they are on, so an Album's result is never the sum of its Projects'. Results are worked out " +
+        "afresh for each window: a Year to Date result is NOT the sum of period results. timeframe is 'period' " +
+        "(the day after the previous Target Deadline up to the deadline), 'year_to_date' (the start of the " +
+        "Project's year up to the deadline) or 'all_time' (default). as_of is the deadline the window ends on " +
+        "(YYYY-MM-DD); without it the window ends at the next Target Deadline, or today when there is none. " +
+        "Returns count, eligible_count (Contacts the criteria could judge), target ({number, date}: the deadline " +
+        "target on the window's last day, else the one-off target, or null), starts_on, ends_on, and a paginated " +
+        "list of Contacts (data: [{id, name, qualifying_value}], alphabetically). qualifying_value is the value " +
+        "that qualified the Contact where there is one, named by qualifying_value_label (e.g. 'Attendance rate', " +
+        "a percentage). A Contact you may not read is listed as {restricted: true} with no details. Pass " +
+        "project_id or album_id; the tracker must be on that Project, or on one of the Album's Projects. Find " +
+        "trackers with makerble_list_cohort_trackers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          timeframe: { type: "string", enum: ["period", "year_to_date", "all_time"], description: "Default all_time" },
+          as_of: { type: "string", description: "The deadline the window ends on, YYYY-MM-DD" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Contacts per page, default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...params }) =>
+        get(album_id ? `/cohort_trackers/${id}/albums/${album_id}/results` : `/cohort_trackers/${id}/projects/${project_id}/results`, params),
     },
 
     {
