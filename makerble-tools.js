@@ -1886,7 +1886,7 @@ export function buildTools(api) {
           period: {
             type: "string",
             enum: ["all_time", "last_12_months", "financial_year", "custom"],
-            description: "Default all_time. financial_year starts on 1 April. custom uses from and to.",
+            description: "Default all_time. financial_year starts on 5 April. custom uses from and to.",
           },
           from: { type: "string", description: "First day of a custom period (YYYY-MM-DD)" },
           to: { type: "string", description: "Last day of a custom period (YYYY-MM-DD)" },
