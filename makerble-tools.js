@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 71 Makerble MCP tool definitions.
+ * All 74 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1788,9 +1788,76 @@ export function buildTools(api) {
             },
           },
         },
-        required: ["id", "charity_id", "availability"],
+        required: ["id", "charity_id"],
       },
       handler: ({ id, ...body }) => patch(`/framework_sets/${id}`, body),
+    },
+
+    // ── Linked indicators (CP-8774) ───────────────────────────────────────────
+    {
+      name: "makerble_list_framework_links",
+      description:
+        "List an Organisation's Linked indicators. A Linked indicator is one of the Organisation's own " +
+        "Indicators (progress trackers) linked to an Outcome inside a Framework Set, e.g. its 'Bootcamp " +
+        "completions' Indicator linked to SDG Target 4.4. Every Story recorded against that Indicator " +
+        "then counts towards the Outcome, in every project (all_projects: true) or only the projects " +
+        "in project_ids. Returns indicator_name, outcome_title, project_ids and all_projects.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID; the user must belong to it" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/framework_links", p),
+    },
+
+    {
+      name: "makerble_link_indicator_to_framework",
+      description:
+        "Link one of an Organisation's Indicators to an Outcome (e.g. an SDG Target) in a Framework Set the " +
+        "Organisation can use, so its Stories count towards that Outcome. The Indicator must be one the " +
+        "Organisation owns or uses in its projects. Leave project_ids empty to count it in every project, " +
+        "or list the projects it should count in; linking again with more projects adds them. Requires an " +
+        "Organisation admin.\n" +
+        "Workflow: (1) makerble_list_framework_sets to choose a set. (2) makerble_get_framework_set for its " +
+        "Impact Frameworks (template_id), then find the Outcome ID inside the right framework, e.g. with " +
+        "makerble_list_outcomes. (3) makerble_list_indicators for the Organisation's Indicator. " +
+        "(4) makerble_link_indicator_to_framework.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          indicator_id: { type: "number" },
+          outcome_id: { type: "number", description: "An Outcome in one of the set's Impact Frameworks" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Empty or omitted: every project" },
+        },
+        required: ["charity_id", "indicator_id", "outcome_id"],
+      },
+      handler: (p) => post("/framework_links", p),
+    },
+
+    {
+      name: "makerble_unlink_indicator",
+      description:
+        "Remove one of an Organisation's Linked indicators (by its id from makerble_list_framework_links). " +
+        "Stories recorded against the Indicator stop counting towards that Outcome. Requires an " +
+        "Organisation admin.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Linked indicator ID" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: async ({ id, charity_id }) => {
+        await del(`/framework_links/${id}?charity_id=${encodeURIComponent(charity_id)}`);
+        return { deleted: true, id };
+      },
     },
 
     // ── Event Formats ──────────────────────────────────────────────────────────
