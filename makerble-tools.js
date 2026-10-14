@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 67 Makerble MCP tool definitions.
+ * All 71 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1650,6 +1650,147 @@ export function buildTools(api) {
       },
       handler: ({ submission_token, ...body }) =>
         postBearer("/referral_submissions", body, submission_token),
+    },
+
+    // ── Framework Sets (CP-8774) ───────────────────────────────────────────────
+    {
+      name: "makerble_list_framework_sets",
+      description:
+        "List the Framework Sets an Organisation can use. A Framework Set groups Impact Frameworks " +
+        "(called templates in the API) into one thing an Organisation reports its contribution towards, " +
+        "e.g. 'UN Sustainable Development Goals' holds the 17 SDG Impact Frameworks; others are TOMs, a " +
+        "funder's outcomes framework or the Organisation's own strategy. Each set names its two levels " +
+        "(e.g. Goal › Target): level 1 is an Impact Framework, level 2 an Outcome inside it. Returns live " +
+        "sets available to the Organisation (every-organisation sets, its Networks' sets and its own) and " +
+        "the drafts the user can edit, with availability (platform | network | charity), the frameworks " +
+        "in order (template_id, name, short_code, colours) and value_source.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID; the user must belong to it" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/framework_sets", p),
+    },
+
+    {
+      name: "makerble_get_framework_set",
+      description:
+        "Get one Framework Set by ID: its levels, who can use it, its Impact Frameworks in order " +
+        "(template_id, name, position, short_code, colour, text_colour) and, when value_source is " +
+        "'set_values', the Financial Value it defines for each Outcome (financial_values).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/framework_sets/${id}`),
+    },
+
+    {
+      name: "makerble_create_framework_set",
+      description:
+        "Create a Framework Set from Impact Frameworks (templates). availability decides who can use it: " +
+        "'charity' (only the Organisation in charity_id; needs an Organisation admin), 'network' (every " +
+        "Organisation in network_id; needs that Network's admin) or 'platform' (every Organisation; " +
+        "System Access users only). frameworks is the ordered list of existing Impact Frameworks; " +
+        "new_frameworks names new, empty Impact Frameworks to create and add at the end (e.g. one per " +
+        "Objective). value_source is 'organisation_values' (each Organisation's own Financial Values, the " +
+        "default) or 'set_values' (values defined in the set per Outcome, set later with " +
+        "makerble_update_framework_set). status 'draft' hides it from people who can't edit it.\n" +
+        "Workflow: (1) makerble_list_framework_sets to avoid duplicating an existing set. " +
+        "(2) makerble_create_framework_set. (3) Link the Organisation's own Indicators to the set's " +
+        "Outcomes so its Stories count towards them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation the user is acting for" },
+          name: { type: "string" },
+          availability: { type: "string", enum: ["platform", "network", "charity"] },
+          network_id: { type: "number", description: "Required when availability is 'network'" },
+          level1_singular: { type: "string", description: "e.g. Goal" },
+          level1_plural: { type: "string", description: "e.g. goals" },
+          level2_singular: { type: "string", description: "e.g. Target" },
+          level2_plural: { type: "string", description: "e.g. targets" },
+          value_source: { type: "string", enum: ["organisation_values", "set_values"] },
+          version_label: { type: "string", description: "e.g. '2025 review'" },
+          supersedes_id: { type: "number", description: "The Framework Set this version replaces" },
+          status: { type: "string", enum: ["draft", "live"] },
+          frameworks: {
+            type: "array",
+            description: "Impact Frameworks in order",
+            items: {
+              type: "object",
+              properties: {
+                template_id: { type: "number" },
+                short_code: { type: "string", description: "e.g. '4' or 'O1'" },
+                colour: { type: "string", description: "Hex colour, e.g. '#C5192D'" },
+                text_colour: { type: "string", description: "Hex colour, e.g. '#FFFFFF'" },
+              },
+              required: ["template_id"],
+            },
+          },
+          new_frameworks: { type: "array", items: { type: "string" }, description: "Names of new Impact Frameworks" },
+        },
+        required: ["charity_id", "name", "availability"],
+      },
+      handler: (p) => post("/framework_sets", p),
+    },
+
+    {
+      name: "makerble_update_framework_set",
+      description:
+        "Update a Framework Set the user can edit. Only the fields sent change, except that frameworks " +
+        "(when sent) replaces the whole ordered list and financial_values (when sent) replaces the " +
+        "Financial Value chosen for each Outcome. financial_values are used when value_source is " +
+        "'set_values': find Outcome IDs with makerble_list_outcomes and Financial Values the Organisation " +
+        "can use in Makerble.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          charity_id: { type: "number", description: "The Organisation the user is acting for" },
+          name: { type: "string" },
+          availability: { type: "string", enum: ["platform", "network", "charity"] },
+          network_id: { type: "number" },
+          level1_singular: { type: "string" },
+          level1_plural: { type: "string" },
+          level2_singular: { type: "string" },
+          level2_plural: { type: "string" },
+          value_source: { type: "string", enum: ["organisation_values", "set_values"] },
+          version_label: { type: "string" },
+          supersedes_id: { type: "number" },
+          status: { type: "string", enum: ["draft", "live"] },
+          frameworks: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                template_id: { type: "number" },
+                short_code: { type: "string" },
+                colour: { type: "string" },
+                text_colour: { type: "string" },
+              },
+              required: ["template_id"],
+            },
+          },
+          new_frameworks: { type: "array", items: { type: "string" } },
+          financial_values: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { outcome_id: { type: "number" }, financial_value_id: { type: "number" } },
+              required: ["outcome_id", "financial_value_id"],
+            },
+          },
+        },
+        required: ["id", "charity_id", "availability"],
+      },
+      handler: ({ id, ...body }) => patch(`/framework_sets/${id}`, body),
     },
 
     // ── Event Formats ──────────────────────────────────────────────────────────
