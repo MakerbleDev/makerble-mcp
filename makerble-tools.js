@@ -45,6 +45,8 @@ export function makeApiClient(baseUrl, email, token) {
     const headers = {
       "X-User-Email": email,
       "X-User-Token": token,
+      // Lets Makerble attribute Access Log views to the MCP server rather than the API.
+      "X-Makerble-Client": "makerble-mcp",
       "Content-Type": "application/json",
       Accept: "application/json",
     };
@@ -339,7 +341,10 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_contact",
-      description: "Get a single Contact (Beneficiary) by ID, including all custom fields.",
+      description:
+        "Get a single Contact (Beneficiary) by ID, including all custom fields. " +
+        "Opening a Contact this way is recorded in its Access Log (the audit trail of who viewed it), " +
+        "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -553,7 +558,9 @@ export function buildTools(api) {
       name: "makerble_get_story",
       description:
         "Get a single Story by ID with full detail — custom fields, beneficiary tags, case links, " +
-        "indicator responses, change values, and verdict scores.",
+        "indicator responses, change values, and verdict scores. " +
+        "Opening a Story this way is recorded in its Access Log (the audit trail of who viewed it), " +
+        "under your name and marked as via MCP, so use makerble_list_stories when you only need to find or scan Stories.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
