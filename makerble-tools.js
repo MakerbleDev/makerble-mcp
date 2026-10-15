@@ -109,6 +109,14 @@ export function makeApiClient(baseUrl, email, token) {
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
+// Webhook events an endpoint can subscribe to (WebhookEndpoint::EVENT_TYPES in the Rails app).
+const WEBHOOK_EVENTS = [
+  "contact.created", "contact.updated", "contact.deleted", "contact.merged", "contact.restored",
+  "story.created", "story.updated", "story.deleted",
+  "project.created", "project.updated", "project.deleted", "project.contact_added", "project.contact_removed",
+  "import.completed",
+];
+
 export function buildTools(api) {
   const { get, post, patch, del, postBearer, signIn } = api;
 
@@ -2331,8 +2339,9 @@ export function buildTools(api) {
       description:
         "List an Organisation's (Charity's) webhook endpoints. A webhook endpoint is an HTTPS URL in " +
         "another system (a CRM such as Dynamics or Salesforce, Zapier, a data warehouse) that Makerble " +
-        "sends a signed JSON POST to whenever a Contact (beneficiary), Story or Project is created or " +
-        "updated, or an import finishes. Returns each endpoint's url, description, event_types, active " +
+        "sends a signed JSON POST to whenever a Contact (beneficiary), Story or Project is created, " +
+        "updated or deleted, a Contact is merged, restored, added to or removed from a Project, or an " +
+        "import finishes. Returns each endpoint's url, description, event_types, active " +
         "(false = paused), disabled_at (set when Makerble switched it off after repeated failed " +
         "deliveries), failure_count and last_success_at. Secrets are never returned here. Only the " +
         "Organisation's admins can use the webhook tools, and only once an admin has ticked 'Turn on " +
@@ -2355,8 +2364,12 @@ export function buildTools(api) {
       name: "makerble_create_webhook_endpoint",
       description:
         "Register a webhook endpoint for an Organisation, so Makerble starts sending it events. " +
-        "Events: contact.created, contact.updated (includes changed_fields), story.created, story.updated, " +
-        "project.created, project.updated, import.completed (one event per finished spreadsheet import " +
+        "Events: contact.created, contact.updated (includes changed_fields; a changed dropdown answer is " +
+        "listed as custom_fields.<dropdown title>), contact.deleted (ids only, no personal data), " +
+        "contact.merged (kept_contact_id and merged_contact_ids; no contact.deleted is sent for a merged " +
+        "Contact), contact.restored, story.created, story.updated, story.deleted, project.created, " +
+        "project.updated, project.deleted, project.contact_added and project.contact_removed (a Contact " +
+        "joins or leaves a Project), import.completed (one event per finished spreadsheet import " +
         "instead of one per row). Leave event_types out to send every event. The url must be HTTPS and " +
         "reachable from the internet. An Organisation can have at most 10 endpoints. The response includes " +
         "`secret` (whsec_…), which the receiving system needs to verify the X-Makerble-Signature header: " +
@@ -2372,7 +2385,7 @@ export function buildTools(api) {
             type: "array",
             items: {
               type: "string",
-              enum: ["contact.created", "contact.updated", "story.created", "story.updated", "project.created", "project.updated", "import.completed"],
+              enum: WEBHOOK_EVENTS,
             },
           },
         },
@@ -2395,7 +2408,12 @@ export function buildTools(api) {
           id: { type: "number", description: "The webhook endpoint ID" },
           url: { type: "string" },
           description: { type: "string" },
-          event_types: { type: "array", items: { type: "string" } },
+          event_types: {
+            type: "array",
+            description: "The full list of events to send. A webhook made before an event existed doesn't " +
+              "receive it until it is added here.",
+            items: { type: "string", enum: WEBHOOK_EVENTS },
+          },
           active: { type: "boolean" },
         },
         required: ["id"],
