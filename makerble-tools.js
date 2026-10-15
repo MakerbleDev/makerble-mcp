@@ -105,6 +105,53 @@ export function makeApiClient(baseUrl, email, token) {
   };
 }
 
+// ─── Story payload helpers ────────────────────────────────────────────────────
+
+// Story#create_or_update_story_method iterates nested story params as
+// index-keyed hashes ({"0": {...}}), the shape the web form submits.
+// A JSON array there raises NoMethodError on the Rails side.
+export function toIndexedHash(arr) {
+  return Object.fromEntries((arr || []).map((v, i) => [String(i), v]));
+}
+
+// Accepts the old misspelt `binray_indicator_value` from existing callers
+// and sends the `binary_indicator_value` key Rails actually reads.
+export function normaliseIndicatorEntry({ binray_indicator_value, ...entry }) {
+  if (entry.binary_indicator_value === undefined && binray_indicator_value !== undefined) {
+    entry.binary_indicator_value = binray_indicator_value;
+  }
+  return entry;
+}
+
+// Activity-change totals are only read from story[story_changes_attributes];
+// a top-level story_changes param is ignored by the API.
+export function buildCreateStoryPayload({ project_id, story_category_id, text, date_happened,
+  beneficiary_ids, case_ids, story_privacy = "only_charity_colleagues", story_changes,
+  story_change_beneficiaries, story_indicator_beneficiaries, custom_fields }) {
+  return {
+    story: {
+      story_group: "change_created",
+      story_format: "old",
+      display_as: "survey_questions_view",
+      project_id,
+      story_category_id,
+      source_of_story: "api",
+      ...(text          ? { text }                      : {}),
+      ...(date_happened ? { created_at: date_happened } : {}),
+      ...(story_changes?.length
+        ? { story_changes_attributes: toIndexedHash(story_changes) }
+        : {}),
+    },
+    story_privacy,
+    individual_list: [],
+    beneficiary_ids:               beneficiary_ids || [],
+    case_ids:                      case_ids        || [],
+    story_change_beneficiaries:    toIndexedHash(story_change_beneficiaries),
+    story_indicator_beneficiaries: toIndexedHash((story_indicator_beneficiaries || []).map(normaliseIndicatorEntry)),
+    custom_fields:                 custom_fields   || {},
+  };
+}
+
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export function buildTools(api) {
@@ -669,8 +716,9 @@ export function buildTools(api) {
         "(3) Submit here. " +
         "\nRules: story_group='change_created', story_format='old'. " +
         "date_happened=YYYY-MM-DD (the activity date). " +
-        "Binary indicators: binray_indicator_value='on' if ticked, omit the record if not. " +
-        "Activity changes: only in story_changes, NOT story_change_beneficiaries.",
+        "Binary indicators: binary_indicator_value='on' if ticked, omit the record if not. " +
+        "Value indicators: number (>= 0). " +
+        "Activity changes: totals go in story_changes, NOT story_change_beneficiaries.",
       inputSchema: {
         type: "object",
         properties: {
@@ -687,7 +735,7 @@ export function buildTools(api) {
           },
           story_changes: {
             type: "array",
-            description: "Metric totals: [{change_id, number}]",
+            description: "Activity change totals: [{change_id, number}]",
             items: {
               type: "object",
               properties: {
@@ -711,7 +759,7 @@ export function buildTools(api) {
             type: "array",
             description:
               "Per-contact indicator responses. Each: {indicator_id, indicator_type, outcome_id, beneficiary_id, " +
-              "sub_ratio_id (scale), binray_indicator_value='on' (binary), number (value)}",
+              "sub_ratio_id (scale), binary_indicator_value='on' (binary), number (value)}",
             items: {
               type: "object",
               properties: {
@@ -720,7 +768,7 @@ export function buildTools(api) {
                 outcome_id: { type: "number" },
                 beneficiary_id: { type: "number" },
                 sub_ratio_id: { type: "number" },
-                binray_indicator_value: { type: "string", enum: ["on"] },
+                binary_indicator_value: { type: "string", enum: ["on"] },
                 number: { type: "number" },
               },
             },
@@ -732,29 +780,7 @@ export function buildTools(api) {
         },
         required: ["project_id", "story_category_id"],
       },
-      handler: ({ project_id, story_category_id, text, date_happened, beneficiary_ids,
-        case_ids, story_privacy = "only_charity_colleagues", story_changes,
-        story_change_beneficiaries, story_indicator_beneficiaries, custom_fields }) =>
-        post("/stories", {
-          story: {
-            story_group: "change_created",
-            story_format: "old",
-            display_as: "survey_questions_view",
-            project_id,
-            story_category_id,
-            source_of_story: "api",
-            ...(text          ? { text }                      : {}),
-            ...(date_happened ? { created_at: date_happened } : {}),
-          },
-          story_privacy,
-          individual_list: [],
-          beneficiary_ids:               beneficiary_ids               || [],
-          case_ids:                       case_ids                       || [],
-          story_changes:                  story_changes                  || [],
-          story_change_beneficiaries:     story_change_beneficiaries     || [],
-          story_indicator_beneficiaries:  story_indicator_beneficiaries  || [],
-          custom_fields:                  custom_fields                  || {},
-        }),
+      handler: (p) => post("/stories", buildCreateStoryPayload(p)),
     },
 
     {
