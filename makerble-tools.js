@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 87 Makerble MCP tool definitions.
+ * All 95 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2193,6 +2193,167 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
+    },
+
+    // ── Webhooks ──────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_webhook_endpoints",
+      description:
+        "List an Organisation's (Charity's) webhook endpoints. A webhook endpoint is an HTTPS URL in " +
+        "another system (a CRM such as Dynamics or Salesforce, Zapier, a data warehouse) that Makerble " +
+        "sends a signed JSON POST to whenever a Contact (beneficiary), Story or Project is created or " +
+        "updated, or an import finishes. Returns each endpoint's url, description, event_types, active " +
+        "(false = paused), disabled_at (set when Makerble switched it off after repeated failed " +
+        "deliveries), failure_count and last_success_at. Secrets are never returned here. Only the " +
+        "Organisation's admins can use the webhook tools, and only once an admin has ticked 'Turn on " +
+        "Webhooks' in the Organisation's Settings (Preferences) page in Makerble (otherwise the API answers " +
+        "'Webhooks are not turned on for this organisation'; tell the user an admin can turn them on there).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only endpoints changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/webhook_endpoints", p),
+    },
+
+    {
+      name: "makerble_create_webhook_endpoint",
+      description:
+        "Register a webhook endpoint for an Organisation, so Makerble starts sending it events. " +
+        "Events: contact.created, contact.updated (includes changed_fields), story.created, story.updated, " +
+        "project.created, project.updated, import.completed (one event per finished spreadsheet import " +
+        "instead of one per row). Leave event_types out to send every event. The url must be HTTPS and " +
+        "reachable from the internet. An Organisation can have at most 10 endpoints. The response includes " +
+        "`secret` (whsec_…), which the receiving system needs to verify the X-Makerble-Signature header: " +
+        "it is shown only this once, so give it to the user straight away and tell them to store it safely. " +
+        "Then call makerble_send_test_webhook to check the receiver works.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          url: { type: "string", description: "HTTPS URL of the receiver" },
+          description: { type: "string", description: "What the endpoint is for, e.g. 'Dynamics sync'" },
+          event_types: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["contact.created", "contact.updated", "story.created", "story.updated", "project.created", "project.updated", "import.completed"],
+            },
+          },
+        },
+        required: ["charity_id", "url"],
+      },
+      handler: (webhook_endpoint) => post("/webhook_endpoints", { webhook_endpoint }),
+    },
+
+    {
+      name: "makerble_update_webhook_endpoint",
+      description:
+        "Change a webhook endpoint: its url, description or event_types, or pause it (active: false) and " +
+        "resume it (active: true). Resuming also turns back on an endpoint that Makerble switched off after " +
+        "repeated failed deliveries (disabled_at set), and resets its failure_count; check the receiver " +
+        "works first with makerble_send_test_webhook. Changes made while an endpoint was paused or " +
+        "switched off are not sent afterwards. Only send the fields to change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The webhook endpoint ID" },
+          url: { type: "string" },
+          description: { type: "string" },
+          event_types: { type: "array", items: { type: "string" } },
+          active: { type: "boolean" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...webhook_endpoint }) => patch(`/webhook_endpoints/${id}`, { webhook_endpoint }),
+    },
+
+    {
+      name: "makerble_delete_webhook_endpoint",
+      description:
+        "Delete a webhook endpoint and its delivery log. Makerble stops sending to it at once. This " +
+        "cannot be undone, so confirm with the user first; to stop sending for a while, pause it with " +
+        "makerble_update_webhook_endpoint (active: false) instead.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The webhook endpoint ID" } },
+        required: ["id"],
+      },
+      handler: async ({ id }) => {
+        await del(`/webhook_endpoints/${id}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_rotate_webhook_secret",
+      description:
+        "Replace a webhook endpoint's signing secret, e.g. if it may have leaked. Returns the endpoint " +
+        "with the new `secret`, shown only this once. Deliveries are signed with the new secret straight " +
+        "away, so the receiving system must be updated with it before it rejects them.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The webhook endpoint ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => post(`/webhook_endpoints/${id}/rotate_secret`),
+    },
+
+    {
+      name: "makerble_send_test_webhook",
+      description:
+        "Send a test event (event: webhook.test, data: { test: true, message }) to a webhook endpoint to check the " +
+        "receiver accepts it. It is queued and sent within a few seconds; returns the queued delivery. " +
+        "Call makerble_list_webhook_deliveries afterwards to see whether it succeeded and the HTTP " +
+        "response_code the receiver returned.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The webhook endpoint ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => post(`/webhook_endpoints/${id}/test`),
+    },
+
+    {
+      name: "makerble_list_webhook_deliveries",
+      description:
+        "A webhook endpoint's delivery log, newest first, kept for 30 days: each delivery's event, the " +
+        "record it is about (resource_type Beneficiary = Contact, Story or Project, and resource_id), " +
+        "status (pending, succeeded or failed), attempts, the receiver's last response_code, " +
+        "occurred_at and next_attempt_at. Failed deliveries are retried about 9 times over 25 hours. " +
+        "event_id is the `id` the receiver saw. Payloads are not included.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The webhook endpoint ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/webhook_endpoints/${id}/deliveries`, p),
+    },
+
+    {
+      name: "makerble_replay_webhook_delivery",
+      description:
+        "Send a delivery from the log again, e.g. one that failed while the receiver was down. It keeps " +
+        "the same event id, so a receiver that already processed it can ignore it. The payload shows the " +
+        "record as it is now, not as it was when the event happened.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The webhook endpoint ID" },
+          delivery_id: { type: "number", description: "The delivery's id from makerble_list_webhook_deliveries" },
+        },
+        required: ["id", "delivery_id"],
+      },
+      handler: ({ id, delivery_id }) => post(`/webhook_endpoints/${id}/deliveries/${delivery_id}/replay`),
     },
   ];
 }
