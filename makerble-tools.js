@@ -1558,7 +1558,7 @@ export function buildTools(api) {
     {
       name: "makerble_send_test_webhook",
       description:
-        "Send a test event (event: webhook.test, data: { test: true }) to a webhook endpoint to check the " +
+        "Send a test event (event: webhook.test, data: { test: true, message }) to a webhook endpoint to check the " +
         "receiver accepts it. It is queued and sent within a few seconds; returns the queued delivery. " +
         "Call makerble_list_webhook_deliveries afterwards to see whether it succeeded and the HTTP " +
         "response_code the receiver returned.",
