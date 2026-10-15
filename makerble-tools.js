@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 70 Makerble MCP tool definitions.
+ * All 87 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -445,6 +445,38 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/beneficiaries/impact_box_data", p),
+    },
+
+    {
+      name: "makerble_get_contact_summary",
+      description:
+        "Get the AI summary (made by SummaryMaker) of one Contact (Beneficiary): three sections, " +
+        "'Who', 'Progress' and 'Watch for', written from the Contact's bio and the Stories (Survey Responses / Updates) " +
+        "that the signed-in user is allowed to see. Use it for a quick picture of a Contact before a session or meeting. " +
+        "Every sentence lists its sources: bio=true if it came from the bio, and story_ids for the Stories it came from " +
+        "(fetch one with makerble_get_story to check the detail). " +
+        "\nstatus: 'ready' = the summary is current; 'stale' = an older summary is returned and new_story_count Stories " +
+        "have been added since; 'pending' = SummaryMaker is writing it (summary may be null or the previous version), " +
+        "so wait about 10 seconds and call again; 'failed' = it could not be made, call again with update=true; " +
+        "'empty' = there is nothing to summarise yet. " +
+        "\nSet update=true to make a fresh summary (like the 'Update summary' button), e.g. when status is 'stale'. " +
+        "Only works for organisations that have turned on SummaryMaker in their preferences (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_id: { type: "number", description: "Contact (Beneficiary) ID" },
+          update: {
+            type: "boolean",
+            description: "true to regenerate the summary from the latest bio and Stories",
+            default: false,
+          },
+        },
+        required: ["contact_id"],
+      },
+      handler: ({ contact_id, update }) =>
+        update
+          ? post(`/beneficiaries/${contact_id}/summary`, {})
+          : get(`/beneficiaries/${contact_id}/summary`),
     },
 
     // ── Contact Bio Forms (Beneficiary Categories) ────────────────────────────
@@ -1195,6 +1227,42 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_cohort_tracker_results",
+      description:
+        "Get a Cohort Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the Contacts " +
+        "(Beneficiaries) behind it. The result is a count of distinct Contacts who meet the tracker's membership " +
+        "setting and all its criteria, counting only stories, events and survey responses saved in that Project " +
+        "(or the Album's Projects) and dated in the window. On an Album a Contact is counted once, however many of " +
+        "its Projects they are on, so an Album's result is never the sum of its Projects'. Results are worked out " +
+        "afresh for each window: a Year to Date result is NOT the sum of period results. timeframe is 'period' " +
+        "(the day after the previous Target Deadline up to the deadline), 'year_to_date' (the start of the " +
+        "Project's year up to the deadline) or 'all_time' (default). as_of is the deadline the window ends on " +
+        "(YYYY-MM-DD); without it the window ends at the next Target Deadline, or today when there is none. " +
+        "Returns count, eligible_count (Contacts the criteria could judge), target ({number, date}: the deadline " +
+        "target on the window's last day, else the one-off target, or null), starts_on, ends_on, and a paginated " +
+        "list of Contacts (data: [{id, name, qualifying_value}], alphabetically). qualifying_value is the value " +
+        "that qualified the Contact where there is one, named by qualifying_value_label (e.g. 'Attendance rate', " +
+        "a percentage). A Contact you may not read is listed as {restricted: true} with no details. Pass " +
+        "project_id or album_id; the tracker must be on that Project, or on one of the Album's Projects. Find " +
+        "trackers with makerble_list_cohort_trackers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Cohort Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          timeframe: { type: "string", enum: ["period", "year_to_date", "all_time"], description: "Default all_time" },
+          as_of: { type: "string", description: "The deadline the window ends on, YYYY-MM-DD" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Contacts per page, default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...params }) =>
+        get(album_id ? `/cohort_trackers/${id}/albums/${album_id}/results` : `/cohort_trackers/${id}/projects/${project_id}/results`, params),
+    },
+
+    {
       name: "makerble_remove_cohort_tracker_from_project",
       description: "Remove a Cohort Tracker from a Project's Impact Scorecard, and its Albums if no other Project in them uses it.",
       inputSchema: {
@@ -1431,6 +1499,158 @@ export function buildTools(api) {
         await del(`/workflow_trackers/${id}/projects/${project_id}`);
         return { removed: true, id, project_id };
       },
+    },
+
+    // ── Filtered versions of metrics (CP-8438) ─────────────────────────────────
+    {
+      name: "makerble_list_filtered_metrics",
+      description:
+        "List the filtered versions of metrics on a Project's or Album's Results Canvas. A filtered version " +
+        "counts a standard metric (a Change: Activity or Engagement tracker; or an Indicator: Choice, " +
+        "Achievement or Numerical tracker) again for only some responses and Contacts, e.g. 'Session " +
+        "attendances — Female, under 21'. It counts attendances (or answers), not Contacts: use a Cohort " +
+        "Tracker to count Contacts. Each item gives parent_type and parent_id (the metric it filters), " +
+        "outcome_id (an Indicator's version sits under that Outcome), response_criteria and " +
+        "contact_criteria. Pass project_id or album_id; an Album shows every filtered version on its " +
+        "Projects. Paginated.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+        },
+      },
+      handler: ({ project_id, album_id, page, per_page }) =>
+        get(album_id ? `/albums/${album_id}/filtered_metrics` : `/projects/${project_id}/filtered_metrics`, { page, per_page }),
+    },
+
+    {
+      name: "makerble_preview_filtered_metric",
+      description:
+        "Check a filtered version's filters before adding it: returns count (how many of the metric's " +
+        "tagged responses on the Project currently pass the filters, e.g. attendances) and total (how " +
+        "many there are with no filters). Takes the same parent_type, parent_id, response_criteria and " +
+        "contact_criteria as makerble_create_filtered_metric.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          parent_type: { type: "string", enum: ["Change", "Indicator"] },
+          parent_id: { type: "number" },
+          response_criteria: { type: "object", description: "See makerble_create_filtered_metric" },
+          contact_criteria: { type: "object", description: "See makerble_create_filtered_metric" },
+        },
+        required: ["project_id", "parent_type", "parent_id"],
+      },
+      handler: ({ project_id, ...filtered_metric }) =>
+        post(`/projects/${project_id}/filtered_metrics/preview`, { filtered_metric }),
+    },
+
+    {
+      name: "makerble_create_filtered_metric",
+      description:
+        "Add a filtered version of a metric to a Project (Edit Project Metrics > Add filtered version). " +
+        "It becomes its own row on the Results Canvas and Set Targets, and appears on the Project's Albums. " +
+        "Workflow: 1) makerble_get_project_results to see the Project's trackers and their IDs; the metric must already be on " +
+        "the Project (a Change in a column, or an Indicator under one of its Outcomes). 2) Build the " +
+        "filters. response_criteria (about the response/story the metric was recorded in) takes: " +
+        "story_category_ids (Surveys), wave_ids (Intervals, e.g. Baseline; see makerble_list_survey_waves), " +
+        "date_range ('dd/mm/yyyy - dd/mm/yyyy', the Date Happened; either end optional), label_ids and " +
+        "author_ids (User IDs). contact_criteria (about the Contacts tagged in it) takes any key the Contacts " +
+        "Filters sidebar sends, as for makerble_preview_cohort_tracker: e.g. sub_ratio_ids (a select Bio " +
+        "field option such as Gender), age_from / age_to ({year, month, day}; age is worked out at the date " +
+        "of each response), custom_field_value_hash, bundle_ids (Contacts also in a Project of these " +
+        "Albums), project_ids. Other Bio fields use the Contact's current value; answer-based and attendance " +
+        "criteria are judged at the end of each reporting period. 3) Optionally check with " +
+        "makerble_preview_filtered_metric. 4) Create, with a display_name such as 'Session attendances — " +
+        "Female, under 21'. A Change's version goes in its parent's column unless column is given; an " +
+        "Indicator's goes under its parent's Outcome. Requires rights to edit the Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          parent_type: { type: "string", enum: ["Change", "Indicator"], description: "The kind of metric being filtered" },
+          parent_id: { type: "number", description: "The Change or Indicator ID" },
+          display_name: { type: "string" },
+          column: {
+            type: "string",
+            enum: ["activities", "engagement", "potential", "behaviour", "growth"],
+            description: "Changes only; defaults to the parent's column",
+          },
+          response_criteria: { type: "object", description: "Response Filters, see the description" },
+          contact_criteria: { type: "object", description: "Contact Filters, see the description" },
+        },
+        required: ["project_id", "parent_type", "parent_id", "display_name"],
+      },
+      handler: ({ project_id, ...filtered_metric }) =>
+        post(`/projects/${project_id}/filtered_metrics`, { filtered_metric }),
+    },
+
+    {
+      name: "makerble_update_filtered_metric",
+      description:
+        "Rename a filtered version or replace its filters. response_criteria and contact_criteria, when " +
+        "given, replace the stored ones ({} clears them). The metric it filters can't be changed. The " +
+        "change applies on every Project and Scorecard Template it is on. Requires rights to edit the " +
+        "Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          id: { type: "number", description: "The filtered version's ID" },
+          display_name: { type: "string" },
+          response_criteria: { type: "object" },
+          contact_criteria: { type: "object" },
+        },
+        required: ["project_id", "id"],
+      },
+      handler: ({ project_id, id, ...filtered_metric }) =>
+        patch(`/projects/${project_id}/filtered_metrics/${id}`, { filtered_metric }),
+    },
+
+    {
+      name: "makerble_remove_filtered_metric",
+      description:
+        "Remove a filtered version from a Project (and its Albums). It is deleted once it is on no other " +
+        "Project or Scorecard Template.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          id: { type: "number", description: "The filtered version's ID" },
+        },
+        required: ["project_id", "id"],
+      },
+      handler: async ({ project_id, id }) => {
+        await del(`/projects/${project_id}/filtered_metrics/${id}`);
+        return { removed: true, id, project_id };
+      },
+    },
+
+    {
+      name: "makerble_get_filtered_metric_results",
+      description:
+        "Get a filtered version's result on a Project or Album, as the Results Canvas shows it: number " +
+        "(count of matching attendances or answers; a Numerical tracker's total) and unit, for a timeframe " +
+        "ending at as_of. timeframe: period (since the previous Target Deadline), year_to_date (since the " +
+        "Year Start) or all_time (default). as_of defaults to the next Target Deadline, or today. " +
+        "Requires the right to see that Project's or Album's results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The filtered version's ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          timeframe: { type: "string", enum: ["period", "year_to_date", "all_time"] },
+          as_of: { type: "string", description: "YYYY-MM-DD" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, timeframe, as_of }) =>
+        get(album_id ? `/albums/${album_id}/filtered_metrics/${id}/results` : `/projects/${project_id}/filtered_metrics/${id}/results`,
+            { timeframe, as_of }),
     },
 
     // ── Metrics ────────────────────────────────────────────────────────────────
@@ -1684,6 +1904,270 @@ export function buildTools(api) {
       },
       handler: ({ submission_token, ...body }) =>
         postBearer("/referral_submissions", body, submission_token),
+    },
+
+    // ── Framework Sets (CP-8774) ───────────────────────────────────────────────
+    {
+      name: "makerble_list_framework_sets",
+      description:
+        "List the Framework Sets an Organisation can use. A Framework Set groups Impact Frameworks " +
+        "(called templates in the API) into one thing an Organisation reports its contribution towards, " +
+        "e.g. 'UN Sustainable Development Goals' holds the 17 SDG Impact Frameworks; others are TOMs, a " +
+        "funder's outcomes framework or the Organisation's own strategy. Each set names its two levels " +
+        "(e.g. Goal › Target): level 1 is an Impact Framework, level 2 an Outcome inside it. Returns live " +
+        "sets available to the Organisation (every-organisation sets, its Networks' sets and its own) and " +
+        "the drafts the user can edit, with availability (platform | network | charity), the frameworks " +
+        "in order (template_id, name, short_code, colours) and value_source.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID; the user must belong to it" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/framework_sets", p),
+    },
+
+    {
+      name: "makerble_get_framework_set",
+      description:
+        "Get one Framework Set by ID: its levels, who can use it, its Impact Frameworks in order " +
+        "(template_id, name, position, short_code, colour, text_colour) and, when value_source is " +
+        "'set_values', the Financial Value it defines for each Outcome (financial_values).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/framework_sets/${id}`),
+    },
+
+    {
+      name: "makerble_create_framework_set",
+      description:
+        "Create a Framework Set from Impact Frameworks (templates). availability decides who can use it: " +
+        "'charity' (only the Organisation in charity_id; needs an Organisation admin), 'network' (every " +
+        "Organisation in network_id; needs that Network's admin) or 'platform' (every Organisation; " +
+        "System Access users only). frameworks is the ordered list of existing Impact Frameworks; " +
+        "new_frameworks names new, empty Impact Frameworks to create and add at the end (e.g. one per " +
+        "Objective). value_source is 'organisation_values' (each Organisation's own Financial Values, the " +
+        "default) or 'set_values' (values defined in the set per Outcome, set later with " +
+        "makerble_update_framework_set). status 'draft' hides it from people who can't edit it.\n" +
+        "Workflow: (1) makerble_list_framework_sets to avoid duplicating an existing set. " +
+        "(2) makerble_create_framework_set. (3) Link the Organisation's own Indicators to the set's " +
+        "Outcomes so its Stories count towards them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation the user is acting for" },
+          name: { type: "string" },
+          availability: { type: "string", enum: ["platform", "network", "charity"] },
+          network_id: { type: "number", description: "Required when availability is 'network'" },
+          level1_singular: { type: "string", description: "e.g. Goal" },
+          level1_plural: { type: "string", description: "e.g. goals" },
+          level2_singular: { type: "string", description: "e.g. Target" },
+          level2_plural: { type: "string", description: "e.g. targets" },
+          value_source: { type: "string", enum: ["organisation_values", "set_values"] },
+          version_label: { type: "string", description: "e.g. '2025 review'" },
+          supersedes_id: { type: "number", description: "The Framework Set this version replaces" },
+          status: { type: "string", enum: ["draft", "live"] },
+          frameworks: {
+            type: "array",
+            description: "Impact Frameworks in order",
+            items: {
+              type: "object",
+              properties: {
+                template_id: { type: "number" },
+                short_code: { type: "string", description: "e.g. '4' or 'O1'" },
+                colour: { type: "string", description: "Hex colour, e.g. '#C5192D'" },
+                text_colour: { type: "string", description: "Hex colour, e.g. '#FFFFFF'" },
+              },
+              required: ["template_id"],
+            },
+          },
+          new_frameworks: { type: "array", items: { type: "string" }, description: "Names of new Impact Frameworks" },
+        },
+        required: ["charity_id", "name", "availability"],
+      },
+      handler: (p) => post("/framework_sets", p),
+    },
+
+    {
+      name: "makerble_update_framework_set",
+      description:
+        "Update a Framework Set the user can edit. Only the fields sent change, except that frameworks " +
+        "(when sent) replaces the whole ordered list and financial_values (when sent) replaces the " +
+        "Financial Value chosen for each Outcome. financial_values are used when value_source is " +
+        "'set_values': find Outcome IDs with makerble_list_outcomes and Financial Values the Organisation " +
+        "can use in Makerble.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          charity_id: { type: "number", description: "The Organisation the user is acting for" },
+          name: { type: "string" },
+          availability: { type: "string", enum: ["platform", "network", "charity"] },
+          network_id: { type: "number" },
+          level1_singular: { type: "string" },
+          level1_plural: { type: "string" },
+          level2_singular: { type: "string" },
+          level2_plural: { type: "string" },
+          value_source: { type: "string", enum: ["organisation_values", "set_values"] },
+          version_label: { type: "string" },
+          supersedes_id: { type: "number" },
+          status: { type: "string", enum: ["draft", "live"] },
+          frameworks: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                template_id: { type: "number" },
+                short_code: { type: "string" },
+                colour: { type: "string" },
+                text_colour: { type: "string" },
+              },
+              required: ["template_id"],
+            },
+          },
+          new_frameworks: { type: "array", items: { type: "string" } },
+          financial_values: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { outcome_id: { type: "number" }, financial_value_id: { type: "number" } },
+              required: ["outcome_id", "financial_value_id"],
+            },
+          },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: ({ id, ...body }) => patch(`/framework_sets/${id}`, body),
+    },
+
+    // ── Linked indicators (CP-8774) ───────────────────────────────────────────
+    {
+      name: "makerble_list_framework_links",
+      description:
+        "List an Organisation's Linked indicators. A Linked indicator is one of the Organisation's own " +
+        "Indicators (progress trackers) linked to an Outcome inside a Framework Set, e.g. its 'Bootcamp " +
+        "completions' Indicator linked to SDG Target 4.4. Every Story recorded against that Indicator " +
+        "then counts towards the Outcome, in every project (all_projects: true) or only the projects " +
+        "in project_ids. Returns indicator_name, outcome_title, project_ids and all_projects.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID; the user must belong to it" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/framework_links", p),
+    },
+
+    {
+      name: "makerble_link_indicator_to_framework",
+      description:
+        "Link one of an Organisation's Indicators to an Outcome (e.g. an SDG Target) in a Framework Set the " +
+        "Organisation can use, so its Stories count towards that Outcome. The Indicator must be one the " +
+        "Organisation owns or uses in its projects. Leave project_ids empty to count it in every project, " +
+        "or list the projects it should count in; linking again with more projects adds them. Requires an " +
+        "Organisation admin.\n" +
+        "Workflow: (1) makerble_list_framework_sets to choose a set. (2) makerble_get_framework_set for its " +
+        "Impact Frameworks (template_id), then find the Outcome ID inside the right framework, e.g. with " +
+        "makerble_list_outcomes. (3) makerble_list_indicators for the Organisation's Indicator. " +
+        "(4) makerble_link_indicator_to_framework.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          indicator_id: { type: "number" },
+          outcome_id: { type: "number", description: "An Outcome in one of the set's Impact Frameworks" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Empty or omitted: every project" },
+        },
+        required: ["charity_id", "indicator_id", "outcome_id"],
+      },
+      handler: (p) => post("/framework_links", p),
+    },
+
+    {
+      name: "makerble_unlink_indicator",
+      description:
+        "Remove one of an Organisation's Linked indicators (by its id from makerble_list_framework_links). " +
+        "Stories recorded against the Indicator stop counting towards that Outcome. Requires an " +
+        "Organisation admin.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Linked indicator ID" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: async ({ id, charity_id }) => {
+        await del(`/framework_links/${id}?charity_id=${encodeURIComponent(charity_id)}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_get_framework_contribution",
+      description:
+        "Get an Organisation's contribution to a Framework Set (e.g. the UN Sustainable Development Goals): " +
+        "the figures on its Contribution page. A Story counts towards an Outcome (e.g. SDG Target 4.4) when it " +
+        "records a value against an Indicator inside that Outcome as a Core indicator, or against one of the " +
+        "Organisation's Linked indicators (see makerble_list_framework_links) in a project the link covers. " +
+        "Use it to answer 'which SDGs does our work contribute to?' for the whole Organisation, one project " +
+        "or one Album (bundle_id), over a period.\n" +
+        "Returns summary { frameworks_contributed, frameworks_total, stories, reached (distinct Contacts), " +
+        "entries, financial_value } with each Story, Contact and entry counted once for the whole set, and " +
+        "frameworks[] (each Impact Framework, e.g. an SDG Goal, with its stories and the outcomes[] it has a " +
+        "contribution to, each with indicators[] and their membership core/linked, stories, reached and " +
+        "financial_value). Framework and Outcome figures overlap, so never add them up into a total; use " +
+        "summary instead. Never add figures across different Framework Sets.\n" +
+        "Workflow: makerble_list_framework_sets to choose the set, then this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Framework Set ID" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID; the user must belong to it" },
+          project_id: { type: "number", description: "Only count Stories in this project" },
+          bundle_id: { type: "number", description: "Only count Stories in the projects of this Album (Bundle)" },
+          period: {
+            type: "string",
+            enum: ["all_time", "last_12_months", "financial_year", "custom"],
+            description: "Default all_time. financial_year starts on 5 April. custom uses from and to.",
+          },
+          from: { type: "string", description: "First day of a custom period (YYYY-MM-DD)" },
+          to: { type: "string", description: "Last day of a custom period (YYYY-MM-DD)" },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: ({ id, ...params }) => get(`/framework_sets/${id}/contribution`, params),
+    },
+
+    {
+      name: "makerble_migrate_framework_links",
+      description:
+        "Copy an Organisation's Linked indicators onto a new version of a Framework Set. A version is a set " +
+        "whose supersedes_id names the set it replaces (e.g. 'SDGs 2025 review' replacing 'SDGs'). Each link " +
+        "on the old version is carried across wherever the new version has the same Outcome, or one with " +
+        "the same title, keeping its project scope. The old links stay, so past reports don't change. " +
+        "Returns carried[] and not_carried[] (links with no matching Outcome, to re-link by hand with " +
+        "makerble_link_indicator_to_framework). Requires an Organisation admin.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The new version's Framework Set ID" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: ({ id, charity_id }) => post(`/framework_sets/${id}/migrate_links`, { charity_id }),
     },
 
     // ── Event Formats ──────────────────────────────────────────────────────────
