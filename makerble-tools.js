@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 96 Makerble MCP tool definitions.
+ * All 97 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1524,6 +1524,43 @@ export function buildTools(api) {
       },
       handler: ({ id, project_id, album_id, ...targets }) =>
         patch(album_id ? `/workflow_trackers/${id}/albums/${album_id}` : `/workflow_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_get_workflow_tracker_results",
+      description:
+        "Get a Workflow Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the items " +
+        "behind it (e.g. each signposting: the Contact (Beneficiary), who they were signposted to and when; each " +
+        "internal referral: the Contact, the Project they were added to and when). On an Album the item or " +
+        "Contact is counted once across its open Projects, so an Album's result is never the sum of its " +
+        "Projects'. result_kind 'additive' (counting each item) adds up across periods; 'snapshot' (counting each " +
+        "Contact once) is worked out for the window on its own, read as_of its last day (or today while that is " +
+        "still to come). timeframe is 'period' (the day after the previous Target Deadline up to the deadline), " +
+        "'year_to_date' (the start of the Project's year up to the deadline) or 'all_time' (default). as_of is " +
+        "the deadline the window ends on (YYYY-MM-DD); without it the window ends at the next Target Deadline, " +
+        "or today when there is none, as on the Results Canvas. Returns number, target (the deadline targets in " +
+        "the window, added up, or for a snapshot the one at its end; else the one-off target; or null), " +
+        "starts_on, ends_on, and a paginated list of items, newest first (data: [{contact_id, contact_name, " +
+        "detail, project_id, happened_at}]; total_count counts every item, whatever the count mode). Items you " +
+        "may not see (a Contact you can't read, or a referral to a Project you can't see) are counted in " +
+        "hidden_count for that page but never listed. Pass project_id or album_id; the tracker must be on that " +
+        "Project, or one of the Album's Projects. Requires rights to see that Results Canvas. Find trackers " +
+        "with makerble_list_workflow_trackers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Workflow Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          timeframe: { type: "string", enum: ["period", "year_to_date", "all_time"], description: "Default all_time" },
+          as_of: { type: "string", description: "The deadline the window ends on, YYYY-MM-DD" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Items per page, default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...params }) =>
+        get(album_id ? `/workflow_trackers/${id}/albums/${album_id}/results` : `/workflow_trackers/${id}/projects/${project_id}/results`, params),
     },
 
     {
