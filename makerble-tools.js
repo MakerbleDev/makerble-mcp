@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 74 Makerble MCP tool definitions.
+ * All 76 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1858,6 +1858,62 @@ export function buildTools(api) {
         await del(`/framework_links/${id}?charity_id=${encodeURIComponent(charity_id)}`);
         return { deleted: true, id };
       },
+    },
+
+    {
+      name: "makerble_get_framework_contribution",
+      description:
+        "Get an Organisation's contribution to a Framework Set (e.g. the UN Sustainable Development Goals): " +
+        "the figures on its Contribution page. A Story counts towards an Outcome (e.g. SDG Target 4.4) when it " +
+        "records a value against an Indicator inside that Outcome as a Core indicator, or against one of the " +
+        "Organisation's Linked indicators (see makerble_list_framework_links) in a project the link covers. " +
+        "Use it to answer 'which SDGs does our work contribute to?' for the whole Organisation, one project " +
+        "or one Album (bundle_id), over a period.\n" +
+        "Returns summary { frameworks_contributed, frameworks_total, stories, reached (distinct Contacts), " +
+        "entries, financial_value } with each Story, Contact and entry counted once for the whole set, and " +
+        "frameworks[] (each Impact Framework, e.g. an SDG Goal, with its stories and the outcomes[] it has a " +
+        "contribution to, each with indicators[] and their membership core/linked, stories, reached and " +
+        "financial_value). Framework and Outcome figures overlap, so never add them up into a total; use " +
+        "summary instead. Never add figures across different Framework Sets.\n" +
+        "Workflow: makerble_list_framework_sets to choose the set, then this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Framework Set ID" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID; the user must belong to it" },
+          project_id: { type: "number", description: "Only count Stories in this project" },
+          bundle_id: { type: "number", description: "Only count Stories in the projects of this Album (Bundle)" },
+          period: {
+            type: "string",
+            enum: ["all_time", "last_12_months", "financial_year", "custom"],
+            description: "Default all_time. financial_year starts on 5 April. custom uses from and to.",
+          },
+          from: { type: "string", description: "First day of a custom period (YYYY-MM-DD)" },
+          to: { type: "string", description: "Last day of a custom period (YYYY-MM-DD)" },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: ({ id, ...params }) => get(`/framework_sets/${id}/contribution`, params),
+    },
+
+    {
+      name: "makerble_migrate_framework_links",
+      description:
+        "Copy an Organisation's Linked indicators onto a new version of a Framework Set. A version is a set " +
+        "whose supersedes_id names the set it replaces (e.g. 'SDGs 2025 review' replacing 'SDGs'). Each link " +
+        "on the old version is carried across wherever the new version has the same Outcome, or one with " +
+        "the same title, keeping its project scope. The old links stay, so past reports don't change. " +
+        "Returns carried[] and not_carried[] (links with no matching Outcome, to re-link by hand with " +
+        "makerble_link_indicator_to_framework). Requires an Organisation admin.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The new version's Framework Set ID" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["id", "charity_id"],
+      },
+      handler: ({ id, charity_id }) => post(`/framework_sets/${id}/migrate_links`, { charity_id }),
     },
 
     // ── Event Formats ──────────────────────────────────────────────────────────
