@@ -387,13 +387,15 @@ export function buildTools(api) {
         "List the Access Logs (audit trail of views) of one record: who opened it, when, and how many times, newest first. " +
         "Use this to answer 'who has looked at this Contact, and when?'. Changes are in makerble_list_versions instead. " +
         "Views by the same colleague less than 30 minutes apart are one entry with a view_count. " +
+        "Entries older than the organisation's retention period (3 to 12 months, set on Organisation Preferences) are rolled up into " +
+        "one entry per colleague per month with monthly_summary: true, first_viewed_at and last_viewed_at spanning that month. " +
         "source is \"web\" (opened in Makerble), \"api\" (fetched through the API) or \"mcp\" (fetched through this MCP server, " +
         "for example by makerble_get_contact). Only Contacts (Beneficiaries) are available so far, so record_type must be \"Contact\". " +
         "Find the Contact's ID first with makerble_list_contacts. " +
         "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Access Logs; " +
         "anything else returns not-found. " +
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
-        "data: [{id, action (\"Viewed ×N\"), view_count, source, user_id, user_name, first_viewed_at, last_viewed_at}]}.",
+        "data: [{id, action (\"Viewed ×N\"), view_count, source, user_id, user_name, first_viewed_at, last_viewed_at, monthly_summary}]}.",
       inputSchema: {
         type: "object",
         properties: {
