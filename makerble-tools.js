@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 95 Makerble MCP tool definitions.
+ * All 96 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -379,6 +379,36 @@ export function buildTools(api) {
         required: ["record_type", "record_id"],
       },
       handler: (p) => get("/versions", p),
+    },
+
+    {
+      name: "makerble_list_access_logs",
+      description:
+        "List the Access Logs (audit trail of views) of one record: who opened it, when, and how many times, newest first. " +
+        "Use this to answer 'who has looked at this Contact, and when?'. Changes are in makerble_list_versions instead. " +
+        "Views by the same colleague less than 30 minutes apart are one entry with a view_count. " +
+        "source is \"web\" (opened in Makerble), \"api\" (fetched through the API) or \"mcp\" (fetched through this MCP server, " +
+        "for example by makerble_get_contact). Only Contacts (Beneficiaries) are available so far, so record_type must be \"Contact\". " +
+        "Find the Contact's ID first with makerble_list_contacts. " +
+        "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Access Logs; " +
+        "anything else returns not-found. " +
+        "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
+        "data: [{id, action (\"Viewed ×N\"), view_count, source, user_id, user_name, first_viewed_at, last_viewed_at}]}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          record_type: { type: "string", enum: ["Contact"], description: "Type of record. Only \"Contact\" for now." },
+          record_id: { type: "number", description: "The Contact (Beneficiary) ID." },
+          from: { type: "string", description: "Only entries on or after this date (YYYY-MM-DD)." },
+          to: { type: "string", description: "Only entries on or before this date (YYYY-MM-DD)." },
+          user_id: { type: "number", description: "Only this colleague's views (a user ID from makerble_list_users)." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only entries last viewed after this ISO 8601 datetime." },
+        },
+        required: ["record_type", "record_id"],
+      },
+      handler: (p) => get("/access_logs", p),
     },
 
     {
