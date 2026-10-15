@@ -1101,7 +1101,12 @@ export function buildTools(api) {
         "beneficiary_state_id}), project_beneficiary_states ({project_id: {state_id: {enabled: 'true', " +
         "added_from_date: 'dd/mm/yyyy - dd/mm/yyyy', removed_from_date}}}), project_story_category_ids " +
         "(Survey Campaigns completed) with project_story_category_filter_data, attendance_rate " +
-        "({change_id, from, to}), distance_travelled ({trackers: [{indicator_id, directions: " +
+        "({change_id, from, to}), same_day_rate (Same-day rate: {change_id, qualifying_change_ids, " +
+        "match: 'all'|'any', from, to, event_scope / qualifying_event_scope: 'all'|'filtered' with " +
+        "event_filter_params / qualifying_event_filter_params}: on the days change_id was recorded for a " +
+        "Contact at an event, the % of those days the qualifying Engagement Trackers were also recorded " +
+        "for them at an event on the same date, e.g. all 4 meals on every class day = from '100', to '100'), " +
+        "distance_travelled ({trackers: [{indicator_id, directions: " +
         "['improved'|'no_change'|'worsened']}], same_project}), indicator_comparisons ({indicator_id: " +
         "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
         "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
