@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 96 Makerble MCP tool definitions.
+ * All 97 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -411,6 +411,49 @@ export function buildTools(api) {
         required: ["record_type", "record_id"],
       },
       handler: (p) => get("/access_logs", p),
+    },
+
+    {
+      name: "makerble_list_audit_trail",
+      description:
+        "List an organisation's Audit Trail: the latest changes (Versions: Created, Edited, Destroyed) and views " +
+        "(Access Logs: Viewed) across all its Contacts (Beneficiaries) and Stories (including Survey Responses), newest first. " +
+        "Use this to answer organisation-wide questions such as 'what has Jane done this week?', 'who has viewed or changed " +
+        "records today?' or 'which Contacts were deleted recently?'. For one record's full history use makerble_list_versions " +
+        "(changes) or makerble_list_access_logs (views, including older monthly summaries) instead. " +
+        "Views by the same colleague less than 30 minutes apart are one entry with a view_count. Only views within the " +
+        "organisation's retention period are listed here; older ones are monthly summaries on makerble_list_access_logs. " +
+        "Get the organisation (charity) ID from makerble_get_organisation and colleague IDs from makerble_list_users. " +
+        "Only Charity Editors (everything in the organisation) and Project Editors (Contacts and Stories in their projects) " +
+        "can see it; anything else returns not-found. " +
+        "Returns {page, page_size, page_count, total_count, data: [{entry_type (\"version\" or \"access_log\"), id, " +
+        "action (\"Created\", \"Edited\", \"Destroyed\" or \"Viewed\"), record_type (\"Contact\" or \"Story\"), " +
+        "record_id, record_name, occurred_at, user_id, who, view_count, source}]}. " +
+        "For an entry_type \"version\" entry, id is a Version ID for makerble_get_version. source is \"web\", \"api\" or " +
+        "\"mcp\" for views, null for changes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) ID." },
+          actions: {
+            type: "string",
+            description:
+              "Comma-separated types of action to include, from created, edited, destroyed, viewed. Default: all of them.",
+          },
+          user_id: { type: "number", description: "Only this colleague's actions (a user ID from makerble_list_users)." },
+          record_type: {
+            type: "string",
+            enum: ["Contact", "Story"],
+            description: "Only Contacts, or only Stories (including Survey Responses).",
+          },
+          record_id: { type: "number", description: "Only this record (needs record_type)." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only entries after this ISO 8601 datetime." },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/audit_trail", p),
     },
 
     {
