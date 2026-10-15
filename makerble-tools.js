@@ -1378,10 +1378,12 @@ export function buildTools(api) {
       description:
         "List an Organisation's Workflow Trackers. A Workflow Tracker is a metric that counts records " +
         "Makerble's own features create, rather than Contacts tagged in updates. Its source says what it " +
-        "counts: 'signpostings' (Signpostings made from a Project) or 'internal_referrals' (Contacts in a " +
-        "Project added to another of the Organisation's Projects). count_mode is 'items' (each signposting " +
-        "or referral; result_kind 'additive', adds up across periods) or 'contacts' (each Contact once; " +
-        "result_kind 'snapshot'). Only an Organisation's editors and reporters, and its project managers, " +
+        "counts: 'signpostings' (Signpostings made from a Project), 'internal_referrals' (Contacts in a " +
+        "Project added to another of the Organisation's Projects), 'cases_created' (Cases created on a " +
+        "Project), 'cases_closed' (each time one of those Cases is closed) or 'cases_open' (the Cases open " +
+        "at the end of each timeframe). count_mode is 'items' (each signposting, referral, Case or closing; " +
+        "result_kind 'additive', adds up across periods, except cases_open which is always 'snapshot') or " +
+        "'contacts' (each Contact once; result_kind 'snapshot'). Only an Organisation's editors and reporters, and its project managers, " +
         "can see them.",
       inputSchema: {
         type: "object",
@@ -1414,15 +1416,16 @@ export function buildTools(api) {
       description:
         "Check what a Workflow Tracker would count before saving it: returns its result on one of the " +
         "Organisation's Projects for the current period (ending at the Project's next deadline, or today), " +
-        "Year to Date and All-time, and the latest records it counts (Contact name, who they were " +
-        "signposted to or which Project they were referred to, and when). Takes the same source, " +
+        "Year to Date and All-time, and the latest records it counts that you may see (Contact name, who " +
+        "they were signposted to, which Project they were referred to or the Case's title, and when); " +
+        "hidden_count says how many more are counted but hidden from you, e.g. confidential Cases. Takes the same source, " +
         "count_mode and settings as makerble_create_workflow_tracker.",
       inputSchema: {
         type: "object",
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           project_id: { type: "number", description: "The Project to preview the result on" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "See makerble_create_workflow_tracker" },
         },
@@ -1442,9 +1445,15 @@ export function buildTools(api) {
         "Contacts in the Project who are added to another of the Organisation's Projects, dated by the " +
         "Status in Projects history; settings choose which Projects count: {destinations: 'any'} (any " +
         "other Project), {destinations: 'only', project_ids: [...]} or {destinations: 'except', " +
-        "project_ids: [...]} (default 'except' with none listed). count_mode 'items' (default) counts each " +
-        "signposting or referral and adds up across periods; 'contacts' counts each Contact once and is a " +
-        "snapshot. Requires an editor or reporter of the Organisation." +
+        "project_ids: [...]} (default 'except' with none listed). Cases (the Cases App) linked to the " +
+        "Project, or to any of an Album's Projects, each counted once: 'cases_created' counts the Cases " +
+        "created; 'cases_closed' counts each time one is closed (a Case closed, reopened and closed again " +
+        "counts twice, or once per Contact); 'cases_open' counts the Cases open at the end of each " +
+        "timeframe, a snapshot. For these three, settings {case_form_id: n} counts only the Cases created " +
+        "with that Case Form (IDs from makerble_list_case_forms); leave it out for any Case Form. " +
+        "Confidential Cases are counted but only listed to people who can see them. count_mode 'items' " +
+        "(default) counts each signposting, referral, Case or closing and adds up across periods (except " +
+        "cases_open); 'contacts' counts each Contact once and is a snapshot. Requires an editor or reporter of the Organisation." +
         "\nWorkflow: (1) makerble_list_projects for Project IDs. (2) makerble_preview_workflow_tracker to " +
         "check the count. (3) makerble_create_workflow_tracker. (4) makerble_add_workflow_tracker_to_project " +
         "to place it in a column of a Project's Impact Scorecard, optionally with a target. Albums pick it " +
@@ -1455,11 +1464,13 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           name: { type: "string", description: "Shown next to the result, e.g. 'Signpostings made'" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: {
             type: "object",
-            description: "internal_referrals only: {destinations: 'any'|'only'|'except', project_ids: [number]}",
+            description:
+              "internal_referrals: {destinations: 'any'|'only'|'except', project_ids: [number]}; " +
+              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); signpostings: none",
           },
         },
         required: ["charity_id", "name", "source"],
@@ -1480,7 +1491,7 @@ export function buildTools(api) {
           id: { type: "number" },
           name: { type: "string" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "Replaces the stored settings" },
         },
@@ -1582,18 +1593,19 @@ export function buildTools(api) {
       description:
         "Get a Workflow Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the items " +
         "behind it (e.g. each signposting: the Contact (Beneficiary), who they were signposted to and when; each " +
-        "internal referral: the Contact, the Project they were added to and when). On an Album the item or " +
+        "internal referral: the Contact, the Project they were added to and when; each Case: the Contact, the Case's " +
+        "title and case_id, and when it was created, closed or last opened). On an Album the item or " +
         "Contact is counted once across its open Projects, so an Album's result is never the sum of its " +
         "Projects'. result_kind 'additive' (counting each item) adds up across periods; 'snapshot' (counting each " +
-        "Contact once) is worked out for the window on its own, read as_of its last day (or today while that is " +
+        "Contact once, or the Cases open) is worked out for the window on its own, read as_of its last day (or today while that is " +
         "still to come). timeframe is 'period' (the day after the previous Target Deadline up to the deadline), " +
         "'year_to_date' (the start of the Project's year up to the deadline) or 'all_time' (default). as_of is " +
         "the deadline the window ends on (YYYY-MM-DD); without it the window ends at the next Target Deadline, " +
         "or today when there is none, as on the Results Canvas. Returns number, target (the deadline targets in " +
         "the window, added up, or for a snapshot the one at its end; else the one-off target; or null), " +
         "starts_on, ends_on, and a paginated list of items, newest first (data: [{contact_id, contact_name, " +
-        "detail, project_id, happened_at}]; total_count counts every item, whatever the count mode). Items you " +
-        "may not see (a Contact you can't read, or a referral to a Project you can't see) are counted in " +
+        "detail, project_id, case_id, happened_at}]; total_count counts every item, whatever the count mode). Items you " +
+        "may not see (a Contact you can't read, a referral to a Project you can't see, or a confidential Case) are counted in " +
         "hidden_count for that page but never listed. Pass project_id or album_id; the tracker must be on that " +
         "Project, or one of the Album's Projects. Requires rights to see that Results Canvas. Find trackers " +
         "with makerble_list_workflow_trackers.",
