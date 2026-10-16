@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 101 Makerble MCP tool definitions.
+ * All 103 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2423,6 +2423,60 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/events/${id}`),
+    },
+
+    {
+      name: "makerble_list_project_event_formats",
+      description:
+        "List the Event Formats (event_category in the API) a user can create events with in one Project — " +
+        "the formats Makerble's Create Event form offers for that Project. An Event Format is a template for " +
+        "events, e.g. Workshops or Drop-in Sessions. This is also how to find out whether the user may create " +
+        "events in the Project: if they can't (the Project has events turned off, or they aren't an " +
+        "Organisation Admin, a Project Manager, or a Project Reporter / Observer chosen as an Event Creator), " +
+        "it returns 403. Each item returns id, name and is_default. First step of creating an event: pick a " +
+        "format here, then call makerble_get_event_form with its id. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project the event will belong to" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Event Formats per page. Default 10, max 200" },
+        },
+        required: ["project_id"],
+      },
+      handler: ({ project_id, ...p }) => get(`/projects/${project_id}/event_categories`, p),
+    },
+
+    {
+      name: "makerble_get_event_form",
+      description:
+        "Get everything Makerble's Create Event (or Edit Event) form offers once an Event Format is chosen in a " +
+        "Project, so you know what to ask the user and which ids to send when creating or editing the event. " +
+        "Returns: fields — the format's fields in order, each with name, kind ('event_attribute' for name / " +
+        "start_datetime / end_datetime, 'custom_field', or 'dropdown'), field_id (the custom field or Dropdown " +
+        "id), data_type (e.g. text, number, date, tickbox, ward, datetime, dropdown), mandatory, " +
+        "validation_hint (the rule a custom field's answer must follow) and, for a Dropdown (ratio set), " +
+        "dropdown {choice: single_choice | unlimited_choice | limited_choice, choice_limit, options: [{id, " +
+        "name}]} (options are answer choices / sub ratios); self_check_in {enabled, surveys, waves} — whether " +
+        "the format has Self Check-in (Kiosk) and the Project's Surveys (story categories; send " +
+        "project_story_category_id) and their Waves (send_survey_wave_id) to choose from; signup_pages [{id, " +
+        "name}] — the Project's Signup Pages (referral link details) people can register through; " +
+        "guest_statuses [{id, name}] — the Guest Statuses (event states) a Signup Page can put people into, " +
+        "in order, the first being the default; event_roles {enabled, guests, event_managers_and_workers}. " +
+        "Workflow: makerble_list_project_event_formats → this tool → create the event. Pass event_id to get " +
+        "the Edit Event form for an existing event. Returns 403 if the user can't create events in the " +
+        "Project (or can't edit the event), 404 if the Event Format isn't available in the Project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project the event belongs to" },
+          event_category_id: { type: "number", description: "The chosen Event Format id, from makerble_list_project_event_formats" },
+          event_id: { type: "number", description: "Only when editing: the event being edited" },
+        },
+        required: ["project_id", "event_category_id"],
+      },
+      handler: ({ project_id, ...p }) => get(`/projects/${project_id}/event_form`, p),
     },
 
     {
