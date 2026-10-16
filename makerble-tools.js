@@ -226,6 +226,10 @@ export function buildTools(api) {
         "(2) Call this tool with start_date / end_date for the period (omit both for all time); Stories count by " +
         "their date. (3) group_by 'month' for a trend or 'project' to compare Projects; each tracker then has a " +
         "groups array, with zero rows for months with nothing recorded. " +
+        "(4) To see only the metrics in one Impact Framework (Template), as 'Metrics included' does on the Results " +
+        "Canvas, pass template_id. A Project's default Impact Framework is default_results_template_id from " +
+        "makerble_get_project; null there means All metrics. The Impact Framework must be the user's own or belong to " +
+        "the Organisation of every Project requested. " +
         "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
         "Returns page, page_size, page_count, total_count, start_date, end_date, project_ids and data (the trackers).",
       inputSchema: {
@@ -240,6 +244,10 @@ export function buildTools(api) {
             description: "Tracker types to include. Defaults to all",
           },
           group_by: { type: "string", enum: ["project", "month"], description: "Split each tracker's figures. Default: one total" },
+          template_id: {
+            type: "number",
+            description: "Impact Framework (Template) ID: return only its trackers. Omit for every tracker",
+          },
           page: { type: "number" },
           per_page: { type: "number", description: "Trackers per page. Default 10, max 200" },
         },
