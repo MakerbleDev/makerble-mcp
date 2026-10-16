@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 115 Makerble MCP tool definitions.
+ * All 124 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -119,6 +119,7 @@ const WEBHOOK_EVENTS = [
 
 export function buildTools(api) {
   const { get, post, patch, del, postBearer, signIn } = api;
+  const query = (p) => { const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined)); return qs.toString() ? `?${qs}` : ""; };
 
   return [
     // ── Authentication ────────────────────────────────────────────────────────
@@ -2787,6 +2788,183 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...p }) => patch(`/events/${id}`, p),
+    },
+
+    {
+      name: "makerble_delete_event",
+      description:
+        "Delete an event, as Makerble's Delete Event does. Deleting a master event (the first event of a " +
+        "recurring series) deletes the whole series. For a later event in a series, delete_option chooses " +
+        "what goes: 'this_event' (default), 'current_and_upcoming_series_events', or 'all_series_events'. " +
+        "Deleting an event also deletes what is recorded against it, so confirm with the user first, naming " +
+        "the events. Returns { deleted_event_ids }. Needs permission to edit the event (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          delete_option: { type: "string", enum: ["this_event", "current_and_upcoming_series_events", "all_series_events"] },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, delete_option }) => del(`/events/${id}${query({ delete_option })}`),
+    },
+
+    {
+      name: "makerble_list_event_guests",
+      description:
+        "List an event's guests (Contacts / beneficiaries), by name, with each one's Guest Status (event state) " +
+        "and, when the Event Format has Event Roles turned on, Event Role. Returns { page, page_size, " +
+        "page_count, total_count, data: [{ contact_id, name, guest_status: {id, name}, event_role: {id, name} " +
+        "or null, added_at, updated_at }] }. Anyone who can open the event page can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Guests per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only guests added or changed after this ISO 8601 time" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/events/${id}/guests`, p),
+    },
+
+    {
+      name: "makerble_add_event_guests",
+      description:
+        "Add Contacts (beneficiaries) as guests of an event, as the event page's Add Guests does. Only Contacts " +
+        "in the event's Project can be added (find them with makerble_list_project_contacts). Contacts already " +
+        "on the event are left as they are. guest_status_id is a Guest Status (event state) from " +
+        "makerble_get_event_form's guest_statuses (default: the first); each Contact must meet that Guest " +
+        "Status's requirements, or the request is refused with 422 naming the requirement. event_role_id is " +
+        "one of the form's event_roles.guests. A fixed guest limit is respected. For an event in a recurring " +
+        "series, apply_to 'this_and_upcoming_events' also adds them to the later events. Returns { event_id, " +
+        "guests_count }; every problem comes back together as 422 { errors }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          contact_ids: { type: "array", items: { type: "number" }, description: "Contact (beneficiary) ids" },
+          guest_status_id: { type: "number", description: "Guest Status (event state) id" },
+          event_role_id: { type: "number", description: "Event Role id for guests" },
+          apply_to: { type: "string", enum: ["this_event", "this_and_upcoming_events"] },
+        },
+        required: ["id", "contact_ids"],
+      },
+      handler: ({ id, ...p }) => post(`/events/${id}/guests`, p),
+    },
+
+    {
+      name: "makerble_update_event_guest",
+      description:
+        "Change one guest's Guest Status (event state), e.g. from Registered to Attended, and/or Event Role on " +
+        "an event. The Contact must meet the new Guest Status's requirements (422 otherwise). Pass " +
+        "event_role_id: null to clear the role; leave it out to keep it. Returns { event_id, guests_count }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          contact_id: { type: "number", description: "The guest's Contact (beneficiary) id" },
+          guest_status_id: { type: "number", description: "Guest Status (event state) id from makerble_get_event_form" },
+          event_role_id: { type: ["number", "null"], description: "Event Role id for guests, or null to clear it" },
+        },
+        required: ["id", "contact_id"],
+      },
+      handler: ({ id, contact_id, ...p }) => patch(`/events/${id}/guests/${contact_id}`, p),
+    },
+
+    {
+      name: "makerble_remove_event_guest",
+      description:
+        "Remove a Contact (beneficiary) from an event's guests. For an event in a recurring series, apply_to " +
+        "'this_and_upcoming_events' also removes them from the later events. Returns { event_id, guests_count }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          contact_id: { type: "number", description: "The guest's Contact (beneficiary) id" },
+          apply_to: { type: "string", enum: ["this_event", "this_and_upcoming_events"] },
+        },
+        required: ["id", "contact_id"],
+      },
+      handler: ({ id, contact_id, apply_to }) => del(`/events/${id}/guests/${contact_id}${query({ apply_to })}`),
+    },
+
+    {
+      name: "makerble_list_event_staff",
+      description:
+        "List an event's Event Managers and Event Workers (users), by name. Returns { page, page_size, " +
+        "page_count, total_count, data: [{ user_id, name, roles: ['manager' and/or 'worker'], event_role: " +
+        "{id, name} or null }] }. Anyone who can open the event page can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Staff per page. Default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/events/${id}/staff`, p),
+    },
+
+    {
+      name: "makerble_add_event_staff",
+      description:
+        "Add colleagues as Event Managers or Event Workers of an event, as the Edit Event form does. They must " +
+        "be colleagues in the event's Project or organisation (find their user ids with makerble_list_users), and a fixed " +
+        "worker limit is respected. event_role_id is one of the form's event_roles.event_managers_and_workers, " +
+        "set on this event. For a master event (first of a recurring series), apply_to " +
+        "'all_events_in_series' adds them to the whole series. Returns the event as makerble_get_event does. " +
+        "Needs permission to edit the event (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          user_ids: { type: "array", items: { type: "number" } },
+          role: { type: "string", enum: ["manager", "worker"] },
+          event_role_id: { type: "number", description: "Event Role id for Event Managers and Workers" },
+          apply_to: { type: "string", enum: ["this_event", "all_events_in_series"] },
+        },
+        required: ["id", "user_ids", "role"],
+      },
+      handler: ({ id, ...p }) => post(`/events/${id}/staff`, p),
+    },
+
+    {
+      name: "makerble_update_event_staff_role",
+      description:
+        "Set or clear (event_role_id: null) the Event Role of one of an event's Event Managers or Workers. " +
+        "Returns the event as makerble_get_event does. Needs permission to edit the event.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          user_id: { type: "number" },
+          event_role_id: { type: ["number", "null"], description: "Event Role id for Event Managers and Workers, or null" },
+        },
+        required: ["id", "user_id", "event_role_id"],
+      },
+      handler: ({ id, user_id, ...p }) => patch(`/events/${id}/staff/${user_id}`, p),
+    },
+
+    {
+      name: "makerble_remove_event_staff",
+      description:
+        "Remove a user from an event's Event Managers and/or Workers (pass role to remove only one). At least " +
+        "one Event Manager must remain (422 otherwise). For a master event, apply_to 'all_events_in_series' " +
+        "removes them from the whole series. Returns the event as makerble_get_event does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          user_id: { type: "number" },
+          role: { type: "string", enum: ["manager", "worker"] },
+          apply_to: { type: "string", enum: ["this_event", "all_events_in_series"] },
+        },
+        required: ["id", "user_id"],
+      },
+      handler: ({ id, user_id, role, apply_to }) => del(`/events/${id}/staff/${user_id}${query({ role, apply_to })}`),
     },
 
     {

@@ -1,6 +1,6 @@
 # Makerble MCP Server — Vercel Deployment
 
-Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **115 tools** covering the full Makerble API.
+Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **124 tools** covering the full Makerble API.
 
 Non-technical users get their personal link from **`/connect`** — no curl, no config files, no tokens to hunt down.
 
@@ -11,7 +11,7 @@ Non-technical users get their personal link from **`/connect`** — no curl, no 
 | File | Purpose |
 |---|---|
 | `server.js` | Express HTTP server — routing, auth, /connect page |
-| `makerble-tools.js` | All 115 Makerble API tool definitions |
+| `makerble-tools.js` | All 124 Makerble API tool definitions |
 | `package.json` | Dependencies |
 | `vercel.json` | Vercel routing config |
 | `.gitignore` | Keeps secrets and node_modules out of git |
