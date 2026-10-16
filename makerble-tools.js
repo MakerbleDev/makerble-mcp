@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 113 Makerble MCP tool definitions.
+ * All 115 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2711,8 +2711,8 @@ export function buildTools(api) {
         "master event (the first of a recurring series), pass apply_to: 'all_events_in_series' to apply the " +
         "change to every event in the series (the default, 'this_event', changes only this one). Locked, as on " +
         "the Edit Event page: the Project, a series' time zone, and a master event's start and end times. " +
-        "Changing a series' Recurring Schedule or Recurring End Date isn't supported by this tool. Returns the " +
-        "event as makerble_get_event does; problems come back together as a 422 { errors: [...] }. Needs " +
+        "To change a series' Recurring Schedule or Recurring End Date, use makerble_change_event_series. " +
+        "Returns the event as makerble_get_event does; problems come back together as a 422 { errors: [...] }. Needs " +
         "permission to edit the event (403 otherwise).",
       inputSchema: {
         type: "object",
@@ -2734,6 +2734,55 @@ export function buildTools(api) {
           capacity: { type: "object", description: "{ guests: 'fixed'|'unlimited', max_guests, allow_signup_after_full, guest_status_after_full_id, confirmation_message_after_full, thank_you_message, workers: 'fixed'|'unlimited', max_workers, timesheets_for_workers, timesheets_for_guests }" },
           listing: { type: "object", description: "{ listing_enabled, description (HTML) } — the public event listing for Events Catalogues. Needs a Signup Page" },
           apply_to: { type: "string", enum: ["this_event", "all_events_in_series"], description: "For a master event: also change every event in its series" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => patch(`/events/${id}`, p),
+    },
+
+    {
+      name: "makerble_preview_event_series_change",
+      description:
+        "Preview what a new Recurring Schedule or Recurring End Date would do to a recurring series of " +
+        "events, without changing anything, as Makerble's Edit Event Series page shows before saving. Pass the " +
+        "id of the master event (the first event of the series; event_type 'master' in makerble_get_event). " +
+        "Leave out recurring_schedule or recurring_end_date to keep its current value. Returns " +
+        "recurring_schedule (with a plain-English description), recurring_end_date, required_dates (every " +
+        "date the new schedule needs, with event_id of the event already on it, or exists: false for one that " +
+        "would be created) and no_longer_fitting_events (events that don't fit the new schedule, with " +
+        "has_stories and has_timesheets). Step 1 of 2: show the user the no_longer_fitting_events, warn " +
+        "them about any with Stories or timesheets, ask which to keep and which to delete, then call " +
+        "makerble_change_event_series. Needs permission to edit the event (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The master event's id" },
+          recurring_schedule: { type: "object", description: "{ frequency: 'daily'|'weekly'|'monthly'|'yearly', interval (every N; default 1), days_of_week (weekly: e.g. ['tuesday']), days_of_month (monthly: e.g. [1, -1], -1 is the last day) }" },
+          recurring_end_date: { type: "string", description: "New Recurring End Date, YYYY-MM-DD" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => post(`/events/${id}/series_schedule_preview`, p),
+    },
+
+    {
+      name: "makerble_change_event_series",
+      description:
+        "Change a recurring series' Recurring Schedule and/or Recurring End Date, as Makerble's Edit Event " +
+        "Series page does. Step 2 of 2: call makerble_preview_event_series_change first with the same " +
+        "values. Every event in its no_longer_fitting_events must be listed in keep_event_ids or " +
+        "delete_event_ids (ask the user; deleting an event also deletes what is recorded against it), or " +
+        "nothing changes and you get a 422. Events for the new dates are created, and the series is " +
+        "renumbered in date order. Pass the master event's id. Returns the master event as makerble_get_event " +
+        "does. Needs permission to edit the event (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The master event's id" },
+          recurring_schedule: { type: "object", description: "{ frequency: 'daily'|'weekly'|'monthly'|'yearly', interval (every N; default 1), days_of_week (weekly: e.g. ['tuesday']), days_of_month (monthly: e.g. [1, -1], -1 is the last day) }" },
+          recurring_end_date: { type: "string", description: "New Recurring End Date, YYYY-MM-DD" },
+          keep_event_ids: { type: "array", items: { type: "number" }, description: "Events that no longer fit, to keep" },
+          delete_event_ids: { type: "array", items: { type: "number" }, description: "Events that no longer fit, to delete" },
         },
         required: ["id"],
       },
