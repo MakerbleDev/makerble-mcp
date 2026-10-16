@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 103 Makerble MCP tool definitions.
+ * All 111 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1103,6 +1103,187 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/custom_field_categories", p),
+    },
+
+    // ── Checklists ────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_checklists",
+      description:
+        "List an Organisation's Checklists. A Checklist is an ordered list of actions the Organisation " +
+        "expects to be done for each Contact (beneficiary), e.g. 'give them a Role', 'complete the Alpha " +
+        "Contact Form', 'invite them to an induction event'. Returns each Checklist's id, name, description " +
+        "and actions_count. Organisation editors and reporters, and its Project Managers, can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/checklists", p),
+    },
+
+    {
+      name: "makerble_get_checklist",
+      description:
+        "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
+        "which say what counts as done), the Projects that offer it with their assignment_mode " +
+        "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
+        "gets it) and how many Contacts have it.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/checklists/${id}`),
+    },
+
+    {
+      name: "makerble_list_checklist_action_types",
+      description:
+        "List the actions a Checklist can contain (e.g. add_role 'Add a role', complete_survey 'Complete a " +
+        "survey', invite_to_event 'Invite to an event') and, for each, the criteria_keys that say what " +
+        "counts as done. Call this before makerble_create_checklist. Criteria values are strings: IDs " +
+        "(beneficiary_role_ids, skill_ids, group_ids, flag_ids, beneficiary_category_ids = Contact Forms, " +
+        "custom_field_category_ids = Custom Forms for contacts, case_form_ids, label_ids) or pairs: " +
+        "relationship_sides '<relationship_category_id>:parent|child', project_states " +
+        "'<project_id>:<beneficiary_state_id>', project_event_categories '<project_id>:<event_category_id>', " +
+        "survey_waves '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
+        "campaign without Waves>'. The two 'for a relative' types take relatives: [{relationship_side, " +
+        "beneficiary_category_ids or survey_waves}], where the side is the relative's own (e.g. the Son). " +
+        "Action types with no criteria_keys are done by any record of the kind (e.g. create_task).",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/checklists/action_types"),
+    },
+
+    {
+      name: "makerble_create_checklist",
+      description:
+        "Create a Checklist for an Organisation. Requires an Organisation editor or reporter. Each action " +
+        "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
+        "(see makerble_list_checklist_action_types). Actions keep the order given." +
+        "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
+        "makerble_list_surveys, makerble_list_survey_campaigns, makerble_list_survey_waves, " +
+        "makerble_list_contact_bio_forms etc. (3) makerble_create_checklist. (4) " +
+        "makerble_set_checklist_project to offer it in Projects, by hand or automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string" },
+          description: { type: "string" },
+          actions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task" },
+                title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
+                description: { type: "string" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+              },
+              required: ["action_type"],
+            },
+          },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: ({ charity_id, ...checklist }) => post("/checklists", { charity_id, checklist }),
+    },
+
+    {
+      name: "makerble_update_checklist",
+      description:
+        "Update a Checklist's name, description or actions. Requires an Organisation editor or reporter. " +
+        "To change an action send its id with the new fields; to remove one send {id, _destroy: true}; " +
+        "actions without an id are added. Get the current actions with makerble_get_checklist first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          name: { type: "string" },
+          description: { type: "string" },
+          actions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number" },
+                _destroy: { type: "boolean" },
+                action_type: { type: "string" },
+                position: { type: "number" },
+                title: { type: "string" },
+                description: { type: "string" },
+                criteria: { type: "object" },
+              },
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...checklist }) => patch(`/checklists/${id}`, { checklist }),
+    },
+
+    {
+      name: "makerble_set_checklist_project",
+      description:
+        "Set how a Project offers a Checklist (the Add to Projects popup). mode 'manual': colleagues may " +
+        "add it to the Project's Contacts by hand. 'automatic': every Contact now in the Project gets it " +
+        "(in the background) and so does every Contact who later joins or is created in it. 'none': stop " +
+        "offering it; Contacts who already have it keep it. Requires an Organisation editor or the " +
+        "Project's Project Manager.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Checklist ID" },
+          project_id: { type: "number" },
+          mode: { type: "string", enum: ["none", "manual", "automatic"] },
+        },
+        required: ["id", "project_id", "mode"],
+      },
+      handler: ({ id, project_id, mode }) => patch(`/checklists/${id}/projects/${project_id}`, { mode }),
+    },
+
+    {
+      name: "makerble_get_contact_checklists",
+      description:
+        "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
+        "each, done_count of actions_count and every action with done true/false. Use it to see what still " +
+        "needs doing for a Contact. Only Contacts you can see are returned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+        },
+        required: ["beneficiary_id"],
+      },
+      handler: ({ beneficiary_id, ...p }) => get(`/beneficiaries/${beneficiary_id}/checklists`, p),
+    },
+
+    {
+      name: "makerble_add_checklist_to_contact",
+      description:
+        "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
+        "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
+        "first (returns [{id, name}] and adds nothing).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          list_available: { type: "boolean", description: "Only list the Checklists that can be added" },
+        },
+        required: ["beneficiary_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, list_available }) =>
+        list_available || !checklist_id
+          ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
+          : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
     },
 
     // ── Cohort Trackers ───────────────────────────────────────────────────────
