@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 111 Makerble MCP tool definitions.
+ * All 113 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2640,8 +2640,8 @@ export function buildTools(api) {
         "validation_hint (the rule a custom field's answer must follow) and, for a Dropdown (ratio set), " +
         "dropdown {choice: single_choice | unlimited_choice | limited_choice, choice_limit, options: [{id, " +
         "name}]} (options are answer choices / sub ratios); self_check_in {enabled, surveys, waves} — whether " +
-        "the format has Self Check-in (Kiosk) and the Project's Surveys (story categories; send " +
-        "project_story_category_id) and their Waves (send_survey_wave_id) to choose from; signup_pages [{id, " +
+        "the format has Self Check-in (Kiosk) and the Project's Surveys (story categories; send their " +
+        "project_story_category_id) and their Waves (send the wave's id as wave_id) to choose from; signup_pages [{id, " +
         "name}] — the Project's Signup Pages (referral link details) people can register through; " +
         "guest_statuses [{id, name}] — the Guest Statuses (event states) a Signup Page can put people into, " +
         "in order, the first being the default; event_roles {enabled, guests, event_managers_and_workers}. " +
@@ -2658,6 +2658,86 @@ export function buildTools(api) {
         required: ["project_id", "event_category_id"],
       },
       handler: ({ project_id, ...p }) => get(`/projects/${project_id}/event_form`, p),
+    },
+
+    {
+      name: "makerble_create_event",
+      description:
+        "Create an event — a session, class, appointment or other gathering — in a Project, as Makerble's " +
+        "Create Event form does. Workflow: (1) find a Project (makerble_list_projects); (2) list the Event " +
+        "Formats you can use there with makerble_list_project_event_formats (a 403 means the user can't create " +
+        "events in that Project); (3) get the form for the chosen format with makerble_get_event_form; (4) ask " +
+        "the user for the mandatory fields and any choices, then call this tool with the ids the form returned. " +
+        "For a recurring series pass recurring_schedule and recurring_end_date: Makerble creates the master " +
+        "event (the first of the series) and every subsequent event up to that date. The user becomes the Event " +
+        "Manager unless manager_ids is given. Every id is checked against the form, and all problems come back " +
+        "together as a 422 { errors: [...] } — fix them and try again. Returns the new event as makerble_get_event " +
+        "does. Not supported: an event image, and adding guests (Contacts) — add guests separately.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project the event belongs to" },
+          event_category_id: { type: "number", description: "The Event Format (event category), from makerble_list_project_event_formats" },
+          name: { type: "string" },
+          start_datetime: { type: "string", description: "ISO 8601, e.g. 2030-01-08T18:00. Without an offset it is a local time in timezone" },
+          end_datetime: { type: "string", description: "ISO 8601, after start_datetime" },
+          timezone: { type: "string", description: "IANA time zone name, e.g. Europe/London. Defaults to the user's. Daylight saving is handled by Makerble" },
+          location: { type: "string" },
+          custom_fields: { type: "object", description: "Custom field id => value, using field_id from makerble_get_event_form. Dates YYYY-MM-DD, times HH:MM, tickboxes true/false" },
+          dropdowns: { type: "object", description: "Dropdown (ratio set) id => array of answer choice (sub ratio) ids, within the Dropdown's choice rule" },
+          manager_ids: { type: "array", items: { type: "number" }, description: "Event Managers (user ids of colleagues in the Project or organisation). At least one" },
+          worker_ids: { type: "array", items: { type: "number" }, description: "Event Workers (user ids of colleagues in the Project or organisation)" },
+          signup_page_id: { type: ["number", "null"], description: "A Signup Page (referral link detail) from the form's signup_pages, or null for none" },
+          guest_status_for_signup_id: { type: "number", description: "Guest Status (event state) for people who sign up while there is space; from the form's guest_statuses" },
+          self_check_in: { type: ["object", "null"], description: "{ project_story_category_id, wave_id } from the form's self_check_in surveys and waves, or null for none. Only when the Event Format has Self Check-in on" },
+          capacity: { type: "object", description: "{ guests: 'fixed'|'unlimited', max_guests, allow_signup_after_full, guest_status_after_full_id, confirmation_message_after_full, thank_you_message, workers: 'fixed'|'unlimited', max_workers, timesheets_for_workers, timesheets_for_guests }" },
+          listing: { type: "object", description: "{ listing_enabled, description (HTML) } — the public event listing for Events Catalogues. Needs a Signup Page" },
+          recurring_schedule: {
+            type: "object",
+            description: "For a recurring series: { frequency: 'daily'|'weekly'|'monthly'|'yearly', interval (default 1), days_of_week: ['tuesday', ...] for weekly, days_of_month: [1, 15, -1 for last] for monthly }",
+          },
+          recurring_end_date: { type: "string", description: "YYYY-MM-DD, the last day of the series. Required with recurring_schedule" },
+        },
+        required: ["project_id", "event_category_id", "name", "start_datetime", "end_datetime"],
+      },
+      handler: (p) => post("/events", p),
+    },
+
+    {
+      name: "makerble_update_event",
+      description:
+        "Change an event, as Makerble's Edit Event page does. Only the fields you pass change; Dropdowns you " +
+        "don't mention keep their answers. Get valid ids from makerble_get_event_form with event_id. For a " +
+        "master event (the first of a recurring series), pass apply_to: 'all_events_in_series' to apply the " +
+        "change to every event in the series (the default, 'this_event', changes only this one). Locked, as on " +
+        "the Edit Event page: the Project, a series' time zone, and a master event's start and end times. " +
+        "Changing a series' Recurring Schedule or Recurring End Date isn't supported by this tool. Returns the " +
+        "event as makerble_get_event does; problems come back together as a 422 { errors: [...] }. Needs " +
+        "permission to edit the event (403 otherwise).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          event_category_id: { type: "number", description: "A different Event Format, from makerble_list_project_event_formats" },
+          name: { type: "string" },
+          start_datetime: { type: "string", description: "ISO 8601, e.g. 2030-01-08T18:00. Without an offset it is a local time in timezone" },
+          end_datetime: { type: "string", description: "ISO 8601, after start_datetime" },
+          timezone: { type: "string", description: "IANA time zone name, e.g. Europe/London. Defaults to the user's. Daylight saving is handled by Makerble" },
+          location: { type: "string" },
+          custom_fields: { type: "object", description: "Custom field id => value, using field_id from makerble_get_event_form. Dates YYYY-MM-DD, times HH:MM, tickboxes true/false" },
+          dropdowns: { type: "object", description: "Dropdown (ratio set) id => array of answer choice (sub ratio) ids, within the Dropdown's choice rule" },
+          manager_ids: { type: "array", items: { type: "number" }, description: "Event Managers (user ids of colleagues in the Project or organisation). At least one" },
+          worker_ids: { type: "array", items: { type: "number" }, description: "Event Workers (user ids of colleagues in the Project or organisation)" },
+          signup_page_id: { type: ["number", "null"], description: "A Signup Page (referral link detail) from the form's signup_pages, or null for none" },
+          guest_status_for_signup_id: { type: "number", description: "Guest Status (event state) for people who sign up while there is space; from the form's guest_statuses" },
+          self_check_in: { type: ["object", "null"], description: "{ project_story_category_id, wave_id } from the form's self_check_in surveys and waves, or null for none. Only when the Event Format has Self Check-in on" },
+          capacity: { type: "object", description: "{ guests: 'fixed'|'unlimited', max_guests, allow_signup_after_full, guest_status_after_full_id, confirmation_message_after_full, thank_you_message, workers: 'fixed'|'unlimited', max_workers, timesheets_for_workers, timesheets_for_guests }" },
+          listing: { type: "object", description: "{ listing_enabled, description (HTML) } — the public event listing for Events Catalogues. Needs a Signup Page" },
+          apply_to: { type: "string", enum: ["this_event", "all_events_in_series"], description: "For a master event: also change every event in its series" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => patch(`/events/${id}`, p),
     },
 
     {
