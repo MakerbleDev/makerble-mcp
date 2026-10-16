@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 99 Makerble MCP tool definitions.
+ * All 101 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2366,6 +2366,65 @@ export function buildTools(api) {
     },
 
     // ── Event Formats ──────────────────────────────────────────────────────────
+    // ── Events ─────────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_events",
+      description:
+        "List the events the user can see, soonest first — the same events as Makerble's Manage Events " +
+        "page. An event is a session, class, appointment or other gathering run within a Project. A recurring " +
+        "series of events starts with a 'master' event followed by its 'subsequent' events; one-off events " +
+        "have event_type 'one-off'. Organisation Admins see every event in their organisation; other users see " +
+        "the events of projects they edit and events they are an Event Manager or Event Worker at. " +
+        "Filters: charity_id (one organisation), project_id, event_category_id (Event Format, e.g. Workshops — " +
+        "find ids with makerble_list_event_formats), event_type, start_date / end_date (YYYY-MM-DD; the event " +
+        "starts between them), master_event_id (every event in one recurring series). Each item returns id, " +
+        "name, start_datetime, end_datetime, timezone, location, event_type, master_event_id, project {id, name}, " +
+        "event_category {id, name} (the Event Format), guests_count (guests are Contacts), managers_count and " +
+        "workers_count. Use makerble_get_event for an event's full details. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this Organisation's (Charity's) events" },
+          project_id: { type: "number", description: "Only this Project's events" },
+          event_category_id: { type: "number", description: "Only events of this Event Format (event_category)" },
+          event_type: { type: "string", enum: ["one-off", "master", "subsequent"], description: "master = first event of a recurring series; subsequent = the rest of the series" },
+          start_date: { type: "string", description: "Only events starting on or after this date (YYYY-MM-DD)" },
+          end_date: { type: "string", description: "Only events starting on or before this date (YYYY-MM-DD)" },
+          master_event_id: { type: "number", description: "Only the events of the recurring series this master event starts" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Events per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only events changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/events", p),
+    },
+
+    {
+      name: "makerble_get_event",
+      description:
+        "Get one event's full details, as shown on its event page and Edit Event page in Makerble. Returns the " +
+        "fields from makerble_list_events plus: can_edit and can_delete (whether this user may change or delete " +
+        "it); for a master event (the first of a recurring series) recurring_schedule {rule, description} such as " +
+        "'Weekly on Tuesdays', recurring_end_date and series_events_count; custom_fields [{id, name, value}] and " +
+        "dropdowns [{id, name, answer_choices: [{id, name}]}] from its Event Format (Dropdown = ratio set, answer " +
+        "choice = sub ratio); signup_page {id, name} (the Signup Page / referral link detail people register " +
+        "through); self_check_in {survey, wave} (the Survey / story category guests answer when they check " +
+        "themselves in, also called Kiosk); capacity (guest and worker limits, whether sign-up continues once " +
+        "the event is full, the Guest Status ids (event states) new sign-ups get, messages, timesheet settings); " +
+        "listing (whether it appears in Events Catalogues, location, description, image); and links " +
+        "{self_check_in, signup, signup_and_self_check_in} — web addresses to share with guests, null when the " +
+        "event has no such page. A user who can't see the event gets 403; another organisation's event, 404.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/events/${id}`),
+    },
+
     {
       name: "makerble_list_event_formats",
       description:
