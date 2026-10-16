@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 106 Makerble MCP tool definitions.
+ * All 111 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2547,6 +2547,144 @@ export function buildTools(api) {
     },
 
     // ── Event Formats ──────────────────────────────────────────────────────────
+    // ── Events ─────────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_events",
+      description:
+        "List the events the user can see, soonest first — the same events as Makerble's Manage Events " +
+        "page. An event is a session, class, appointment or other gathering run within a Project. A recurring " +
+        "series of events starts with a 'master' event followed by its 'subsequent' events; one-off events " +
+        "have event_type 'one-off'. Organisation Admins see every event in their organisation; other users see " +
+        "the events of projects they edit and events they are an Event Manager or Event Worker at. " +
+        "Filters: charity_id (one organisation), project_id, event_category_id (Event Format, e.g. Workshops — " +
+        "find ids with makerble_list_event_formats), event_type, start_date / end_date (YYYY-MM-DD; the event " +
+        "starts between them), master_event_id (every event in one recurring series). Each item returns id, " +
+        "name, start_datetime, end_datetime, timezone, location, event_type, master_event_id, project {id, name}, " +
+        "event_category {id, name} (the Event Format), guests_count (guests are Contacts), managers_count and " +
+        "workers_count. Use makerble_get_event for an event's full details. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this Organisation's (Charity's) events" },
+          project_id: { type: "number", description: "Only this Project's events" },
+          event_category_id: { type: "number", description: "Only events of this Event Format (event_category)" },
+          event_type: { type: "string", enum: ["one-off", "master", "subsequent"], description: "master = first event of a recurring series; subsequent = the rest of the series" },
+          start_date: { type: "string", description: "Only events starting on or after this date (YYYY-MM-DD)" },
+          end_date: { type: "string", description: "Only events starting on or before this date (YYYY-MM-DD)" },
+          master_event_id: { type: "number", description: "Only the events of the recurring series this master event starts" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Events per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only events changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/events", p),
+    },
+
+    {
+      name: "makerble_get_event",
+      description:
+        "Get one event's full details, as shown on its event page and Edit Event page in Makerble. Returns the " +
+        "fields from makerble_list_events plus: can_edit and can_delete (whether this user may change or delete " +
+        "it); for a master event (the first of a recurring series) recurring_schedule {rule, description} such as " +
+        "'Weekly on Tuesdays', recurring_end_date and series_events_count; custom_fields [{id, name, value}] and " +
+        "dropdowns [{id, name, answer_choices: [{id, name}]}] from its Event Format (Dropdown = ratio set, answer " +
+        "choice = sub ratio); signup_page {id, name} (the Signup Page / referral link detail people register " +
+        "through); self_check_in {survey, wave} (the Survey / story category guests answer when they check " +
+        "themselves in, also called Kiosk); capacity (guest and worker limits, whether sign-up continues once " +
+        "the event is full, the Guest Status ids (event states) new sign-ups get, messages, timesheet settings); " +
+        "listing (whether it appears in Events Catalogues, location, description, image); and links " +
+        "{self_check_in, signup, signup_and_self_check_in} — web addresses to share with guests, null when the " +
+        "event has no such page. A user who can't see the event gets 403; another organisation's event, 404.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/events/${id}`),
+    },
+
+    {
+      name: "makerble_list_project_event_formats",
+      description:
+        "List the Event Formats (event_category in the API) a user can create events with in one Project — " +
+        "the formats Makerble's Create Event form offers for that Project. An Event Format is a template for " +
+        "events, e.g. Workshops or Drop-in Sessions. This is also how to find out whether the user may create " +
+        "events in the Project: if they can't (the Project has events turned off, or they aren't an " +
+        "Organisation Admin, a Project Manager, or a Project Reporter / Observer chosen as an Event Creator), " +
+        "it returns 403. Each item returns id, name and is_default. First step of creating an event: pick a " +
+        "format here, then call makerble_get_event_form with its id. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project the event will belong to" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Event Formats per page. Default 10, max 200" },
+        },
+        required: ["project_id"],
+      },
+      handler: ({ project_id, ...p }) => get(`/projects/${project_id}/event_categories`, p),
+    },
+
+    {
+      name: "makerble_get_event_form",
+      description:
+        "Get everything Makerble's Create Event (or Edit Event) form offers once an Event Format is chosen in a " +
+        "Project, so you know what to ask the user and which ids to send when creating or editing the event. " +
+        "Returns: fields — the format's fields in order, each with name, kind ('event_attribute' for name / " +
+        "start_datetime / end_datetime, 'custom_field', or 'dropdown'), field_id (the custom field or Dropdown " +
+        "id), data_type (e.g. text, number, date, tickbox, ward, datetime, dropdown), mandatory, " +
+        "validation_hint (the rule a custom field's answer must follow) and, for a Dropdown (ratio set), " +
+        "dropdown {choice: single_choice | unlimited_choice | limited_choice, choice_limit, options: [{id, " +
+        "name}]} (options are answer choices / sub ratios); self_check_in {enabled, surveys, waves} — whether " +
+        "the format has Self Check-in (Kiosk) and the Project's Surveys (story categories; send " +
+        "project_story_category_id) and their Waves (send_survey_wave_id) to choose from; signup_pages [{id, " +
+        "name}] — the Project's Signup Pages (referral link details) people can register through; " +
+        "guest_statuses [{id, name}] — the Guest Statuses (event states) a Signup Page can put people into, " +
+        "in order, the first being the default; event_roles {enabled, guests, event_managers_and_workers}. " +
+        "Workflow: makerble_list_project_event_formats → this tool → create the event. Pass event_id to get " +
+        "the Edit Event form for an existing event. Returns 403 if the user can't create events in the " +
+        "Project (or can't edit the event), 404 if the Event Format isn't available in the Project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project the event belongs to" },
+          event_category_id: { type: "number", description: "The chosen Event Format id, from makerble_list_project_event_formats" },
+          event_id: { type: "number", description: "Only when editing: the event being edited" },
+        },
+        required: ["project_id", "event_category_id"],
+      },
+      handler: ({ project_id, ...p }) => get(`/projects/${project_id}/event_form`, p),
+    },
+
+    {
+      name: "makerble_list_event_formats",
+      description:
+        "List the Event Formats (called Event Category / event_category in the API) of the " +
+        "organisations the user is an Organisation Admin of. An Event Format is a template for events " +
+        "— e.g. Workshops, Classes, Meetings — managed on an organisation's Manage Event Formats page. " +
+        "Only Organisation Admins can see this list: anyone else gets 403 'Only an Organisation Admin " +
+        "can list Event Formats.' Pass charity_id to list one organisation's formats. " +
+        "Each item returns id, name, is_default (one of the formats every organisation starts with), " +
+        "charity_id, events_count (events using it), projects_count (projects it is added to), " +
+        "can_delete and delete_blocked_reason (why it can't be deleted yet, or null). Use it to find the " +
+        "id for makerble_delete_event_format and to tell the user beforehand whether deletion will work. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this Organisation's (Charity's) Event Formats" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Event Formats per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Event Formats changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/event_categories", p),
+    },
+
     {
       name: "makerble_delete_event_format",
       description:
@@ -2557,9 +2695,9 @@ export function buildTools(api) {
         "the Event Format still has any events, or is still added to any project: the user must first " +
         "delete or move those events, or remove the Event Format from those projects, in Makerble. " +
         "Default formats (Appointments, Classes, Conferences, Gatherings, Meetings, Other Events, " +
-        "Sessions, Workshops) can be deleted under the same rules. Ask the user for the Event Format's " +
-        "id (it is in the URL of its Edit Settings page: /charities/<org id>/event_categories/<id>/edit) " +
-        "and confirm with them before calling, because this cannot be undone. " +
+        "Sessions, Workshops) can be deleted under the same rules. Find the id with makerble_list_event_formats, " +
+        "which also says whether the Event Format can be deleted and why not, and confirm with the user " +
+        "before calling, because this cannot be undone. " +
         "Returns { id, message } on success.",
       inputSchema: {
         type: "object",
