@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 124 Makerble MCP tool definitions.
+ * All 127 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3193,6 +3193,81 @@ export function buildTools(api) {
         required: ["id", "delivery_id"],
       },
       handler: ({ id, delivery_id }) => post(`/webhook_endpoints/${id}/deliveries/${delivery_id}/replay`),
+    },
+
+    {
+      name: "makerble_search_library",
+      description:
+        "Search the library of reusable building blocks before making a new one: Surveys, Metrics, Activity " +
+        "trackers, Outcomes, Lists of answer choices, Units, Fields, Contact Forms, Case Forms, Impact " +
+        "Frameworks, Toolkits, Project Types and Ideas. Look here first and reuse what exists: results recorded " +
+        "against a copy of a Metric don't add up with results recorded against the original. Every word of the " +
+        "query must match a name or description; Surveys also match on their question wording, Lists on their " +
+        "choices and Metrics on their default question (so 'safe at home' finds a Survey asking 'How safe do " +
+        "you feel at home?'). source is 'organisation' (default, the user's own organisation's library), " +
+        "'public' (the public library shared by every organisation) or 'both'. Returns up to per_page results " +
+        "of each type, each with id, type, name, a one-line description and owner ('your organisation', " +
+        "'public library' or 'Makerble'); Metrics also have metric_type (scale, value or binary) and choices, " +
+        "Lists have choices. Then use makerble_get_library_item to read an item in full, and " +
+        "makerble_get_where_used before changing one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "What you are looking for, e.g. 'confidence', 'agree disagree'" },
+          item_types: {
+            type: "array",
+            items: { type: "string" },
+            description: "Types to search (default every type), any of: survey (Survey, a Story Category), metric (Metric, an Indicator), activity_tracker (Activity or Attendance tracker, a Change), outcome, list (List of answer choices, a Ratio Set), unit, field (Field, a Custom Field), contact_form (Contact Form, a Beneficiary Category), case_form (Case Form, a Custom Field Category), impact_framework (Impact Framework, a Template), toolkit (Toolkit, a Collection), project_type, idea (Idea, a Tip)",
+          },
+          source: { type: "string", enum: ["organisation", "public", "both"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Results per type (default 10, max 200)" },
+        },
+        required: ["query"],
+      },
+      handler: (p) => get("/library/search", p),
+    },
+
+    {
+      name: "makerble_get_library_item",
+      description:
+        "Read one library item in full, to reuse it or copy it. Use the type and id from " +
+        "makerble_search_library. A Survey returns its questions in order, each with the Metric, List, Field or " +
+        "Activity tracker behind it, plus section titles. A Metric returns metric_type, default_question, unit, " +
+        "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
+        "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
+        "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
+        "Returns 404 for anything the user may not see.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          item_type: { type: "string", description: "The item's type, one of: survey (Survey, a Story Category), metric (Metric, an Indicator), activity_tracker (Activity or Attendance tracker, a Change), outcome, list (List of answer choices, a Ratio Set), unit, field (Field, a Custom Field), contact_form (Contact Form, a Beneficiary Category), case_form (Case Form, a Custom Field Category), impact_framework (Impact Framework, a Template), toolkit (Toolkit, a Collection), project_type, idea (Idea, a Tip)" },
+          id: { type: "number" },
+        },
+        required: ["item_type", "id"],
+      },
+      handler: ({ item_type, id }) => get(`/library/${encodeURIComponent(item_type)}/${id}`),
+    },
+
+    {
+      name: "makerble_get_where_used",
+      description:
+        "See where a library item is used before changing it. Use the type and id from " +
+        "makerble_search_library. Returns projects (id and name of up to 50 projects the user can see that use " +
+        "it) and other_projects_count, records_count and last_used_at (survey responses for a Survey; recorded " +
+        "values for a Metric, Activity tracker, Outcome or List; Contacts for a Contact Form; Cases for a Case " +
+        "Form), contained_in (the Surveys, Contact Forms, Outcomes, Impact Frameworks, Metrics or Toolkits that " +
+        "include it) and in_use, true if any of these is above zero. Don't change an item that is in_use unless " +
+        "the user created it for this task; make a new one instead. Counts only, no records.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          item_type: { type: "string", description: "The item's type, one of: survey (Survey, a Story Category), metric (Metric, an Indicator), activity_tracker (Activity or Attendance tracker, a Change), outcome, list (List of answer choices, a Ratio Set), unit, field (Field, a Custom Field), contact_form (Contact Form, a Beneficiary Category), case_form (Case Form, a Custom Field Category), impact_framework (Impact Framework, a Template), toolkit (Toolkit, a Collection), project_type, idea (Idea, a Tip)" },
+          id: { type: "number" },
+        },
+        required: ["item_type", "id"],
+      },
+      handler: ({ item_type, id }) => get(`/library/${encodeURIComponent(item_type)}/${id}/usage`),
     },
   ];
 }
