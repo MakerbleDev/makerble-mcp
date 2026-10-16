@@ -2823,11 +2823,13 @@ export function buildTools(api) {
         "List an event's guests (Contacts / beneficiaries), by name, with each one's Guest Status (event state) " +
         "and, when the Event Format has Event Roles turned on, Event Role. Returns { page, page_size, " +
         "page_count, total_count, data: [{ contact_id, name, guest_status: {id, name}, event_role: {id, name} " +
-        "or null, added_at, updated_at }] }. Anyone who can open the event page can see them.",
+        "or null, added_at, updated_at }] }. Anyone who can open the event page can see them. To find one " +
+        "guest, pass search: part of their name or Contact ID; it searches every page, not only the one returned.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The event id" },
+          search: { type: "string", description: "Part of a guest's name or Contact ID (the prefix and leading zeros of a Contact ID are ignored)" },
           page: { type: "number" },
           per_page: { type: "number", description: "Guests per page. Default 10, max 200" },
           last_synced_datetime: { type: "string", description: "Only guests added or changed after this ISO 8601 time" },
