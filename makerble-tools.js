@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 97 Makerble MCP tool definitions.
+ * All 99 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2367,6 +2367,31 @@ export function buildTools(api) {
 
     // ── Event Formats ──────────────────────────────────────────────────────────
     {
+      name: "makerble_list_event_formats",
+      description:
+        "List the Event Formats (called Event Category / event_category in the API) of the " +
+        "organisations the user is an Organisation Admin of. An Event Format is a template for events " +
+        "— e.g. Workshops, Classes, Meetings — managed on an organisation's Manage Event Formats page. " +
+        "Only Organisation Admins can see this list: anyone else gets 403 'Only an Organisation Admin " +
+        "can list Event Formats.' Pass charity_id to list one organisation's formats. " +
+        "Each item returns id, name, is_default (one of the formats every organisation starts with), " +
+        "charity_id, events_count (events using it), projects_count (projects it is added to), " +
+        "can_delete and delete_blocked_reason (why it can't be deleted yet, or null). Use it to find the " +
+        "id for makerble_delete_event_format and to tell the user beforehand whether deletion will work. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this Organisation's (Charity's) Event Formats" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Event Formats per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Event Formats changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/event_categories", p),
+    },
+
+    {
       name: "makerble_delete_event_format",
       description:
         "Permanently delete an Event Format (called Event Category / event_category in the API). " +
@@ -2376,9 +2401,9 @@ export function buildTools(api) {
         "the Event Format still has any events, or is still added to any project: the user must first " +
         "delete or move those events, or remove the Event Format from those projects, in Makerble. " +
         "Default formats (Appointments, Classes, Conferences, Gatherings, Meetings, Other Events, " +
-        "Sessions, Workshops) can be deleted under the same rules. Ask the user for the Event Format's " +
-        "id (it is in the URL of its Edit Settings page: /charities/<org id>/event_categories/<id>/edit) " +
-        "and confirm with them before calling, because this cannot be undone. " +
+        "Sessions, Workshops) can be deleted under the same rules. Find the id with makerble_list_event_formats, " +
+        "which also says whether the Event Format can be deleted and why not, and confirm with the user " +
+        "before calling, because this cannot be undone. " +
         "Returns { id, message } on success.",
       inputSchema: {
         type: "object",
