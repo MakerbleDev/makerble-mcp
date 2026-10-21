@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 127 Makerble MCP tool definitions.
+ * All 130 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2137,6 +2137,74 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/outcome_indicators", p),
+    },
+
+    // ── Add metric to (CP-559) ───────────────────────────────────────────────
+    {
+      name: "makerble_list_metric_destinations",
+      description:
+        "Where a metric can be added: the options of the Add metric to popup in the Makerble app. " +
+        "A metric is a Change (activity or participation KPI), an Outcome or an Indicator. " +
+        "Without destination, returns the destination types offered for the metric, e.g. [{key: 'projects', label: 'Projects'}]. " +
+        "An Indicator is never added to a Project directly, only through one of its Outcomes, so it has no Projects option. " +
+        "With destination (e.g. 'projects'), returns a page of the places of that type you can add the metric to, each with " +
+        "added: true if the metric is already there. For projects, these are the open Projects whose metrics you can edit, " +
+        "with their Organisation. Use before makerble_add_metric_to or makerble_remove_metric_from to find the target_id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
+          metric_id: { type: "number" },
+          destination: { type: "string", description: "A key from the list of destination types, e.g. 'projects'" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+        required: ["metric_type", "metric_id"],
+      },
+      handler: ({ metric_type, metric_id, destination, ...params }) =>
+        get(`/metrics/${metric_type}/${metric_id}/destinations${destination ? `/${destination}` : ""}`, params),
+    },
+
+    {
+      name: "makerble_add_metric_to",
+      description:
+        "Add a metric (Change or Outcome) to a Project, the same as Add metric to > Projects in the Makerble app or " +
+        "adding it on Edit Project Metrics. The metric goes in the Impact Scorecard column of its own stage, after the " +
+        "metrics already there; it is also added to the Project's Default Survey and, if the Organisation uses one, its " +
+        "default Progress Board. Requires rights to edit the Project's metrics. " +
+        "Workflow: (1) makerble_list_metric_destinations with destination 'projects' to find the Project's id (target_id) " +
+        "and check it isn't already added. (2) makerble_add_metric_to. Returns {added: true}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
+          metric_id: { type: "number" },
+          destination: { type: "string", description: "The destination type, e.g. 'projects'" },
+          target_id: { type: "number", description: "The id of the Project (or other destination) to add it to" },
+        },
+        required: ["metric_type", "metric_id", "destination", "target_id"],
+      },
+      handler: ({ metric_type, metric_id, destination, target_id }) =>
+        post(`/metrics/${metric_type}/${metric_id}/destinations/${destination}/${target_id}`),
+    },
+
+    {
+      name: "makerble_remove_metric_from",
+      description:
+        "Remove a metric (Change or Outcome) from a Project, the same as Remove from project in the Add metric to popup. " +
+        "Requires rights to edit the Project's metrics. Stories already recorded against the metric are kept. Returns {added: false}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
+          metric_id: { type: "number" },
+          destination: { type: "string", description: "The destination type, e.g. 'projects'" },
+          target_id: { type: "number", description: "The id of the Project (or other destination) to remove it from" },
+        },
+        required: ["metric_type", "metric_id", "destination", "target_id"],
+      },
+      handler: ({ metric_type, metric_id, destination, target_id }) =>
+        del(`/metrics/${metric_type}/${metric_id}/destinations/${destination}/${target_id}`),
     },
 
     // ── Story metric sub-resources ─────────────────────────────────────────────
