@@ -375,11 +375,13 @@ export function buildTools(api) {
       name: "makerble_list_versions",
       description:
         "List the Versions (audit trail) of one record: every time it was created or edited, " +
-        "who did it and when, newest first. Use this to answer 'who changed this Contact, and when?'. " +
-        "Only Contacts (Beneficiaries) are versioned so far, so record_type must be \"Contact\". " +
-        "Find the Contact's ID first with makerble_list_contacts. " +
-        "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Versions; " +
-        "anything else returns not-found. " +
+        "who did it and when, newest first. Use this to answer 'who changed this Contact or Story, and when?'. " +
+        "record_type is \"Contact\" (a Contact, API: Beneficiary; find its ID with makerble_list_contacts) or " +
+        "\"Story\" (a Story or Survey Response; find its ID with makerble_list_stories). " +
+        "A Story is named \"[story ID] <survey> in <project> by <user> on <date happened>\". " +
+        "Only Charity Editors (any Contact or Story in the organisation) and Project Editors (Contacts in their projects, and " +
+        "Stories in their projects that they may read: a Story shared only with specific individuals is hidden unless they are one) " +
+        "can see Versions; anything else returns not-found. A deleted record's Versions stay listed, with record.deleted true. " +
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
         "data: [{id, event, action (Created/Edited/Destroyed), user_id, user_name (\"System\" for background jobs such as CSV imports), created_at}]}. " +
         "One Save can write several Versions a fraction of a second apart. " +
@@ -387,8 +389,12 @@ export function buildTools(api) {
       inputSchema: {
         type: "object",
         properties: {
-          record_type: { type: "string", enum: ["Contact"], description: "Type of record. Only \"Contact\" for now." },
-          record_id: { type: "number", description: "The Contact (Beneficiary) ID." },
+          record_type: {
+            type: "string",
+            enum: ["Contact", "Story"],
+            description: "\"Contact\" (Beneficiary) or \"Story\" (a Story or Survey Response).",
+          },
+          record_id: { type: "number", description: "The Contact (Beneficiary) ID or the Story ID." },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200." },
           last_sync_datetime: { type: "string", description: "Only Versions created after this ISO 8601 datetime." },
@@ -407,17 +413,20 @@ export function buildTools(api) {
         "Entries older than the organisation's retention period (3 to 12 months, set on Organisation Preferences) are rolled up into " +
         "one entry per colleague per month with monthly_summary: true, first_viewed_at and last_viewed_at spanning that month. " +
         "source is \"web\" (opened in Makerble), \"api\" (fetched through the API) or \"mcp\" (fetched through this MCP server, " +
-        "for example by makerble_get_contact). Only Contacts (Beneficiaries) are available so far, so record_type must be \"Contact\". " +
-        "Find the Contact's ID first with makerble_list_contacts. " +
-        "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Access Logs; " +
-        "anything else returns not-found. " +
+        "for example by makerble_get_contact). record_type is \"Contact\" (find its ID with makerble_list_contacts) or " +
+        "\"Story\" (a Story or Survey Response; find its ID with makerble_list_stories). " +
+        "Same permissions as makerble_list_versions; anything else returns not-found. " +
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
         "data: [{id, action (\"Viewed ×N\"), view_count, source, user_id, user_name, first_viewed_at, last_viewed_at, monthly_summary}]}.",
       inputSchema: {
         type: "object",
         properties: {
-          record_type: { type: "string", enum: ["Contact"], description: "Type of record. Only \"Contact\" for now." },
-          record_id: { type: "number", description: "The Contact (Beneficiary) ID." },
+          record_type: {
+            type: "string",
+            enum: ["Contact", "Story"],
+            description: "\"Contact\" (Beneficiary) or \"Story\" (a Story or Survey Response).",
+          },
+          record_id: { type: "number", description: "The Contact (Beneficiary) ID or the Story ID." },
           from: { type: "string", description: "Only entries on or after this date (YYYY-MM-DD)." },
           to: { type: "string", description: "Only entries on or before this date (YYYY-MM-DD)." },
           user_id: { type: "number", description: "Only this colleague's views (a user ID from makerble_list_users)." },
@@ -478,6 +487,9 @@ export function buildTools(api) {
       description:
         "Get one Version (audit-trail entry) by ID, including full_object: a complete snapshot of every field " +
         "of the record as it was saved at that moment (not just the fields that changed). " +
+        "For a Story, full_object is {schema_version, story (the Story's own fields), privacy_settings, contact_ids, " +
+        "outcome_ids, label_ids, media, answers: [{kind, field_id, label, contact_id, sub_ratio_id, sub_ratio_label, value}]}, " +
+        "so a survey question keeps the label it had then. " +
         "Compare two Versions' full_object to see exactly what changed between them. " +
         "Get Version IDs from makerble_list_versions. Same permissions as makerble_list_versions.",
       inputSchema: {
