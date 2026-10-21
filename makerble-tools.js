@@ -1474,7 +1474,8 @@ export function buildTools(api) {
         "(2) makerble_create_cohort_tracker. (3) makerble_add_cohort_tracker_to_project to place it in " +
         "a column of a Project's Impact Scorecard, optionally with a target. Albums pick it up from " +
         "their Projects automatically. To show the result as a percentage (e.g. '68% Children attending " +
-        "75%+', shown with '34 of 50 contacts in this project'), set result_type 'percentage' and a denominator.",
+        "75%+', shown with '34 of 50 contacts in this project'), set result_type 'percentage' and a denominator; " +
+        "for a percentage of some of the members (e.g. of the girls), use denominator 'filtered' with denominator_criteria.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1490,12 +1491,20 @@ export function buildTools(api) {
           },
           denominator: {
             type: "string",
-            enum: ["members", "enough_data"],
+            enum: ["members", "enough_data", "filtered"],
             description:
-              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album) or " +
+              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album), " +
               "'enough_data' (Contacts with enough data: invited to an event for Attendance Rate, two or more " +
-              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion). " +
+              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion), or " +
+              "'filtered' (members who also meet denominator_criteria, e.g. 'of the girls in this project'). " +
               "'enough_data' is recommended for improvement or attendance, so Contacts without data don't lower it",
+          },
+          denominator_criteria: {
+            type: "object",
+            description:
+              "Required when denominator is 'filtered': Contact Filter criteria, the same keys as criteria " +
+              "(check them with makerble_preview_cohort_tracker), for the Contacts the percentage is out of. " +
+              "Ignored and cleared for any other denominator",
           },
         },
         required: ["charity_id", "name"],
@@ -1507,7 +1516,8 @@ export function buildTools(api) {
     {
       name: "makerble_update_cohort_tracker",
       description:
-        "Update a Cohort Tracker's name, description, membership, criteria, result_type or denominator. Only " +
+        "Update a Cohort Tracker's name, description, membership, criteria, result_type, denominator or " +
+        "denominator_criteria. Only " +
         "the fields sent change. Changes apply everywhere it is used (see makerble_get_cohort_tracker usage). " +
         "Requires an Organisation editor, or the reporter who created it. Switching result_type between " +
         "'number' and 'percentage' CLEARS all the tracker's targets on every Project and Album, so the API " +
@@ -1528,12 +1538,20 @@ export function buildTools(api) {
           },
           denominator: {
             type: "string",
-            enum: ["members", "enough_data"],
+            enum: ["members", "enough_data", "filtered"],
             description:
-              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album) or " +
+              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album), " +
               "'enough_data' (Contacts with enough data: invited to an event for Attendance Rate, two or more " +
-              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion). " +
+              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion), or " +
+              "'filtered' (members who also meet denominator_criteria, e.g. 'of the girls in this project'). " +
               "'enough_data' is recommended for improvement or attendance, so Contacts without data don't lower it",
+          },
+          denominator_criteria: {
+            type: "object",
+            description:
+              "Required when denominator is 'filtered': Contact Filter criteria, the same keys as criteria " +
+              "(check them with makerble_preview_cohort_tracker), for the Contacts the percentage is out of. " +
+              "Ignored and cleared for any other denominator",
           },
           confirm_clear_targets: {
             type: "boolean",
