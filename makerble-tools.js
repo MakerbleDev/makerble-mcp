@@ -2146,18 +2146,19 @@ export function buildTools(api) {
         "Where a metric can be added: the options of the Add metric to popup in the Makerble app. " +
         "A metric is a Change (activity or participation KPI), an Outcome or an Indicator. " +
         "Without destination, returns the destination types offered for the metric, e.g. " +
-        "[{key: 'projects', label: 'Projects'}, {key: 'impact_frameworks', label: 'Impact Frameworks'}]. " +
+        "[{key: 'projects', label: 'Projects'}, {key: 'impact_frameworks', label: 'Impact Frameworks'}, {key: 'collections', label: 'Collections'}]. " +
+        "A Collection is a curated set of metrics, surveys and other resources that people can browse and reuse. " +
         "An Impact Framework (Template) is a reusable set of metrics that can be applied to several Projects. " +
-        "An Indicator is never added to a Project or Impact Framework directly, only through one of its Outcomes, so it has neither option. " +
+        "An Indicator is never added to a Project or Impact Framework directly, only through one of its Outcomes, so it has neither option (it can go in a Collection). " +
         "With destination (e.g. 'projects'), returns a page of the places of that type you can add the metric to, each with " +
         "added: true if the metric is already there. For projects, these are the open Projects whose metrics you can edit, " +
-        "with their Organisation; for impact_frameworks, the Impact Frameworks you created (only their creator can edit them). Use before makerble_add_metric_to or makerble_remove_metric_from to find the target_id.",
+        "with their Organisation; for impact_frameworks, the Impact Frameworks you created (only their creator can edit them); for collections, your own Collections and those of Organisations you are an editor of, with their owner. Use before makerble_add_metric_to or makerble_remove_metric_from to find the target_id.",
       inputSchema: {
         type: "object",
         properties: {
           metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
           metric_id: { type: "number" },
-          destination: { type: "string", description: "A key from the list of destination types: 'projects' or 'impact_frameworks'" },
+          destination: { type: "string", description: "A key from the list of destination types: 'projects', 'impact_frameworks' or 'collections'" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200" },
         },
@@ -2170,11 +2171,12 @@ export function buildTools(api) {
     {
       name: "makerble_add_metric_to",
       description:
-        "Add a metric (Change or Outcome) to a Project or an Impact Framework, the same as the Add metric to popup in the Makerble app. " +
+        "Add a metric (Change, Outcome or Indicator) to a Project, an Impact Framework or a Collection, the same as the Add metric to popup in the Makerble app. " +
         "On a Project (destination 'projects') it goes in the Impact Scorecard column of its own stage, after the " +
         "metrics already there, as on Edit Project Metrics; it is also added to the Project's Default Survey and, if the Organisation uses one, its " +
         "default Progress Board. Requires rights to edit the Project's metrics. On an Impact Framework (destination 'impact_frameworks') it goes in " +
-        "its own stage, which is added to the framework if missing; you must have created the framework. " +
+        "its own stage, which is added to the framework if missing; you must have created the framework. In a Collection (destination 'collections', " +
+        "which also takes an Indicator) it goes at the end; you must own the Collection or edit the Organisation that owns it. " +
         "Workflow: (1) makerble_list_metric_destinations with destination 'projects' to find the Project's id (target_id) " +
         "(or the Impact Framework's id) and check it isn't already added. (2) makerble_add_metric_to. Returns {added: true}.",
       inputSchema: {
@@ -2182,7 +2184,7 @@ export function buildTools(api) {
         properties: {
           metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
           metric_id: { type: "number" },
-          destination: { type: "string", enum: ["projects", "impact_frameworks"] },
+          destination: { type: "string", enum: ["projects", "impact_frameworks", "collections"] },
           target_id: { type: "number", description: "The id of the Project (or other destination) to add it to" },
         },
         required: ["metric_type", "metric_id", "destination", "target_id"],
@@ -2194,14 +2196,14 @@ export function buildTools(api) {
     {
       name: "makerble_remove_metric_from",
       description:
-        "Remove a metric (Change or Outcome) from a Project or an Impact Framework, the same as removing it in the Add metric to popup. " +
+        "Remove a metric from a Project, an Impact Framework or a Collection, the same as removing it in the Add metric to popup. " +
         "Requires the same rights as adding it. Stories already recorded against the metric are kept. Returns {added: false}.",
       inputSchema: {
         type: "object",
         properties: {
           metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
           metric_id: { type: "number" },
-          destination: { type: "string", enum: ["projects", "impact_frameworks"] },
+          destination: { type: "string", enum: ["projects", "impact_frameworks", "collections"] },
           target_id: { type: "number", description: "The id of the Project (or other destination) to remove it from" },
         },
         required: ["metric_type", "metric_id", "destination", "target_id"],
