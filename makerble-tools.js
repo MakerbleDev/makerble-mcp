@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 127 Makerble MCP tool definitions.
+ * All 128 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2567,7 +2567,15 @@ export function buildTools(api) {
         "the events of projects they edit and events they are an Event Manager or Event Worker at. " +
         "Filters: charity_id (one organisation), project_id, event_category_id (Event Format, e.g. Workshops — " +
         "find ids with makerble_list_event_formats), event_type, start_date / end_date (YYYY-MM-DD; the event " +
-        "starts between them), master_event_id (every event in one recurring series). Each item returns id, " +
+        "starts between them), master_event_id (every event in one recurring series), and form_field_filters: " +
+        "the answers on the event's Event Creation Form (its custom fields and Dropdowns), e.g. every event whose " +
+        "Activity Dropdown is Archery. Call makerble_list_event_filter_fields first for the filter keys, then pass " +
+        "an object of key => value: text for a Text / Email Address field (contains, ignoring case), digits for a " +
+        "Telephone field, 'yes' or 'no' for a Tickbox / Attachment / Signature field, <key>_from and/or <key>_to " +
+        "for a Number, Date (YYYY-MM-DD) or Time (HH:MM) range, and a list of answer choice ids for a Dropdown " +
+        "(the event matches if it has any of them). Several keys must all match. sort orders the whole list by " +
+        "those fields: a sort_key from makerble_list_event_filter_fields followed by asc or desc, several " +
+        "comma-separated; blank answers come last. Each item returns id, " +
         "name, start_datetime, end_datetime, timezone, location, event_type, master_event_id, project {id, name}, " +
         "event_category {id, name} (the Event Format), guests_count (guests are Contacts), managers_count and " +
         "workers_count. Use makerble_get_event for an event's full details. " +
@@ -2582,12 +2590,50 @@ export function buildTools(api) {
           start_date: { type: "string", description: "Only events starting on or after this date (YYYY-MM-DD)" },
           end_date: { type: "string", description: "Only events starting on or before this date (YYYY-MM-DD)" },
           master_event_id: { type: "number", description: "Only the events of the recurring series this master event starts" },
+          form_field_filters: {
+            type: "object",
+            description:
+              "Event Creation Form answers to match, keyed by the filter_keys of makerble_list_event_filter_fields, " +
+              "e.g. { \"custom_field_12\": \"archery\", \"custom_field_15_from\": 5, \"ratio_set_7\": [31, 32] }",
+            additionalProperties: {
+              oneOf: [{ type: "string" }, { type: "number" }, { type: "array", items: { type: "number" } }],
+            },
+          },
+          sort: { type: "string", description: "e.g. 'custom_field_12 desc' or 'ratio_set_7 asc, custom_field_15 desc'. Default: soonest first" },
           page: { type: "number" },
           per_page: { type: "number", description: "Events per page. Default 10, max 200" },
           last_synced_datetime: { type: "string", description: "Only events changed after this ISO 8601 time" },
         },
       },
       handler: (p) => get("/events", p),
+    },
+
+    {
+      name: "makerble_list_event_filter_fields",
+      description:
+        "List the fields events can be filtered and sorted by with makerble_list_events: the custom fields and " +
+        "Dropdowns (ratio sets) on the Event Creation Forms of the user's organisations' Event Formats " +
+        "(event categories) — the 'Event Creation Form fields' section of the Filter Events panel on Makerble's " +
+        "Manage Events page. Use it when someone wants to find events by what was recorded about them, e.g. 'all " +
+        "the archery sessions' or 'events for ages 5 to 10'. Each item returns key, id, name, data_type (text, " +
+        "email_address, telephone, number, date, time, tickbox, file (Attachment), signature or dropdown), " +
+        "filter_keys (the keys to use in form_field_filters; a Number, Date or Time field has <key>_from and " +
+        "<key>_to), filter_hint (what value to send) and sort_key (for sort). A Dropdown's filter takes answer " +
+        "choice (sub ratio) ids: pass dropdown_id with that item's id, and optionally query with part of a " +
+        "name, to list its answer choices [{id, name}] alphabetically instead. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this Organisation's (Charity's) Event Creation Forms" },
+          dropdown_id: { type: "number", description: "List this Dropdown's answer choices instead of the fields" },
+          query: { type: "string", description: "With dropdown_id: only answer choices whose name contains this" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Items per page. Default 10, max 200" },
+        },
+      },
+      handler: ({ dropdown_id, ...p }) =>
+        dropdown_id ? get(`/event_filter_fields/${dropdown_id}/choices`, p) : get("/event_filter_fields", p),
     },
 
     {
