@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 129 Makerble MCP tool definitions.
+ * All 130 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2210,6 +2210,31 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/outcomes/${id}`),
+    },
+
+    {
+      name: "makerble_copy_metric",
+      description:
+        "Copy a metric: an Output (API: Change), an Outcome or an Indicator (Progress Tracker). " +
+        "Use it when someone wants a new metric that starts from an existing one, e.g. the same indicator with different wording. " +
+        "The copy is called \"Copy of <original name>\" (numbered, e.g. \"Copy of X (2)\", if that name is taken), has the same owner, " +
+        "settings, survey question wording and levels, and is not added to any Project, Survey (Story Category) or Impact Framework. " +
+        "A copied Indicator keeps the original's Outcomes; a copied Outcome keeps the original's Indicators. " +
+        "Only someone who can edit the original may copy it. Returns { id, metric_class, name, owner_type, owner_id, copied_from_id }. " +
+        "To rename the copy afterwards, edit it in Makerble (Edit Metric).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "ID of the metric to copy." },
+          metric_class: {
+            type: "string",
+            enum: ["Change", "Indicator", "Outcome"],
+            description: "What kind of metric it is: Change (an Output), Indicator or Outcome.",
+          },
+        },
+        required: ["id", "metric_class"],
+      },
+      handler: ({ id, metric_class }) => post(`/metrics/${id}/copy`, { metric_class }),
     },
 
     {
