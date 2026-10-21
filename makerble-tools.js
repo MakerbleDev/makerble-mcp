@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 128 Makerble MCP tool definitions.
+ * All 130 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1151,7 +1151,8 @@ export function buildTools(api) {
       name: "makerble_get_checklist",
       description:
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
-        "which say what counts as done), the Projects that offer it with their assignment_mode " +
+        "which say what counts as done, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
+        "owner_relationship_side and a readable owner_description), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
       inputSchema: {
@@ -1186,10 +1187,12 @@ export function buildTools(api) {
         "Create a Checklist for an Organisation. Requires an Organisation editor or reporter. Each action " +
         "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
         "(see makerble_list_checklist_action_types). Actions keep the order given." +
+        " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
         "makerble_list_surveys, makerble_list_survey_campaigns, makerble_list_survey_waves, " +
-        "makerble_list_contact_bio_forms etc. (3) makerble_create_checklist. (4) " +
-        "makerble_set_checklist_project to offer it in Projects, by hand or automatically.",
+        "makerble_list_contact_bio_forms etc., and owners with makerble_get_checklist_owner_options and " +
+        "makerble_list_users. (3) makerble_create_checklist. (4) makerble_set_checklist_project to offer " +
+        "it in Projects, by hand or automatically.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1205,6 +1208,17 @@ export function buildTools(api) {
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                owner_kind: {
+                  type: "string",
+                  enum: ["none", "adder", "user", "team", "relationship"],
+                  description: "Who is responsible for this action (optional, default 'none'). See makerble_get_checklist_owner_options.",
+                },
+                owner_user_id: { type: "number", description: "For owner_kind 'user': a colleague's User ID (makerble_list_users)" },
+                owner_team_id: { type: "number", description: "For owner_kind 'team': one of the Organisation's Team IDs" },
+                owner_relationship_side: {
+                  type: "string",
+                  description: "For owner_kind 'relationship': '<relationship_category_id>:parent|child', the colleague's own side",
+                },
               },
               required: ["action_type"],
             },
@@ -1239,6 +1253,17 @@ export function buildTools(api) {
                 title: { type: "string" },
                 description: { type: "string" },
                 criteria: { type: "object" },
+                owner_kind: {
+                  type: "string",
+                  enum: ["none", "adder", "user", "team", "relationship"],
+                  description: "Who is responsible for this action (optional, default 'none'). See makerble_get_checklist_owner_options.",
+                },
+                owner_user_id: { type: "number", description: "For owner_kind 'user': a colleague's User ID (makerble_list_users)" },
+                owner_team_id: { type: "number", description: "For owner_kind 'team': one of the Organisation's Team IDs" },
+                owner_relationship_side: {
+                  type: "string",
+                  description: "For owner_kind 'relationship': '<relationship_category_id>:parent|child', the colleague's own side",
+                },
               },
             },
           },
@@ -1272,8 +1297,11 @@ export function buildTools(api) {
       name: "makerble_get_contact_checklists",
       description:
         "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
-        "each, done_count of actions_count and every action with done true/false. Use it to see what still " +
-        "needs doing for a Contact. Only Contacts you can see are returned.",
+        "each, done_count of actions_count and every action with done true/false and who is responsible " +
+        "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
+        "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
+        "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
+        "still needs doing for a Contact, and by whom. Only Contacts you can see are returned.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1305,6 +1333,54 @@ export function buildTools(api) {
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
           : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
+    },
+
+    {
+      name: "makerble_get_checklist_owner_options",
+      description:
+        "List the choices for who is responsible for a Checklist action (the 'Who is responsible?' " +
+        "dropdown): owner kinds ('none' nobody in particular; 'adder' the colleague who added the Checklist " +
+        "to the Contact, or the Project's Project Managers when a Project added it automatically; 'user' a " +
+        "specific colleague, from makerble_list_users; 'team' anyone in one of the Organisation's Teams who " +
+        "can see the Contact; 'relationship' any colleague with a given kind of Relationship with the " +
+        "Contact, e.g. their Therapist), the Organisation's Teams [{id, name}] and its relationship sides " +
+        "[{owner_relationship_side, name}]. Use the values with makerble_create_checklist, " +
+        "makerble_update_checklist or makerble_set_contact_checklist_action_owner.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/checklists/owner_options", { charity_id }),
+    },
+
+    {
+      name: "makerble_set_contact_checklist_action_owner",
+      description:
+        "Change who is responsible for one action of a Contact's (beneficiary's) Checklist, for that " +
+        "Contact only (the Change link on their profile's Checklists box); other Contacts keep the " +
+        "Checklist's default. Send use_checklist_default: true to undo the change. Requires edit access to " +
+        "the Contact. Returns the action's owner fields, responsible_user_ids and owner_warning." +
+        "\nWorkflow: (1) makerble_get_contact_checklists for the checklist_id and action id. (2) " +
+        "makerble_get_checklist_owner_options (and makerble_list_users for a colleague). (3) this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action's id" },
+          use_checklist_default: { type: "boolean", description: "Go back to the Checklist's own owner for this action" },
+          owner_kind: { type: "string", enum: ["none", "adder", "user", "team", "relationship"] },
+          owner_user_id: { type: "number" },
+          owner_team_id: { type: "number" },
+          owner_relationship_side: { type: "string", description: "'<relationship_category_id>:parent|child'" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: async ({ beneficiary_id, checklist_id, action_id, use_checklist_default, ...owner }) => {
+        const path = `/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/owner`;
+        return use_checklist_default ? del(path) : patch(path, owner);
+      },
     },
 
     // ── Cohort Trackers ───────────────────────────────────────────────────────
