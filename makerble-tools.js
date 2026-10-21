@@ -2148,7 +2148,8 @@ export function buildTools(api) {
       name: "makerble_list_metric_destinations",
       description:
         "Where a metric can be added: the options of the Add metric to popup in the Makerble app. " +
-        "A metric is a Change (activity or participation KPI), an Outcome or an Indicator. " +
+        "A metric is a Change (activity or participation KPI), an Outcome or an Indicator; a Cohort Tracker or Workflow Tracker (metric_type cohort_tracker / workflow_tracker) " +
+        "can also be added, to 'projects' and 'impact_frameworks' only: each item then has column, the Impact Scorecard column it is in (null if it isn't there). " +
         "Without destination, returns the destination types offered for the metric, e.g. " +
         "[{key: 'projects', label: 'Projects'}, {key: 'impact_frameworks', label: 'Impact Frameworks'}, {key: 'surveys', label: 'Surveys'}, {key: 'collections', label: 'Collections'}]. " +
         "An Indicator also gets 'outcomes' (Outcomes it can be added to, i.e. made a child of) when you can edit an Outcome; " +
@@ -2161,13 +2162,13 @@ export function buildTools(api) {
         "with their Organisation; for impact_frameworks, the Impact Frameworks you created (only their creator can edit them); for surveys, the Surveys (Story Categories) you can edit, with their owner; for collections, your own Collections and those of Organisations you are an editor of, with their owner; for outcomes, the Outcomes you can edit; " +
         "for indicators, the Indicators you can see (your own, your Organisations' and the public library), with their indicator_type. " +
         "for progress_boards, the open Progress Boards you created or are a Board Admin of, with board_type 'managed' or 'basic'. " +
-        "Progress Boards are only offered when you pass project_id (a Project) or bundle_id (an Album, the API's Bundle) whose results the board's card will show. " +
+        "Progress Boards are only offered for a Change or an Indicator (a board has no Outcome card), and only when you pass project_id (a Project) or bundle_id (an Album, the API's Bundle) whose results the board's card will show. " +
         "Pass q to search outcomes or indicators by name. Each item has removable: false when it can't be removed here: a Survey that already asks the metric, " +
         "or an Outcome/Indicator link that stories have already used. Use before makerble_add_metric_to or makerble_remove_metric_from to find the target_id.",
       inputSchema: {
         type: "object",
         properties: {
-          metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
+          metric_type: { type: "string", enum: ["change", "outcome", "indicator", "cohort_tracker", "workflow_tracker"] },
           metric_id: { type: "number" },
           destination: { type: "string", description: "A key from the list of destination types: 'projects', 'impact_frameworks', 'surveys', 'collections', 'outcomes', 'indicators' or 'progress_boards'" },
           project_id: { type: "number", description: "For progress_boards: the Project whose results the card shows" },
@@ -2195,7 +2196,9 @@ export function buildTools(api) {
         "and an Outcome adds each of its Indicators (as a grid when they share answer choices); you must be able to edit the Survey. " +
         "With destination 'outcomes' (metric_type indicator) or 'indicators' (metric_type outcome), it makes the Outcome a parent of the Indicator; " +
         "you must be able to edit the Outcome. " +
-        "On a Progress Board (destination 'progress_boards', with project_id or bundle_id) it becomes the board's last card, showing that Project's or Album's results; " +
+        "A Cohort or Workflow Tracker goes on a Project (only its own Organisation's) or an Impact Framework in the column you pass: " +
+        "'activities', 'engagement' (the default), 'potential', 'behaviour' or 'growth'. " +
+        "On a Progress Board (destination 'progress_boards', a Change or an Indicator only, with project_id or bundle_id) it becomes the board's last card, showing that Project's or Album's results; " +
         "you must have created the board or be one of its Board Admins. Leave out target_id to create a new Managed Progress Board " +
         "named \"<your name>'s Progress Board\" for the Project's Organisation with the card on it; this returns {added: true, data: {id, name}}. " +
         "Workflow: (1) makerble_list_metric_destinations with destination 'projects' to find the Project's id (target_id) " +
@@ -2203,17 +2206,18 @@ export function buildTools(api) {
       inputSchema: {
         type: "object",
         properties: {
-          metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
+          metric_type: { type: "string", enum: ["change", "outcome", "indicator", "cohort_tracker", "workflow_tracker"] },
           metric_id: { type: "number" },
           destination: { type: "string", enum: ["projects", "impact_frameworks", "surveys", "collections", "outcomes", "indicators", "progress_boards"] },
           target_id: { type: "number", description: "The id of the Project (or other destination) to add it to. Leave out only for progress_boards, to create a new board" },
+          column: { type: "string", enum: ["activities", "engagement", "potential", "behaviour", "growth"], description: "For a Cohort or Workflow Tracker: the Impact Scorecard column to put it in (default engagement)" },
           project_id: { type: "number", description: "For progress_boards: the Project whose results the card shows" },
           bundle_id: { type: "number", description: "For progress_boards: the Album (Bundle) whose results the card shows, instead of a Project" },
         },
         required: ["metric_type", "metric_id", "destination"],
       },
-      handler: ({ metric_type, metric_id, destination, target_id, project_id, bundle_id }) =>
-        post(metricDestinationPath(metric_type, metric_id, destination, target_id, { project_id, bundle_id })),
+      handler: ({ metric_type, metric_id, destination, target_id, project_id, bundle_id, column }) =>
+        post(metricDestinationPath(metric_type, metric_id, destination, target_id, { project_id, bundle_id, column })),
     },
 
     {
@@ -2226,7 +2230,7 @@ export function buildTools(api) {
       inputSchema: {
         type: "object",
         properties: {
-          metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
+          metric_type: { type: "string", enum: ["change", "outcome", "indicator", "cohort_tracker", "workflow_tracker"] },
           metric_id: { type: "number" },
           destination: { type: "string", enum: ["projects", "impact_frameworks", "surveys", "collections", "outcomes", "indicators", "progress_boards"] },
           target_id: { type: "number", description: "The id of the Project (or other destination) to remove it from" },
