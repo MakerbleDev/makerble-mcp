@@ -2146,7 +2146,7 @@ export function buildTools(api) {
         "Where a metric can be added: the options of the Add metric to popup in the Makerble app. " +
         "A metric is a Change (activity or participation KPI), an Outcome or an Indicator. " +
         "Without destination, returns the destination types offered for the metric, e.g. " +
-        "[{key: 'projects', label: 'Projects'}, {key: 'impact_frameworks', label: 'Impact Frameworks'}, {key: 'collections', label: 'Collections'}]. " +
+        "[{key: 'projects', label: 'Projects'}, {key: 'impact_frameworks', label: 'Impact Frameworks'}, {key: 'surveys', label: 'Surveys'}, {key: 'collections', label: 'Collections'}]. " +
         "An Indicator also gets 'outcomes' (Outcomes it can be added to, i.e. made a child of) when you can edit an Outcome; " +
         "an Outcome you can edit gets 'indicators' (Indicators to make it the parent of). " +
         "A Collection is a curated set of metrics, surveys and other resources that people can browse and reuse. " +
@@ -2154,16 +2154,16 @@ export function buildTools(api) {
         "An Indicator is never added to a Project or Impact Framework directly, only through one of its Outcomes, so it has neither option (it can go in a Collection). " +
         "With destination (e.g. 'projects'), returns a page of the places of that type you can add the metric to, each with " +
         "added: true if the metric is already there. For projects, these are the open Projects whose metrics you can edit, " +
-        "with their Organisation; for impact_frameworks, the Impact Frameworks you created (only their creator can edit them); for collections, your own Collections and those of Organisations you are an editor of, with their owner; for outcomes, the Outcomes you can edit; " +
+        "with their Organisation; for impact_frameworks, the Impact Frameworks you created (only their creator can edit them); for surveys, the Surveys (Story Categories) you can edit, with their owner; for collections, your own Collections and those of Organisations you are an editor of, with their owner; for outcomes, the Outcomes you can edit; " +
         "for indicators, the Indicators you can see (your own, your Organisations' and the public library), with their indicator_type. " +
-        "Pass q to search outcomes or indicators by name. Each item has removable: false when stories have already recorded the Indicator under that Outcome, " +
-        "so the link can't be removed. Use before makerble_add_metric_to or makerble_remove_metric_from to find the target_id.",
+        "Pass q to search outcomes or indicators by name. Each item has removable: false when it can't be removed here: a Survey that already asks the metric, " +
+        "or an Outcome/Indicator link that stories have already used. Use before makerble_add_metric_to or makerble_remove_metric_from to find the target_id.",
       inputSchema: {
         type: "object",
         properties: {
           metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
           metric_id: { type: "number" },
-          destination: { type: "string", description: "A key from the list of destination types: 'projects', 'impact_frameworks', 'collections', 'outcomes' or 'indicators'" },
+          destination: { type: "string", description: "A key from the list of destination types: 'projects', 'impact_frameworks', 'surveys', 'collections', 'outcomes' or 'indicators'" },
           q: { type: "string", description: "Search by name (outcomes and indicators only)" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200" },
@@ -2183,6 +2183,8 @@ export function buildTools(api) {
         "default Progress Board. Requires rights to edit the Project's metrics. On an Impact Framework (destination 'impact_frameworks') it goes in " +
         "its own stage, which is added to the framework if missing; you must have created the framework. In a Collection (destination 'collections', " +
         "which also takes an Indicator) it goes at the end; you must own the Collection or edit the Organisation that owns it. " +
+        "On a Survey (destination 'surveys', a Story Category) it becomes the last, optional question; a scale Indicator is Single Choice, " +
+        "and an Outcome adds each of its Indicators (as a grid when they share answer choices); you must be able to edit the Survey. " +
         "With destination 'outcomes' (metric_type indicator) or 'indicators' (metric_type outcome), it makes the Outcome a parent of the Indicator; " +
         "you must be able to edit the Outcome. " +
         "Workflow: (1) makerble_list_metric_destinations with destination 'projects' to find the Project's id (target_id) " +
@@ -2192,7 +2194,7 @@ export function buildTools(api) {
         properties: {
           metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
           metric_id: { type: "number" },
-          destination: { type: "string", enum: ["projects", "impact_frameworks", "collections", "outcomes", "indicators"] },
+          destination: { type: "string", enum: ["projects", "impact_frameworks", "surveys", "collections", "outcomes", "indicators"] },
           target_id: { type: "number", description: "The id of the Project (or other destination) to add it to" },
         },
         required: ["metric_type", "metric_id", "destination", "target_id"],
@@ -2205,14 +2207,14 @@ export function buildTools(api) {
       name: "makerble_remove_metric_from",
       description:
         "Remove a metric from a Project, an Impact Framework or a Collection, the same as removing it in the Add metric to popup. " +
-        "For outcomes/indicators, it unlinks the Indicator from the Outcome, which is refused once stories have recorded the Indicator under that Outcome. " +
+        "A Survey's questions can't be removed this way (edit the Survey instead). For outcomes/indicators, it unlinks the Indicator from the Outcome, which is refused once stories have recorded the Indicator under that Outcome. " +
         "Requires the same rights as adding it. Stories already recorded against the metric are kept. Returns {added: false}.",
       inputSchema: {
         type: "object",
         properties: {
           metric_type: { type: "string", enum: ["change", "outcome", "indicator"] },
           metric_id: { type: "number" },
-          destination: { type: "string", enum: ["projects", "impact_frameworks", "collections", "outcomes", "indicators"] },
+          destination: { type: "string", enum: ["projects", "impact_frameworks", "surveys", "collections", "outcomes", "indicators"] },
           target_id: { type: "number", description: "The id of the Project (or other destination) to remove it from" },
         },
         required: ["metric_type", "metric_id", "destination", "target_id"],
