@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 130 Makerble MCP tool definitions.
+ * All 133 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
