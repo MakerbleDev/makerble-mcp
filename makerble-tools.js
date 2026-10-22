@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 133 Makerble MCP tool definitions.
+ * All 137 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -116,6 +116,12 @@ const WEBHOOK_EVENTS = [
   "project.created", "project.updated", "project.deleted", "project.contact_added", "project.contact_removed",
   "import.completed",
 ];
+
+// A Calendar Feed's filters, as the Event Filters the Calendar Feeds page saves (Event.filter_events).
+function feedFilters({ project_ids, event_category_ids, user_ids, beneficiary_ids }) {
+  const filters = { project_ids, event_category_ids, user_ids, beneficiary_ids };
+  return Object.fromEntries(Object.entries(filters).filter(([, v]) => Array.isArray(v) && v.length));
+}
 
 export function buildTools(api) {
   const { get, post, patch, del, postBearer, signIn } = api;
@@ -3259,6 +3265,102 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
+    },
+
+    // ── Calendar Feeds ────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_calendar_feeds",
+      description:
+        "List an Organisation's (Charity's) Calendar Feeds that the user can see. A Calendar Feed is a private " +
+        "subscription link (feed_url) that a calendar app such as Google Calendar, Outlook or Apple Calendar " +
+        "subscribes to, so the organisation's events appear there and stay up to date. Each feed shows the " +
+        "events the person who made it can see, narrowed by its filters, from the last 12 months to the next 24. " +
+        "Each item returns id, name, charity_id, feed_url (give this to the user to subscribe), expired, " +
+        "filter_params (project_ids, event_category_ids, user_ids, beneficiary_ids, event_types), " +
+        "created_by_name and updated_by_name. Check here before making a new feed, to reuse one that already " +
+        "covers what the user wants. Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) id" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Calendar Feeds per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Calendar Feeds changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, ...p }) => get("/calendar_feeds", { charity_id, ...p }),
+    },
+
+    {
+      name: "makerble_create_calendar_feed",
+      description:
+        "Make a Calendar Feed: a private subscription link that puts an Organisation's (Charity's) events into " +
+        "a calendar app (Google Calendar, Outlook, Apple Calendar) and keeps them up to date. The feed contains " +
+        "the events the user can see, from the last 12 months to the next 24, narrowed by any filters given: " +
+        "only some Projects, Event Formats (Event Categories), staff (Event Managers and Workers, by user id) " +
+        "or guests (Contacts / Beneficiaries, by id). With no filters it contains every event the user can see. " +
+        "Find ids with makerble_list_projects, makerble_list_project_event_formats, makerble_list_users and " +
+        "makerble_list_contacts. Returns the feed with its feed_url. To subscribe, the user pastes feed_url " +
+        "into their calendar app (in Google Calendar: Other calendars > From URL; in Outlook: Add calendar > " +
+        "Subscribe from web). Tell the user to keep the link private: anyone who has it can read the events, " +
+        "including guests' names.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) the feed is for" },
+          name: { type: "string", description: "A name for the feed, e.g. 'Youth Mentoring drop-ins'" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Only events of these Projects" },
+          event_category_ids: { type: "array", items: { type: "number" }, description: "Only events of these Event Formats" },
+          user_ids: { type: "array", items: { type: "number" }, description: "Only events these users are Event Managers or Workers of" },
+          beneficiary_ids: { type: "array", items: { type: "number" }, description: "Only events these Contacts are guests of" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: ({ charity_id, name, ...filters }) =>
+        post("/calendar_feeds", { calendar_feed: { charity_id, name, filter_params: feedFilters(filters) } }),
+    },
+
+    {
+      name: "makerble_update_calendar_feed",
+      description:
+        "Rename a Calendar Feed or change which events it contains. Only the person who made the feed, or an " +
+        "Organisation Admin, can change it. Give name to rename it. Give any of the filters to replace the " +
+        "feed's filters as a whole: filters you leave out are cleared, so pass every filter the feed should " +
+        "keep (read them first with makerble_list_calendar_feeds). The feed_url stays the same, so calendars " +
+        "already subscribed pick up the change. Returns the updated feed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Calendar Feed id, from makerble_list_calendar_feeds" },
+          name: { type: "string" },
+          project_ids: { type: "array", items: { type: "number" } },
+          event_category_ids: { type: "array", items: { type: "number" } },
+          user_ids: { type: "array", items: { type: "number" } },
+          beneficiary_ids: { type: "array", items: { type: "number" } },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, name, ...filters }) => {
+        const calendar_feed = {};
+        if (name !== undefined) calendar_feed.name = name;
+        if (Object.values(filters).some((v) => v !== undefined)) calendar_feed.filter_params = feedFilters(filters);
+        return patch(`/calendar_feeds/${id}`, { calendar_feed });
+      },
+    },
+
+    {
+      name: "makerble_delete_calendar_feed",
+      description:
+        "Delete a Calendar Feed. Its feed_url stops working, so calendar apps subscribed to it stop receiving " +
+        "events. Only the person who made the feed, or an Organisation Admin, can delete it. Confirm with the " +
+        "user before calling. Returns nothing on success.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Calendar Feed id, from makerble_list_calendar_feeds" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/calendar_feeds/${id}`),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
