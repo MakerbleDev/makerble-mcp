@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 133 Makerble MCP tool definitions.
+ * All 138 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3223,7 +3223,8 @@ export function buildTools(api) {
         "Each item returns id, name, is_default (one of the formats every organisation starts with), " +
         "charity_id, events_count (events using it), projects_count (projects it is added to), " +
         "can_delete and delete_blocked_reason (why it can't be deleted yet, or null). Use it to find the " +
-        "id for makerble_delete_event_format and to tell the user beforehand whether deletion will work. " +
+        "id for makerble_get_event_format, makerble_update_event_format and makerble_delete_event_format, and to tell " +
+        "the user beforehand whether deletion will work. " +
         "Paginated: returns { page, page_size, page_count, total_count, data }.",
       inputSchema: {
         type: "object",
@@ -3259,6 +3260,100 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
+    },
+
+    {
+      name: "makerble_get_event_format",
+      description:
+        "Read one Event Format (called Event Category / event_category in the API): the template an organisation's " +
+        "events are created from, such as Workshops or Drop-in. Returns its name, settings (survey_kiosk_enabled is " +
+        "Self Check-in, attendance_form_id the Survey used to record attendance, Event Role settings), guest_statuses " +
+        "(id and name, in order; the first is given to new guests) and project_ids (the projects whose events can use " +
+        "it). Only an Organisation Admin of its organisation can read it. Find the id with makerble_list_event_formats.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Event Format (event_category) id" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/event_categories/${id}`),
+    },
+
+    {
+      name: "makerble_create_event_format",
+      description:
+        "Create an Event Format (called Event Category / event_category in the API) in an organisation: a template " +
+        "for events, such as Drop-in, Workshop or Class. Only an Organisation Admin of the organisation can. Check " +
+        "makerble_list_event_formats first and reuse a format that already exists rather than making a near-duplicate. " +
+        "guest_status_ids are the organisation's Guest Statuses its events' guests can have, in order (the first is " +
+        "given to new guests). A new Event Format can't be used for events until it is added to a project with " +
+        "makerble_add_event_format_to_project. Returns the new Event Format.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) that will own it" },
+          name: { type: "string" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses, in order" },
+          survey_kiosk_enabled: { type: "boolean", description: "Self Check-in at its events" },
+          attendance_form_id: { type: "number", description: "The Survey (Story Category) used to record attendance at its events" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: (p) => post("/event_categories", p),
+    },
+
+    {
+      name: "makerble_update_event_format",
+      description:
+        "Rename an Event Format (Event Category), change its Self Check-in or attendance Survey, or replace its Guest " +
+        "Statuses (give them all, in order). Only an Organisation Admin of its organisation can. Every event that uses " +
+        "the format is affected. Give only what changes. Returns the updated Event Format.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+          name: { type: "string" },
+          guest_status_ids: { type: "array", items: { type: "number" } },
+          survey_kiosk_enabled: { type: "boolean" },
+          attendance_form_id: { type: ["number", "null"] },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => patch(`/event_categories/${id}`, p),
+    },
+
+    {
+      name: "makerble_add_event_format_to_project",
+      description:
+        "Add an Event Format (Event Category) to a Project, so the Project's events can use it. This also turns events " +
+        "on for the Project. Only an Organisation Admin of the format's organisation can, and only for that " +
+        "organisation's Projects. Adding one that is already added does nothing. Returns { event_category_id, " +
+        "project_id, status } with status added or already_added.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, project_id }) => post(`/event_categories/${id}/projects`, { project_id }),
+    },
+
+    {
+      name: "makerble_remove_event_format_from_project",
+      description:
+        "Take an Event Format (Event Category) off a Project, so new events in the Project can't use it. Events that " +
+        "already use it keep it. Only an Organisation Admin of the format's organisation can. Returns { event_category_id, " +
+        "project_id, status: removed }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, project_id }) => del(`/event_categories/${id}/projects/${project_id}`),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
