@@ -377,11 +377,13 @@ export function buildTools(api) {
       name: "makerble_list_versions",
       description:
         "List the Versions (audit trail) of one record: every time it was created or edited, " +
-        "who did it and when, newest first. Use this to answer 'who changed this Contact, and when?'. " +
-        "Only Contacts (Beneficiaries) are versioned so far, so record_type must be \"Contact\". " +
-        "Find the Contact's ID first with makerble_list_contacts. " +
-        "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Versions; " +
-        "anything else returns not-found. " +
+        "who did it and when, newest first. Use this to answer 'who changed this Contact or Story, and when?'. " +
+        "record_type is \"Contact\" (a Contact, API: Beneficiary; find its ID with makerble_list_contacts) or " +
+        "\"Story\" (a Story or Survey Response; find its ID with makerble_list_stories). " +
+        "A Story is named \"[story ID] <survey> in <project> by <user> on <date happened>\". " +
+        "Only Charity Editors (any Contact or Story in the organisation) and Project Editors (Contacts in their projects, and " +
+        "Stories in their projects that they may read: a Story shared only with specific individuals is hidden unless they are one) " +
+        "can see Versions; anything else returns not-found. A deleted record's Versions stay listed, with record.deleted true. " +
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
         "data: [{id, event, action (Created/Edited/Destroyed), user_id, user_name (\"System\" for background jobs such as CSV imports), created_at}]}. " +
         "One Save can write several Versions a fraction of a second apart. " +
@@ -389,8 +391,12 @@ export function buildTools(api) {
       inputSchema: {
         type: "object",
         properties: {
-          record_type: { type: "string", enum: ["Contact"], description: "Type of record. Only \"Contact\" for now." },
-          record_id: { type: "number", description: "The Contact (Beneficiary) ID." },
+          record_type: {
+            type: "string",
+            enum: ["Contact", "Story"],
+            description: "\"Contact\" (Beneficiary) or \"Story\" (a Story or Survey Response).",
+          },
+          record_id: { type: "number", description: "The Contact (Beneficiary) ID or the Story ID." },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200." },
           last_sync_datetime: { type: "string", description: "Only Versions created after this ISO 8601 datetime." },
@@ -409,17 +415,20 @@ export function buildTools(api) {
         "Entries older than the organisation's retention period (3 to 12 months, set on Organisation Preferences) are rolled up into " +
         "one entry per colleague per month with monthly_summary: true, first_viewed_at and last_viewed_at spanning that month. " +
         "source is \"web\" (opened in Makerble), \"api\" (fetched through the API) or \"mcp\" (fetched through this MCP server, " +
-        "for example by makerble_get_contact). Only Contacts (Beneficiaries) are available so far, so record_type must be \"Contact\". " +
-        "Find the Contact's ID first with makerble_list_contacts. " +
-        "Only Charity Editors (any Contact in the organisation) and Project Editors (Contacts in their projects) can see Access Logs; " +
-        "anything else returns not-found. " +
+        "for example by makerble_get_contact). record_type is \"Contact\" (find its ID with makerble_list_contacts) or " +
+        "\"Story\" (a Story or Survey Response; find its ID with makerble_list_stories). " +
+        "Same permissions as makerble_list_versions; anything else returns not-found. " +
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
         "data: [{id, action (\"Viewed ×N\"), view_count, source, user_id, user_name, first_viewed_at, last_viewed_at, monthly_summary}]}.",
       inputSchema: {
         type: "object",
         properties: {
-          record_type: { type: "string", enum: ["Contact"], description: "Type of record. Only \"Contact\" for now." },
-          record_id: { type: "number", description: "The Contact (Beneficiary) ID." },
+          record_type: {
+            type: "string",
+            enum: ["Contact", "Story"],
+            description: "\"Contact\" (Beneficiary) or \"Story\" (a Story or Survey Response).",
+          },
+          record_id: { type: "number", description: "The Contact (Beneficiary) ID or the Story ID." },
           from: { type: "string", description: "Only entries on or after this date (YYYY-MM-DD)." },
           to: { type: "string", description: "Only entries on or before this date (YYYY-MM-DD)." },
           user_id: { type: "number", description: "Only this colleague's views (a user ID from makerble_list_users)." },
@@ -480,6 +489,9 @@ export function buildTools(api) {
       description:
         "Get one Version (audit-trail entry) by ID, including full_object: a complete snapshot of every field " +
         "of the record as it was saved at that moment (not just the fields that changed). " +
+        "For a Story, full_object is {schema_version, story (the Story's own fields), privacy_settings, contact_ids, " +
+        "outcome_ids, label_ids, media, answers: [{kind, field_id, label, contact_id, sub_ratio_id, sub_ratio_label, value}]}, " +
+        "so a survey question keeps the label it had then. " +
         "Compare two Versions' full_object to see exactly what changed between them. " +
         "Get Version IDs from makerble_list_versions. Same permissions as makerble_list_versions.",
       inputSchema: {
@@ -1141,7 +1153,8 @@ export function buildTools(api) {
       name: "makerble_get_checklist",
       description:
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
-        "which say what counts as done), the Projects that offer it with their assignment_mode " +
+        "which say what counts as done, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
+        "owner_relationship_side and a readable owner_description), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
       inputSchema: {
@@ -1176,10 +1189,12 @@ export function buildTools(api) {
         "Create a Checklist for an Organisation. Requires an Organisation editor or reporter. Each action " +
         "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
         "(see makerble_list_checklist_action_types). Actions keep the order given." +
+        " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
         "makerble_list_surveys, makerble_list_survey_campaigns, makerble_list_survey_waves, " +
-        "makerble_list_contact_bio_forms etc. (3) makerble_create_checklist. (4) " +
-        "makerble_set_checklist_project to offer it in Projects, by hand or automatically.",
+        "makerble_list_contact_bio_forms etc., and owners with makerble_get_checklist_owner_options and " +
+        "makerble_list_users. (3) makerble_create_checklist. (4) makerble_set_checklist_project to offer " +
+        "it in Projects, by hand or automatically.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1195,6 +1210,17 @@ export function buildTools(api) {
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                owner_kind: {
+                  type: "string",
+                  enum: ["none", "adder", "user", "team", "relationship"],
+                  description: "Who is responsible for this action (optional, default 'none'). See makerble_get_checklist_owner_options.",
+                },
+                owner_user_id: { type: "number", description: "For owner_kind 'user': a colleague's User ID (makerble_list_users)" },
+                owner_team_id: { type: "number", description: "For owner_kind 'team': one of the Organisation's Team IDs" },
+                owner_relationship_side: {
+                  type: "string",
+                  description: "For owner_kind 'relationship': '<relationship_category_id>:parent|child', the colleague's own side",
+                },
               },
               required: ["action_type"],
             },
@@ -1229,6 +1255,17 @@ export function buildTools(api) {
                 title: { type: "string" },
                 description: { type: "string" },
                 criteria: { type: "object" },
+                owner_kind: {
+                  type: "string",
+                  enum: ["none", "adder", "user", "team", "relationship"],
+                  description: "Who is responsible for this action (optional, default 'none'). See makerble_get_checklist_owner_options.",
+                },
+                owner_user_id: { type: "number", description: "For owner_kind 'user': a colleague's User ID (makerble_list_users)" },
+                owner_team_id: { type: "number", description: "For owner_kind 'team': one of the Organisation's Team IDs" },
+                owner_relationship_side: {
+                  type: "string",
+                  description: "For owner_kind 'relationship': '<relationship_category_id>:parent|child', the colleague's own side",
+                },
               },
             },
           },
@@ -1262,8 +1299,11 @@ export function buildTools(api) {
       name: "makerble_get_contact_checklists",
       description:
         "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
-        "each, done_count of actions_count and every action with done true/false. Use it to see what still " +
-        "needs doing for a Contact. Only Contacts you can see are returned.",
+        "each, done_count of actions_count and every action with done true/false and who is responsible " +
+        "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
+        "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
+        "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
+        "still needs doing for a Contact, and by whom. Only Contacts you can see are returned.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1295,6 +1335,54 @@ export function buildTools(api) {
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
           : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
+    },
+
+    {
+      name: "makerble_get_checklist_owner_options",
+      description:
+        "List the choices for who is responsible for a Checklist action (the 'Who is responsible?' " +
+        "dropdown): owner kinds ('none' nobody in particular; 'adder' the colleague who added the Checklist " +
+        "to the Contact, or the Project's Project Managers when a Project added it automatically; 'user' a " +
+        "specific colleague, from makerble_list_users; 'team' anyone in one of the Organisation's Teams who " +
+        "can see the Contact; 'relationship' any colleague with a given kind of Relationship with the " +
+        "Contact, e.g. their Therapist), the Organisation's Teams [{id, name}] and its relationship sides " +
+        "[{owner_relationship_side, name}]. Use the values with makerble_create_checklist, " +
+        "makerble_update_checklist or makerble_set_contact_checklist_action_owner.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/checklists/owner_options", { charity_id }),
+    },
+
+    {
+      name: "makerble_set_contact_checklist_action_owner",
+      description:
+        "Change who is responsible for one action of a Contact's (beneficiary's) Checklist, for that " +
+        "Contact only (the Change link on their profile's Checklists box); other Contacts keep the " +
+        "Checklist's default. Send use_checklist_default: true to undo the change. Requires edit access to " +
+        "the Contact. Returns the action's owner fields, responsible_user_ids and owner_warning." +
+        "\nWorkflow: (1) makerble_get_contact_checklists for the checklist_id and action id. (2) " +
+        "makerble_get_checklist_owner_options (and makerble_list_users for a colleague). (3) this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action's id" },
+          use_checklist_default: { type: "boolean", description: "Go back to the Checklist's own owner for this action" },
+          owner_kind: { type: "string", enum: ["none", "adder", "user", "team", "relationship"] },
+          owner_user_id: { type: "number" },
+          owner_team_id: { type: "number" },
+          owner_relationship_side: { type: "string", description: "'<relationship_category_id>:parent|child'" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: async ({ beneficiary_id, checklist_id, action_id, use_checklist_default, ...owner }) => {
+        const path = `/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/owner`;
+        return use_checklist_default ? del(path) : patch(path, owner);
+      },
     },
 
     // ── Cohort Trackers ───────────────────────────────────────────────────────
@@ -1388,7 +1476,8 @@ export function buildTools(api) {
         "(2) makerble_create_cohort_tracker. (3) makerble_add_cohort_tracker_to_project to place it in " +
         "a column of a Project's Impact Scorecard, optionally with a target. Albums pick it up from " +
         "their Projects automatically. To show the result as a percentage (e.g. '68% Children attending " +
-        "75%+', shown with '34 of 50 contacts in this project'), set result_type 'percentage' and a denominator.",
+        "75%+', shown with '34 of 50 contacts in this project'), set result_type 'percentage' and a denominator; " +
+        "for a percentage of some of the members (e.g. of the girls), use denominator 'filtered' with denominator_criteria.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1404,12 +1493,20 @@ export function buildTools(api) {
           },
           denominator: {
             type: "string",
-            enum: ["members", "enough_data"],
+            enum: ["members", "enough_data", "filtered"],
             description:
-              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album) or " +
+              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album), " +
               "'enough_data' (Contacts with enough data: invited to an event for Attendance Rate, two or more " +
-              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion). " +
+              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion), or " +
+              "'filtered' (members who also meet denominator_criteria, e.g. 'of the girls in this project'). " +
               "'enough_data' is recommended for improvement or attendance, so Contacts without data don't lower it",
+          },
+          denominator_criteria: {
+            type: "object",
+            description:
+              "Required when denominator is 'filtered': Contact Filter criteria, the same keys as criteria " +
+              "(check them with makerble_preview_cohort_tracker), for the Contacts the percentage is out of. " +
+              "Ignored and cleared for any other denominator",
           },
         },
         required: ["charity_id", "name"],
@@ -1421,7 +1518,8 @@ export function buildTools(api) {
     {
       name: "makerble_update_cohort_tracker",
       description:
-        "Update a Cohort Tracker's name, description, membership, criteria, result_type or denominator. Only " +
+        "Update a Cohort Tracker's name, description, membership, criteria, result_type, denominator or " +
+        "denominator_criteria. Only " +
         "the fields sent change. Changes apply everywhere it is used (see makerble_get_cohort_tracker usage). " +
         "Requires an Organisation editor, or the reporter who created it. Switching result_type between " +
         "'number' and 'percentage' CLEARS all the tracker's targets on every Project and Album, so the API " +
@@ -1442,12 +1540,20 @@ export function buildTools(api) {
           },
           denominator: {
             type: "string",
-            enum: ["members", "enough_data"],
+            enum: ["members", "enough_data", "filtered"],
             description:
-              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album) or " +
+              "For a percentage, what it is out of: 'members' (default: Contacts in this Project / Album), " +
               "'enough_data' (Contacts with enough data: invited to an event for Attendance Rate, two or more " +
-              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion). " +
+              "Choice Tracker responses for Distance Travelled, an answer for an answer-based criterion), or " +
+              "'filtered' (members who also meet denominator_criteria, e.g. 'of the girls in this project'). " +
               "'enough_data' is recommended for improvement or attendance, so Contacts without data don't lower it",
+          },
+          denominator_criteria: {
+            type: "object",
+            description:
+              "Required when denominator is 'filtered': Contact Filter criteria, the same keys as criteria " +
+              "(check them with makerble_preview_cohort_tracker), for the Contacts the percentage is out of. " +
+              "Ignored and cleared for any other denominator",
           },
           confirm_clear_targets: {
             type: "boolean",
@@ -2124,6 +2230,31 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/outcomes/${id}`),
+    },
+
+    {
+      name: "makerble_copy_metric",
+      description:
+        "Copy a metric: an Output (API: Change), an Outcome or an Indicator (Progress Tracker). " +
+        "Use it when someone wants a new metric that starts from an existing one, e.g. the same indicator with different wording. " +
+        "The copy is called \"Copy of <original name>\" (numbered, e.g. \"Copy of X (2)\", if that name is taken), has the same owner, " +
+        "settings, survey question wording and levels, and is not added to any Project, Survey (Story Category) or Impact Framework. " +
+        "A copied Indicator keeps the original's Outcomes; a copied Outcome keeps the original's Indicators. " +
+        "Only someone who can edit the original may copy it. Returns { id, metric_class, name, owner_type, owner_id, copied_from_id }. " +
+        "To rename the copy afterwards, edit it in Makerble (Edit Metric).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "ID of the metric to copy." },
+          metric_class: {
+            type: "string",
+            enum: ["Change", "Indicator", "Outcome"],
+            description: "What kind of metric it is: Change (an Output), Indicator or Outcome.",
+          },
+        },
+        required: ["id", "metric_class"],
+      },
+      handler: ({ id, metric_class }) => post(`/metrics/${id}/copy`, { metric_class }),
     },
 
     {
