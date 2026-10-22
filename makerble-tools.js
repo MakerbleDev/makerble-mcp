@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 144 Makerble MCP tool definitions.
+ * All 146 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3480,6 +3480,50 @@ export function buildTools(api) {
         required: ["id", "project_id"],
       },
       handler: ({ id, project_id, ...p }) => patch(`/event_catalogues/${id}/projects/${project_id}/access`, p),
+    },
+
+    // ── Contacts' Portal ──────────────────────────────────────────────────────
+    {
+      name: "makerble_list_portal_links",
+      description:
+        "List a Project's Contacts who can use the Contacts' Portal: their own page where they see the Event " +
+        "Catalogues their Project lets them see and book onto events. Only Contacts who can see at least one Event " +
+        "Catalogue are listed (to add one, use makerble_update_event_catalogue_access). Returns each Contact's " +
+        "contact_id, name, link_status (active; deactivated; or none, meaning never sent), last_sent_at, " +
+        "last_sent_channel, and can_email / can_sms (whether they can be sent their link that way). The link itself is " +
+        "never returned, because it signs the Contact in. Project Managers, Reporters and Organisation Admins can.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+        required: ["project_id"],
+      },
+      handler: ({ project_id, ...p }) => get(`/projects/${project_id}/portal_links${query(p)}`),
+    },
+
+    {
+      name: "makerble_send_portal_links",
+      description:
+        "Send Contacts their own link to the Contacts' Portal by email or SMS, as the Send button on a Project's Portal " +
+        "Links page does. To give a Contact Portal access: first make sure they can see an Event Catalogue " +
+        "(makerble_list_portal_links lists those who can; otherwise tick them with " +
+        "makerble_update_event_catalogue_access), then send the link with this tool. Every Contact must be in the " +
+        "Project and able to see an Event Catalogue, or nothing is sent and the error says why. Contacts with no email " +
+        "address (or mobile number, for SMS) are skipped and named in skipped. Only the Project's Project Managers " +
+        "and Organisation Admins can. This messages the Contacts: confirm with the user first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          contact_ids: { type: "array", items: { type: "number" } },
+          channel: { type: "string", enum: ["email", "sms"] },
+        },
+        required: ["project_id", "contact_ids", "channel"],
+      },
+      handler: ({ project_id, ...p }) => post(`/projects/${project_id}/portal_links/send`, p),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
