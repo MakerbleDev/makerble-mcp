@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 133 Makerble MCP tool definitions.
+ * All 134 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -173,7 +173,10 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_project",
-      description: "Get a single Project by ID.",
+      description:
+        "Get a single Project by ID. beneficiary_states lists the Contact statuses (Beneficiary States, e.g. " +
+        "Enrolled, Waiting List) switched on for the Project: use their ids as beneficiary_state_id in " +
+        "makerble_add_contacts_to_project.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -356,6 +359,46 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/project_beneficiaries", p),
+    },
+
+    {
+      name: "makerble_add_contacts_to_project",
+      description:
+        "Add existing Contacts (Beneficiaries) to a Project, optionally with a status (Beneficiary State, e.g. " +
+        "Enrolled or Waiting List). This is the same as 'Assign Contacts to projects' on the Contacts page in " +
+        "Makerble: each Contact added gets an entry on their activity timeline and the Project's team is notified. " +
+        "It does not create Contacts: use makerble_create_contact for a new person. " +
+        "\nWhen to use: before makerble_create_survey_links with beneficiary_ids, when the Contacts aren't in the " +
+        "Survey Campaign's Project yet (that call fails with 'not in the project' otherwise). Contacts created from " +
+        "an email address by makerble_create_survey_links join the organisation but not the Project. " +
+        "\nWorkflow: (1) makerble_get_project → beneficiary_states, if you want a status other than the default " +
+        "(Enrolled, or the Project's first status if Enrolled is switched off). (2) Call this tool. " +
+        "\nContacts already in the Project are left as they are: their status is not changed, and they are returned " +
+        "with already_in_project: true. At most 200 beneficiary_ids per call. Nothing is added if any Contact is " +
+        "refused. The Project must be open (not closed) and in the Contacts' organisation. " +
+        "Requires an Organisation Editor, Reporter or Observer, or a Project Editor (or Reporter, if the " +
+        "organisation allows it) of a Project the Contact is in. " +
+        "Returns { data: [{ id, project_id, beneficiary_id, beneficiary_state_id, already_in_project, created_at, " +
+        "updated_at }] }, one entry per Contact. Errors: 404 for a Project you can't see; 403 naming the Contacts " +
+        "you may not move; 422 with beneficiary_ids_not_found for ids that aren't Contacts of the Project's " +
+        "organisation, or for an unknown status, a closed Project, no ids or more than 200.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project to add the Contacts to" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs from the Project's organisation, at most 200",
+          },
+          beneficiary_state_id: {
+            type: "number",
+            description: "Optional Contact status (Beneficiary State) ID from makerble_get_project's beneficiary_states",
+          },
+        },
+        required: ["project_id", "beneficiary_ids"],
+      },
+      handler: (body) => post("/project_beneficiaries", body),
     },
 
     {
