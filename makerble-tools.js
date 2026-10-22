@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 138 Makerble MCP tool definitions.
+ * All 144 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3354,6 +3354,132 @@ export function buildTools(api) {
         required: ["id", "project_id"],
       },
       handler: ({ id, project_id }) => del(`/event_categories/${id}/projects/${project_id}`),
+    },
+
+    // ── Event Catalogues ──────────────────────────────────────────────────────
+    {
+      name: "makerble_list_event_catalogues",
+      description:
+        "List an Organisation's (Charity's) Event Catalogues. An Event Catalogue is a public page listing the " +
+        "organisation's upcoming events that people can book onto (it can be shared as a link or embedded on a " +
+        "website), and Contacts can see it on their Contacts' Portal if their project allows it. Each item returns id, " +
+        "name, filters (project_ids, event_category_ids for Event Formats, user_ids, beneficiary_ids, event_types, " +
+        "date_from; empty lists mean no filter) and public_url. Only events that haven't started, have a Signup Page " +
+        "and have their listing turned on ever appear. Check here before making a new catalogue. Paginated: returns " +
+        "{ page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) id" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Catalogues per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only catalogues changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/event_catalogues", p),
+    },
+
+    {
+      name: "makerble_get_event_catalogue",
+      description:
+        "Read one Event Catalogue, with upcoming_events_count: how many events its public page shows now. If that is " +
+        "0, the events it should show probably lack a Signup Page or have their listing turned off (fix with " +
+        "makerble_update_event: signup_page_id and listing.listing_enabled).",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Event Catalogue id" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/event_catalogues/${id}`),
+    },
+
+    {
+      name: "makerble_create_event_catalogue",
+      description:
+        "Make an Event Catalogue: a public page listing an organisation's upcoming events that people can book onto. " +
+        "Organisation Admins and Project Managers can. Narrow it with filters (project_ids, event_category_ids for " +
+        "Event Formats); with no filters it lists every bookable event in the organisation. Returns the catalogue with " +
+        "its public_url to share. To let a project's Contacts see it on their Contacts' Portal, use " +
+        "makerble_update_event_catalogue_access.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity)" },
+          name: { type: "string", description: "e.g. 'Drop-ins'" },
+          filters: {
+            type: "object",
+            properties: {
+              project_ids: { type: "array", items: { type: "number" } },
+              event_category_ids: { type: "array", items: { type: "number" }, description: "Event Formats" },
+            },
+          },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: (p) => post("/event_catalogues", p),
+    },
+
+    {
+      name: "makerble_update_event_catalogue",
+      description:
+        "Rename an Event Catalogue or change which events it lists. filters, when given, replaces all its filters, so " +
+        "give every one it should keep (read them with makerble_get_event_catalogue). Its public_url stays the same. " +
+        "Organisation Admins and Project Managers can.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Catalogue id" },
+          name: { type: "string" },
+          filters: {
+            type: "object",
+            properties: {
+              project_ids: { type: "array", items: { type: "number" } },
+              event_category_ids: { type: "array", items: { type: "number" } },
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => patch(`/event_catalogues/${id}`, p),
+    },
+
+    {
+      name: "makerble_get_event_catalogue_access",
+      description:
+        "Who in a Project can see an Event Catalogue on their Contacts' Portal: mode every_enrolled (every Contact " +
+        "currently Enrolled in the Project) or specific (only the Contacts in contact_ids).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Catalogue id" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, project_id }) => get(`/event_catalogues/${id}/projects/${project_id}/access`),
+    },
+
+    {
+      name: "makerble_update_event_catalogue_access",
+      description:
+        "Change who in a Project can see an Event Catalogue on their Contacts' Portal, where Contacts book onto events. " +
+        "mode every_enrolled lets every Contact enrolled in the Project see it (and drops any ticked Contacts); mode " +
+        "specific lets only ticked Contacts see it: tick them with add_contact_ids (Contacts in the Project, from " +
+        "makerble_list_project_contacts) and untick with remove_contact_ids. Only the Project's Project Managers and " +
+        "Organisation Admins can. Confirm with the user first: it decides what Contacts see.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Catalogue id" },
+          project_id: { type: "number" },
+          mode: { type: "string", enum: ["every_enrolled", "specific"] },
+          add_contact_ids: { type: "array", items: { type: "number" } },
+          remove_contact_ids: { type: "array", items: { type: "number" } },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, project_id, ...p }) => patch(`/event_catalogues/${id}/projects/${project_id}/access`, p),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
