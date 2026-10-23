@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 134 Makerble MCP tool definitions.
+ * All 145 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1990,6 +1990,268 @@ export function buildTools(api) {
       },
       handler: async ({ id, project_id }) => {
         await del(`/workflow_trackers/${id}/projects/${project_id}`);
+        return { removed: true, id, project_id };
+      },
+    },
+
+    // ── Formula Trackers (CP-8514) ─────────────────────────────────────────────
+    {
+      name: "makerble_list_formula_trackers",
+      description:
+        "List an Organisation's Formula Trackers. A Formula Tracker is a metric worked out from the " +
+        "Organisation's other trackers with + − × ÷, numbers and brackets, e.g. Referrals completed = " +
+        "External referrals + Internal referrals, or % of children receiving support = Children supported ÷ " +
+        "Children enrolled × 100. Each has its formula as tokens (expression), formula_text (the formula in " +
+        "words), display_format ('number' or 'percentage'), decimal_places, unit_label and result_kind: " +
+        "'additive' (only + and − of trackers that add up; adds up across periods) or 'snapshot' (each " +
+        "timeframe worked out from its own totals). Only an Organisation's editors and reporters, and its " +
+        "project managers, can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/formula_trackers", p),
+    },
+
+    {
+      name: "makerble_get_formula_tracker",
+      description:
+        "Get one Formula Tracker by ID: its formula (expression tokens and formula_text), display settings, " +
+        "result_kind, where it is used (usage: projects, albums, templates) and warnings about its formula.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/formula_trackers/${id}`),
+    },
+
+    {
+      name: "makerble_list_formula_tracker_operands",
+      description:
+        "List the trackers a Formula Tracker can use, by name: the Organisation's Activity and Engagement " +
+        "trackers (type 'Change'), Achievement and Numerical trackers (type 'Indicator'; Choice trackers " +
+        "aren't listed), Cohort Trackers ('CohortTracker'), Workflow Trackers ('WorkflowTracker'), filtered " +
+        "versions ('FilteredMetric') and other Formula Trackers ('FormulaTracker'). Each has the type and id " +
+        "to put in a tracker token, its front-end type_name (e.g. 'Engagement tracker'), its unit and whether " +
+        "it adds up across periods (result_kind). Use this before makerble_create_formula_tracker.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/formula_trackers/operands", p),
+    },
+
+    {
+      name: "makerble_preview_formula_tracker",
+      description:
+        "Check a formula before saving it: returns its result on one of the Organisation's Projects for the " +
+        "current period (ending at the Project's next deadline, or today), Year to Date and All-time (null " +
+        "where it divides by 0), each tracker's own result, result_kind, and warnings worth checking (a " +
+        "tracker used twice is counted twice; a Numerical tracker added to a count; trackers with different " +
+        "units added together; dividing by a tracker that could be 0). A formula with errors (e.g. it ends " +
+        "with an operator, or brackets don't match) is refused with errors and warnings. Takes the same " +
+        "expression as makerble_create_formula_tracker; pass formula_tracker_id when editing one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "The Project to preview the result on" },
+          formula_tracker_id: { type: "number", description: "The Formula Tracker being edited, if any" },
+          expression: { type: "array", description: "See makerble_create_formula_tracker", items: { type: "object" } },
+          display_format: { type: "string", enum: ["number", "percentage"] },
+        },
+        required: ["charity_id", "project_id", "expression"],
+      },
+      handler: ({ charity_id, project_id, formula_tracker_id, ...formula_tracker }) =>
+        post("/formula_trackers/preview", { charity_id, project_id, formula_tracker_id, formula_tracker }),
+    },
+
+    {
+      name: "makerble_create_formula_tracker",
+      description:
+        "Create a Formula Tracker (Create a metric > Formula Tracker): a metric worked out from the " +
+        "Organisation's other trackers. expression is the formula as an ordered list of tokens: " +
+        "{kind: 'tracker', type, id} (type and id from makerble_list_formula_tracker_operands), " +
+        "{kind: 'operator', value: '+' | '-' | '*' | '/'}, {kind: 'number', value: 100}, {kind: 'open'} " +
+        "and {kind: 'close'} (brackets). × and ÷ are worked out before + and −, brackets first. Examples: " +
+        "A + B is [{kind:'tracker',type:'Change',id:1},{kind:'operator',value:'+'},{kind:'tracker',type:'WorkflowTracker',id:2}]; " +
+        "a percentage A ÷ B × 100 adds {kind:'operator',value:'/'}, B, {kind:'operator',value:'*'}, " +
+        "{kind:'number',value:100} with display_format 'percentage'. For each timeframe each tracker's result " +
+        "is worked out first, then the formula, so a Year to Date percentage is Year to Date numerator ÷ Year " +
+        "to Date denominator. Dividing by 0 gives no result. Refused when the formula is empty, starts or ends " +
+        "with an operator, has two operators or values in a row, unmatched or empty brackets, uses another " +
+        "Organisation's tracker, or uses itself. Requires an editor or reporter of the Organisation." +
+        "\nWorkflow: (1) makerble_list_formula_tracker_operands for the trackers. (2) makerble_list_projects " +
+        "for a Project ID. (3) makerble_preview_formula_tracker to check the result and warnings. " +
+        "(4) makerble_create_formula_tracker. (5) makerble_add_formula_tracker_to_project to place it in a " +
+        "column of a Project's Impact Scorecard, optionally with a target. Albums pick it up automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "Shown next to the result, e.g. 'Referrals completed'" },
+          description: { type: "string" },
+          expression: {
+            type: "array",
+            description: "The formula's tokens, in order",
+            items: {
+              type: "object",
+              properties: {
+                kind: { type: "string", enum: ["tracker", "operator", "number", "open", "close"] },
+                type: { type: "string", enum: ["Change", "Indicator", "CohortTracker", "WorkflowTracker", "FilteredMetric", "FormulaTracker"] },
+                id: { type: "number" },
+                value: { description: "operator: + - * /; number: the number" },
+              },
+              required: ["kind"],
+            },
+          },
+          display_format: { type: "string", enum: ["number", "percentage"], description: "Show result as (default number)" },
+          decimal_places: { type: "number", description: "0 to 3, default 0" },
+          unit_label: { type: "string", description: "Optional, e.g. 'h per child'" },
+        },
+        required: ["charity_id", "name", "expression"],
+      },
+      handler: ({ charity_id, ...formula_tracker }) =>
+        post("/formula_trackers", { formula_tracker: { charity_id, ...formula_tracker } }),
+    },
+
+    {
+      name: "makerble_update_formula_tracker",
+      description:
+        "Update a Formula Tracker's name, description, expression (replaces the whole formula), " +
+        "display_format, decimal_places or unit_label. Only the fields sent change. Changes apply everywhere " +
+        "it is used (see makerble_get_formula_tracker usage). Requires an Organisation editor, or the " +
+        "reporter who created it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          name: { type: "string" },
+          description: { type: "string" },
+          expression: { type: "array", description: "See makerble_create_formula_tracker", items: { type: "object" } },
+          display_format: { type: "string", enum: ["number", "percentage"] },
+          decimal_places: { type: "number" },
+          unit_label: { type: "string" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...formula_tracker }) => patch(`/formula_trackers/${id}`, { formula_tracker }),
+    },
+
+    {
+      name: "makerble_delete_formula_tracker",
+      description:
+        "Delete a Formula Tracker. Refused while it is used on any Project, Album or Scorecard Template; " +
+        "remove it from those first.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: async ({ id }) => {
+        await del(`/formula_trackers/${id}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_add_formula_tracker_to_project",
+      description:
+        "Place a Formula Tracker in a column of a Project's Impact Scorecard (Edit Project Metrics), " +
+        "optionally with a one-off target (a whole percentage, 0 to 100, for a percentage tracker). Columns: " +
+        "activities, engagement, potential (short-term outcomes), behaviour (medium-term), growth (long-term). " +
+        "The tracker and Project must belong to the same Organisation, and you need rights to edit the " +
+        "Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          column: { type: "string", enum: ["activities", "engagement", "potential", "behaviour", "growth"] },
+          target: { type: "number", description: "Optional one-off target" },
+        },
+        required: ["id", "project_id", "column"],
+      },
+      handler: ({ id, project_id, column, target }) =>
+        post(`/formula_trackers/${id}/projects/${project_id}`, { column, ...(target !== undefined ? { target } : {}) }),
+    },
+
+    {
+      name: "makerble_get_formula_tracker_targets",
+      description:
+        "Get a Formula Tracker's targets on a Project or an Album (its Set Targets page): the one-off " +
+        "target and any deadline targets ([{date, number}]). Pass project_id or album_id. Requires rights to " +
+        "edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id }) =>
+        get(album_id ? `/formula_trackers/${id}/albums/${album_id}` : `/formula_trackers/${id}/projects/${project_id}`),
+    },
+
+    {
+      name: "makerble_set_formula_tracker_targets",
+      description:
+        "Set a Formula Tracker's targets on a Project or an Album (Set Targets): target is the one-off " +
+        "number; deadlines is a list of {date: 'YYYY-MM-DD', number} that REPLACES this tracker's deadline " +
+        "targets there ([] clears them). An additive tracker adds its targets up across deadlines; a snapshot " +
+        "uses each deadline's target on its own. A percentage tracker's targets are whole percentages from 0 " +
+        "to 100. An Album's target is never the sum of its Projects'. The tracker must already be on that " +
+        "Project or one of the Album's Projects. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          target: { type: "number", description: "One-off target" },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets, replacing any already set for this tracker",
+            items: {
+              type: "object",
+              properties: { date: { type: "string" }, number: { type: "number" } },
+              required: ["date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...targets }) =>
+        patch(album_id ? `/formula_trackers/${id}/albums/${album_id}` : `/formula_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_remove_formula_tracker_from_project",
+      description: "Remove a Formula Tracker from a Project's Impact Scorecard, and its Albums if no other Project in them uses it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: async ({ id, project_id }) => {
+        await del(`/formula_trackers/${id}/projects/${project_id}`);
         return { removed: true, id, project_id };
       },
     },
