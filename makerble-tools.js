@@ -1770,7 +1770,7 @@ export function buildTools(api) {
         "Year to Date and All-time, and the latest records it counts that you may see (Contact name, who " +
         "they were signposted to, which Project they were referred to or the Case's title, and when); " +
         "hidden_count says how many more are counted but hidden from you, e.g. confidential Cases. Takes the same source, " +
-        "count_mode and settings as makerble_create_workflow_tracker.",
+        "count_mode, settings and contact_criteria as makerble_create_workflow_tracker.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1779,6 +1779,7 @@ export function buildTools(api) {
           source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "See makerble_create_workflow_tracker" },
+          contact_criteria: { type: "object", description: "See makerble_create_workflow_tracker" },
         },
         required: ["charity_id", "project_id", "source"],
       },
@@ -1804,7 +1805,11 @@ export function buildTools(api) {
         "with that Case Form (IDs from makerble_list_case_forms); leave it out for any Case Form. " +
         "Confidential Cases are counted but only listed to people who can see them. count_mode 'items' " +
         "(default) counts each signposting, referral, Case or closing and adds up across periods (except " +
-        "cases_open); 'contacts' counts each Contact once and is a snapshot. Requires an editor or reporter of the Organisation." +
+        "cases_open); 'contacts' counts each Contact once and is a snapshot. contact_criteria (\"Only count " +
+        "contacts who match\") counts only the items of Contacts who meet Contact Filter criteria, the same keys " +
+        "as a Cohort Tracker's criteria (see makerble_preview_cohort_tracker), e.g. {age_to: {year: '17'}} for " +
+        "children; Contacts are matched on their current details, so editing a Contact can change past results. " +
+        "Requires an editor or reporter of the Organisation." +
         "\nWorkflow: (1) makerble_list_projects for Project IDs. (2) makerble_preview_workflow_tracker to " +
         "check the count. (3) makerble_create_workflow_tracker. (4) makerble_add_workflow_tracker_to_project " +
         "to place it in a column of a Project's Impact Scorecard, optionally with a target. Albums pick it " +
@@ -1823,6 +1828,12 @@ export function buildTools(api) {
               "internal_referrals: {destinations: 'any'|'only'|'except', project_ids: [number]}; " +
               "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); signpostings: none",
           },
+          contact_criteria: {
+            type: "object",
+            description:
+              "Optional: Contact Filter criteria a Contact must meet for their items to count, the same keys as " +
+              "a Cohort Tracker's criteria. Leave out, or {}, to count every Contact.",
+          },
         },
         required: ["charity_id", "name", "source"],
       },
@@ -1833,7 +1844,7 @@ export function buildTools(api) {
     {
       name: "makerble_update_workflow_tracker",
       description:
-        "Update a Workflow Tracker's name, description, source, count_mode or settings. Only the fields sent " +
+        "Update a Workflow Tracker's name, description, source, count_mode, settings or contact_criteria. Only the fields sent " +
         "change. Changes apply everywhere it is used (see makerble_get_workflow_tracker usage). Requires an " +
         "Organisation editor, or the reporter who created it.",
       inputSchema: {
@@ -1845,6 +1856,10 @@ export function buildTools(api) {
           source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "Replaces the stored settings" },
+          contact_criteria: {
+            type: "object",
+            description: "Replaces the stored Contact Filter criteria (\"Only count contacts who match\"); {} counts every Contact",
+          },
         },
         required: ["id"],
       },
