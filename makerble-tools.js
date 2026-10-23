@@ -1299,7 +1299,13 @@ export function buildTools(api) {
       name: "makerble_get_contact_checklists",
       description:
         "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
-        "each, done_count of actions_count and every action with done true/false and who is responsible " +
+        "each, done_count of actions_count and every action with done true/false. A done action has a " +
+        "completion saying when it was done (completed_at: when the record that did it was made, e.g. the " +
+        "survey's date), by whom (completed_by_user_id, completed_by_name; null when unknown), how " +
+        "(completion_method: detected or manual) and with what record (proof_type and proof_id, e.g. Story " +
+        "123; proof_deleted true once that record was deleted). A done action stays done. Actions are " +
+        "ticked in the background a few seconds after the record is saved, so re-check shortly after " +
+        "creating a story or role. Each action also says who is responsible " +
         "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
         "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
         "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
