@@ -1210,6 +1210,11 @@ export function buildTools(api) {
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                only_this_project: {
+                  type: "boolean",
+                  description: "'Only count records in this project': for project_scopable types (surveys, events, labelled stories, cases, " +
+                    "project states), count only records made in the Project the Checklist was added to the Contact through",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1255,6 +1260,7 @@ export function buildTools(api) {
                 title: { type: "string" },
                 description: { type: "string" },
                 criteria: { type: "object" },
+                only_this_project: { type: "boolean", description: "'Only count records in this project' (project_scopable types only)" },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1327,20 +1333,23 @@ export function buildTools(api) {
       description:
         "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
         "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
-        "first (returns [{id, name}] and adds nothing).",
+        "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
+        "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
+        "count records in this project' then count only that Project's records).",
       inputSchema: {
         type: "object",
         properties: {
           beneficiary_id: { type: "number", description: "The Contact ID" },
           checklist_id: { type: "number" },
+          project_id: { type: "number", description: "The Project to add it through; required when the Checklist lists several projects" },
           list_available: { type: "boolean", description: "Only list the Checklists that can be added" },
         },
         required: ["beneficiary_id"],
       },
-      handler: ({ beneficiary_id, checklist_id, list_available }) =>
+      handler: ({ beneficiary_id, checklist_id, project_id, list_available }) =>
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
-          : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
+          : post(`/beneficiaries/${beneficiary_id}/checklists`, project_id ? { checklist_id, project_id } : { checklist_id }),
     },
 
     {
