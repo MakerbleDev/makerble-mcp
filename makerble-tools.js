@@ -1359,6 +1359,11 @@ export function buildTools(api) {
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                only_this_project: {
+                  type: "boolean",
+                  description: "'Only count records in this project': for project_scopable types (surveys, events, labelled stories, cases, " +
+                    "project states), count only records made in the Project the Checklist was added to the Contact through",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1404,6 +1409,7 @@ export function buildTools(api) {
                 title: { type: "string" },
                 description: { type: "string" },
                 criteria: { type: "object" },
+                only_this_project: { type: "boolean", description: "'Only count records in this project' (project_scopable types only)" },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1448,7 +1454,13 @@ export function buildTools(api) {
       name: "makerble_get_contact_checklists",
       description:
         "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
-        "each, done_count of actions_count and every action with done true/false and who is responsible " +
+        "each, done_count of actions_count and every action with done true/false. A done action has a " +
+        "completion saying when it was done (completed_at: when the record that did it was made, e.g. the " +
+        "survey's date), by whom (completed_by_user_id, completed_by_name; null when unknown), how " +
+        "(completion_method: detected or manual) and with what record (proof_type and proof_id, e.g. Story " +
+        "123; proof_deleted true once that record was deleted). A done action stays done. Actions are " +
+        "ticked in the background a few seconds after the record is saved, so re-check shortly after " +
+        "creating a story or role. Each action also says who is responsible " +
         "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
         "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
         "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
@@ -1470,20 +1482,23 @@ export function buildTools(api) {
       description:
         "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
         "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
-        "first (returns [{id, name}] and adds nothing).",
+        "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
+        "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
+        "count records in this project' then count only that Project's records).",
       inputSchema: {
         type: "object",
         properties: {
           beneficiary_id: { type: "number", description: "The Contact ID" },
           checklist_id: { type: "number" },
+          project_id: { type: "number", description: "The Project to add it through; required when the Checklist lists several projects" },
           list_available: { type: "boolean", description: "Only list the Checklists that can be added" },
         },
         required: ["beneficiary_id"],
       },
-      handler: ({ beneficiary_id, checklist_id, list_available }) =>
+      handler: ({ beneficiary_id, checklist_id, project_id, list_available }) =>
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
-          : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
+          : post(`/beneficiaries/${beneficiary_id}/checklists`, project_id ? { checklist_id, project_id } : { checklist_id }),
     },
 
     {
