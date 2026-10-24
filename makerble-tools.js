@@ -3706,8 +3706,9 @@ export function buildTools(api) {
       name: "makerble_search_impact_store",
       description:
         "Search the Makerble ImpactStore (the Explore pages) for a ready-made, well-tested Survey (Story " +
-        "Category), Contact Form (Beneficiary Category), Impact Framework (Template), Report Template or Toolkit " +
-        "(Collection) published for any organisation to reuse. Use it before making one of these from scratch: " +
+        "Category), Contact Form (Beneficiary Category), Case Form (Custom Form for cases), Impact Framework " +
+        "(Template), Report Template, Toolkit (Collection) or Project Type published for any organisation to " +
+        "reuse. Use it before making one of these from scratch: " +
         "reusing an ImpactStore item is faster, usually better, and lets organisations compare results. Only " +
         "published items are searched, and withdrawn ones never appear. Pass the key words of what the user " +
         "wants (e.g. 'wellbeing young people'), not a whole sentence: items matching more of the words come " +
@@ -3715,7 +3716,7 @@ export function buildTools(api) {
         "subcause name from the Explore page, e.g. 'Health' or 'Mental health'). Returns the {page, page_size, " +
         "page_count, total_count, data} envelope; each item has id, type, type_label, name, a one-line " +
         "description, causes, used_by_count (how many organisations use it), explore_url (its Explore page, to " +
-        "show the user) and matched_words (how many of your words it matched; an item matching only one of " +
+        "show the user; null for a Project Type) and matched_words (how many of your words it matched; an item matching only one of " +
         "several words is probably not a good match). Typical workflow: search with per_page 3, show the user " +
         "the good matches with their explore_url, and if they want one, read it in full with " +
         "makerble_get_library_item using the same type and id (Report Templates excepted).",
@@ -3725,8 +3726,8 @@ export function buildTools(api) {
           query: { type: "string", description: "The key words of what the user wants, e.g. 'wellbeing survey young people'" },
           item_type: {
             type: "string",
-            enum: ["survey", "contact_form", "impact_framework", "report_template", "toolkit"],
-            description: "Only this kind of item (default every kind): survey (Survey), contact_form (Contact Form), impact_framework (Impact Framework), report_template (Report Template), toolkit (Toolkit)",
+            enum: ["survey", "contact_form", "case_form", "impact_framework", "report_template", "toolkit", "project_type"],
+            description: "Only this kind of item (default every kind): survey (Survey), contact_form (Contact Form), case_form (Case Form), impact_framework (Impact Framework), report_template (Report Template), toolkit (Toolkit), project_type (Project Type)",
           },
           cause: { type: "string", description: "Only items tagged with this cause or subcause, e.g. 'Mental health'" },
           page: { type: "number" },
