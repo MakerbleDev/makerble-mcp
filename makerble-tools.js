@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 145 Makerble MCP tool definitions.
+ * All 149 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -173,13 +173,116 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_project",
-      description: "Get a single Project by ID.",
+      description:
+        "Get a single Project by ID. beneficiary_states lists the Contact statuses (Beneficiary States, e.g. " +
+        "Enrolled, Waiting List) switched on for the Project: use their ids as beneficiary_state_id in " +
+        "makerble_add_contacts_to_project.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
         required: ["id"],
       },
       handler: ({ id }) => get(`/projects/${id}`),
+    },
+
+    {
+      name: "makerble_get_project_form",
+      description:
+        "Get what the Create Project form offers in an organisation, before creating or editing a Project with " +
+        "makerble_create_project or makerble_update_project. Returns the Project Types (each with its solutions) and " +
+        "the organisation's Project Categories. Each category lists its form fields in order: standard fields with " +
+        "the parameter that sets them (e.g. project[help_statement] for Short Description, project[reporter_ids] for " +
+        "Changemakers), custom questions with the field_id their answer goes under in custom_fields, and dropdowns " +
+        "with the field_id their choices go under in sub_ratios (use makerble_list_answer_choices for the choices). " +
+        "is_mandatory marks the fields the form requires. Get the organisation id from makerble_list_charities.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) to create the Project in." },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/projects/form", { charity_id }),
+    },
+
+    {
+      name: "makerble_create_project",
+      description:
+        "Create a Project in an organisation, as the Create Project page does, with the same permissions: the user must " +
+        "be allowed to create projects there (an Organisation Admin, or a colleague with project creation switched on). " +
+        "The user becomes the Project's Manager unless editor_ids is given. Any Project Automation the new Project " +
+        "matches is applied. Returns the Project.\n" +
+        "Workflow: (1) Look before you make: call makerble_list_projects and check the organisation doesn't already " +
+        "have this Project; suggest using or editing an existing one instead of a near-duplicate. " +
+        "(2) makerble_get_project_form → project_type_id, project_category_id and the category's fields. " +
+        "(3) makerble_create_project with the fields the category's form asks for. " +
+        "(4) Set its Project Preferences and targets separately once those tools exist.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) to create the Project in." },
+          name: { type: "string", description: "The Project's name." },
+          project_type_id: { type: "number", description: "From makerble_get_project_form. Required." },
+          solution_group_id: { type: "number", description: "One of the chosen Project Type's solutions, from makerble_get_project_form." },
+          project_category_id: { type: "number", description: "One of the organisation's Project Categories. Defaults to its default category." },
+          help_statement: { type: "string", description: "Short Description." },
+          help_description: { type: "string", description: "Long Description." },
+          location: { type: "string" },
+          editor_ids: { type: "array", items: { type: "number" }, description: "Managers (Project Editors) by user id." },
+          reporter_ids: { type: "array", items: { type: "number" }, description: "Changemakers (Project Reporters) by user id." },
+          observer_ids: { type: "array", items: { type: "number" }, description: "Analysts (Project Observers) by user id." },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Surveys (Story Categories) to use in the Project, on top of the Project Category's own." },
+          privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+            description: "Who can see the Project. only_certain_individual uses individual_list.",
+          },
+          individual_list: { type: "array", items: { type: "number" }, description: "User ids the Project is shared with, for only_certain_individual." },
+          custom_fields: { type: "object", description: "Answers to the category's custom questions: { \"<field_id>\": value }." },
+          sub_ratios: { type: "object", description: "Choices in the category's dropdowns: { \"<field_id>\": [choice ids] }." },
+        },
+        required: ["charity_id", "name", "project_type_id"],
+      },
+      handler: ({ charity_id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
+        post("/projects", { charity_id, project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_update_project",
+      description:
+        "Edit a Project's details, as the Edit Project page does, with the same permissions (a Manager of the Project or " +
+        "an Organisation Admin; a Changemaker can't). Only what you send changes. A colleague list you send replaces " +
+        "that role's colleagues; one you leave out is kept. story_category_ids adds Surveys (Story Categories) to the " +
+        "Project and never removes or stops any. Returns the Project.\n" +
+        "Before changing anything, show the user the Project's current values (makerble_get_project) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          name: { type: "string" },
+          project_type_id: { type: "number" },
+          solution_group_id: { type: "number" },
+          project_category_id: { type: "number", description: "One of the organisation's Project Categories." },
+          help_statement: { type: "string", description: "Short Description." },
+          help_description: { type: "string", description: "Long Description." },
+          location: { type: "string" },
+          editor_ids: { type: "array", items: { type: "number" }, description: "Replaces the Managers (Project Editors)." },
+          reporter_ids: { type: "array", items: { type: "number" }, description: "Replaces the Changemakers (Project Reporters)." },
+          observer_ids: { type: "array", items: { type: "number" }, description: "Replaces the Analysts (Project Observers)." },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Surveys to add to the Project." },
+          privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+          },
+          individual_list: { type: "array", items: { type: "number" } },
+          custom_fields: { type: "object", description: "Answers to the category's custom questions: { \"<field_id>\": value }." },
+          sub_ratios: { type: "object", description: "Choices in the category's dropdowns: { \"<field_id>\": [choice ids] }." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
+        patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
     },
 
     {
@@ -356,6 +459,46 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/project_beneficiaries", p),
+    },
+
+    {
+      name: "makerble_add_contacts_to_project",
+      description:
+        "Add existing Contacts (Beneficiaries) to a Project, optionally with a status (Beneficiary State, e.g. " +
+        "Enrolled or Waiting List). This is the same as 'Assign Contacts to projects' on the Contacts page in " +
+        "Makerble: each Contact added gets an entry on their activity timeline and the Project's team is notified. " +
+        "It does not create Contacts: use makerble_create_contact for a new person. " +
+        "\nWhen to use: before makerble_create_survey_links with beneficiary_ids, when the Contacts aren't in the " +
+        "Survey Campaign's Project yet (that call fails with 'not in the project' otherwise). Contacts created from " +
+        "an email address by makerble_create_survey_links join the organisation but not the Project. " +
+        "\nWorkflow: (1) makerble_get_project → beneficiary_states, if you want a status other than the default " +
+        "(Enrolled, or the Project's first status if Enrolled is switched off). (2) Call this tool. " +
+        "\nContacts already in the Project are left as they are: their status is not changed, and they are returned " +
+        "with already_in_project: true. At most 200 beneficiary_ids per call. Nothing is added if any Contact is " +
+        "refused. The Project must be open (not closed) and in the Contacts' organisation. " +
+        "Requires an Organisation Editor, Reporter or Observer, or a Project Editor (or Reporter, if the " +
+        "organisation allows it) of a Project the Contact is in. " +
+        "Returns { data: [{ id, project_id, beneficiary_id, beneficiary_state_id, already_in_project, created_at, " +
+        "updated_at }] }, one entry per Contact. Errors: 404 for a Project you can't see; 403 naming the Contacts " +
+        "you may not move; 422 with beneficiary_ids_not_found for ids that aren't Contacts of the Project's " +
+        "organisation, or for an unknown status, a closed Project, no ids or more than 200.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project to add the Contacts to" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs from the Project's organisation, at most 200",
+          },
+          beneficiary_state_id: {
+            type: "number",
+            description: "Optional Contact status (Beneficiary State) ID from makerble_get_project's beneficiary_states",
+          },
+        },
+        required: ["project_id", "beneficiary_ids"],
+      },
+      handler: (body) => post("/project_beneficiaries", body),
     },
 
     {
@@ -1018,12 +1161,18 @@ export function buildTools(api) {
         "(4) Call this tool. " +
         "\nRecipients: beneficiary_ids must be Contacts already in the Survey Campaign's Project. emails can be any " +
         "address: it is matched to an existing Contact of the organisation, or a new Contact is created. " +
+        "A Contact created from an email joins the organisation but NOT the Survey Campaign's Project, so to pass " +
+        "their id in beneficiary_ids later, first call makerble_add_contacts_to_project (or reuse their existing " +
+        "link from makerble_list_survey_links). " +
         "At most 200 beneficiary_ids + emails per call. " +
         "\nlink_expiry: 'use_once' (default) — the link stops working after one response; " +
         "'evergreen' — the link stays active for repeat responses. " +
         "Requires Project Editor or Organisation Editor access. " +
         "Returns send_survey_id and data: [{beneficiary_id, email, survey_token, survey_url, link_expiry, " +
-        "is_anonymised, send_survey_wave_id, expired, created_at}].",
+        "is_anonymised, send_survey_wave_id, expired, created_at}]. " +
+        "A 422 for refused Contacts lists them in invalid_beneficiary_ids, split into beneficiary_ids_not_in_project " +
+        "(in the organisation but not the Project: add them with makerble_add_contacts_to_project, then retry) and " +
+        "beneficiary_ids_not_found (not Contacts of the organisation).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1210,6 +1359,11 @@ export function buildTools(api) {
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                only_this_project: {
+                  type: "boolean",
+                  description: "'Only count records in this project': for project_scopable types (surveys, events, labelled stories, cases, " +
+                    "project states), count only records made in the Project the Checklist was added to the Contact through",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1255,6 +1409,7 @@ export function buildTools(api) {
                 title: { type: "string" },
                 description: { type: "string" },
                 criteria: { type: "object" },
+                only_this_project: { type: "boolean", description: "'Only count records in this project' (project_scopable types only)" },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1299,7 +1454,13 @@ export function buildTools(api) {
       name: "makerble_get_contact_checklists",
       description:
         "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
-        "each, done_count of actions_count and every action with done true/false and who is responsible " +
+        "each, done_count of actions_count and every action with done true/false. A done action has a " +
+        "completion saying when it was done (completed_at: when the record that did it was made, e.g. the " +
+        "survey's date), by whom (completed_by_user_id, completed_by_name; null when unknown), how " +
+        "(completion_method: detected or manual) and with what record (proof_type and proof_id, e.g. Story " +
+        "123; proof_deleted true once that record was deleted). A done action stays done. Actions are " +
+        "ticked in the background a few seconds after the record is saved, so re-check shortly after " +
+        "creating a story or role. Each action also says who is responsible " +
         "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
         "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
         "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
@@ -1321,20 +1482,23 @@ export function buildTools(api) {
       description:
         "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
         "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
-        "first (returns [{id, name}] and adds nothing).",
+        "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
+        "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
+        "count records in this project' then count only that Project's records).",
       inputSchema: {
         type: "object",
         properties: {
           beneficiary_id: { type: "number", description: "The Contact ID" },
           checklist_id: { type: "number" },
+          project_id: { type: "number", description: "The Project to add it through; required when the Checklist lists several projects" },
           list_available: { type: "boolean", description: "Only list the Checklists that can be added" },
         },
         required: ["beneficiary_id"],
       },
-      handler: ({ beneficiary_id, checklist_id, list_available }) =>
+      handler: ({ beneficiary_id, checklist_id, project_id, list_available }) =>
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
-          : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
+          : post(`/beneficiaries/${beneficiary_id}/checklists`, project_id ? { checklist_id, project_id } : { checklist_id }),
     },
 
     {
