@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 161 Makerble MCP tool definitions.
+ * All 163 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -71,6 +71,7 @@ export function makeApiClient(baseUrl, email, token) {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
     patch: (path, body) => request("PATCH", path, body),
+    put: (path, body) => request("PUT", path, body),
     del: (path, body) => request("DELETE", path, body),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
@@ -118,7 +119,7 @@ const WEBHOOK_EVENTS = [
 ];
 
 export function buildTools(api) {
-  const { get, post, patch, del, postBearer, signIn } = api;
+  const { get, post, patch, put, del, postBearer, signIn } = api;
   const query = (p) => { const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined)); return qs.toString() ? `?${qs}` : ""; };
   const metricDestinationPath = (metricType, metricId, destination, targetId, context) =>
     `/metrics/${metricType}/${metricId}/destinations/${destination}${targetId ? `/${targetId}` : ""}${query(context)}`;
@@ -4306,6 +4307,59 @@ export function buildTools(api) {
         required: ["item_type", "id"],
       },
       handler: ({ item_type, id }) => get(`/library/${encodeURIComponent(item_type)}/${id}/usage`),
+    },
+
+    // ── Seats (CP-8881) ───────────────────────────────────────────────────────
+    {
+      name: "makerble_list_seats",
+      description:
+        "List an Organisation's (Charity's) seats per colleague: the Seats per Colleague page under Our Account › " +
+        "Seats in Makerble. Use it to answer 'who has which seat', 'are we over our seat count' or 'who still needs " +
+        "a seat'. Each Contract (what the Organisation has bought, e.g. Makerble CRM · Standard) comes with its seats " +
+        "bought, assigned and over, per Billing Role (Organiser, Practitioner or Helper) on Role-based Pricing, or one " +
+        "line in all on Flat Pricing; default_for_new_colleagues marks the Contract new colleagues are given seats on " +
+        "automatically. data is a page of colleagues: their roles in words, lowest_seat_allowed (the Billing Role their " +
+        "roles need), status (covered, no_seat, seat_too_low, or no_seat_needed for someone still holding a seat they " +
+        "no longer need), and the seat they hold on each Contract. Nobody loses access because of their seat. Only " +
+        "the Organisation's admins (Organisation Admins / Charity Editors) can read this; anyone else gets not-found.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Colleagues per page, up to 200 (default 10)" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/seats`, params),
+    },
+
+    {
+      name: "makerble_change_seat",
+      description:
+        "Give a colleague a seat on one of their Organisation's current Contracts, change it, or take it away. Call " +
+        "makerble_list_seats first to get the contract_id, the Billing Role ids (from a Contract's lines) and the " +
+        "colleague's user_id, and to see whether the Contract uses Role-based or Flat Pricing. On Role-based Pricing " +
+        "send billing_role_id (e.g. the Helper seat's id), or billing_role_id: null to take the seat away. On Flat " +
+        "Pricing send has_seat: true or false instead, and no billing_role_id. A seat below the colleague's " +
+        "lowest_seat_allowed shows as 'Seat too low'; going over the seats bought is allowed and shows as over count, so " +
+        "warn the user before doing either. The old seat stays in Seat History. Only the Organisation's admins can " +
+        "change seats. Returns the colleague with their seats after the change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          user_id: { type: "number", description: "The colleague's user id, from makerble_list_seats" },
+          contract_id: { type: "number", description: "One of the Organisation's current Contracts, from makerble_list_seats" },
+          billing_role_id: {
+            type: ["number", "null"],
+            description: "Role-based Pricing only: the Billing Role (seat) to give, or null to take the seat away",
+          },
+          has_seat: { type: "boolean", description: "Flat Pricing only: true gives a seat, false takes it away" },
+        },
+        required: ["organisation_id", "user_id", "contract_id"],
+      },
+      handler: ({ organisation_id, user_id, ...body }) => put(`/organisations/${organisation_id}/seats/${user_id}`, body),
     },
   ];
 }
