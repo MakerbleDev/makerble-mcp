@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 157 Makerble MCP tool definitions.
+ * All 161 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -283,6 +283,138 @@ export function buildTools(api) {
       },
       handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
         patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_get_project_settings",
+      description:
+        "Get a Project's Project Preferences, as its Project Preferences page shows them: which bio forms (Contact " +
+        "Forms) create and edit Contacts (contact_form_ids, edit_contact_form_ids), which Contact statuses are " +
+        "switched on (beneficiary_state_ids: Waiting List, Enrolled, Alumni, Declined) with each status's form and " +
+        "baseline Surveys, editorial control (which bio forms each role may edit), Events (is_creation_of_events_required, " +
+        "event_creator_ids, event_category_ids for Event Formats), Cases (is_creation_of_new_cases_enabled, " +
+        "case_creator_ids, custom_field_category_id for the Case Form), Timesheets, the default privacy of new Stories, " +
+        "and the Mailchimp list. Requires a Project Manager or Organisation Admin. Use it before " +
+        "makerble_update_project_settings to show the user the current values.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Project's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/projects/${id}/preferences`),
+    },
+
+    {
+      name: "makerble_update_project_settings",
+      description:
+        "Change a Project's Project Preferences, as its Project Preferences page does, with the same permissions " +
+        "(a Project Manager or Organisation Admin; a Changemaker can't). Send only the settings to change, using the " +
+        "names makerble_get_project_settings returns; a list you send replaces that list ([] empties it). Forms, " +
+        "Case Forms, Event Formats and Surveys must be the Project's organisation's. Examples: switch on the " +
+        "Waiting List and Enrolled statuses with beneficiary_state_ids; choose a bio form with contact_form_ids; " +
+        "switch on Events with is_creation_of_events_required: true. Returns the Project Preferences.\n" +
+        "Before changing anything, show the user the current values (makerble_get_project_settings) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          beneficiary_state_ids: { type: "array", items: { type: "number" }, description: "Contact statuses switched on." },
+          contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms used to create Contacts." },
+          edit_contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms that can be added to a Contact's bio." },
+          is_creation_of_events_required: { type: "boolean", description: "Enable Events." },
+          event_creator_ids: { type: "array", items: { type: "number" }, description: "Users who may create Events besides Project Managers." },
+          event_category_ids: { type: "array", items: { type: "number" }, description: "The Project's Event Formats." },
+          is_creation_of_new_cases_enabled: { type: "boolean", description: "Enable Cases." },
+          case_creator_ids: { type: "array", items: { type: "number" }, description: "Changemakers and Analysts who may create Cases." },
+          custom_field_category_id: { type: ["number", "null"], description: "The Case Form for the Project's Cases." },
+          is_creation_of_timesheets_required: { type: "boolean", description: "Enable Timesheets." },
+          default_story_privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+            description: "Who sees a new Story by default. only_certain_individual uses individual_list.",
+          },
+          individual_list: { type: "array", items: { type: "number" } },
+          default_results_template_id: { type: ["number", "null"], description: "The Impact Framework the Results Canvas shows by default; null for All metrics." },
+        },
+        required: ["id"],
+        additionalProperties: true,
+      },
+      handler: ({ id, ...body }) => patch(`/projects/${id}/preferences`, body),
+    },
+
+    {
+      name: "makerble_get_project_targets",
+      description:
+        "Get a Project's targets, as its Set Targets page shows them: year_start_date (the day its target year " +
+        "starts), the one-off target on each Activity (Change) and Outcome (Indicator) metric on the Project (metrics), " +
+        "on each Cohort, Workflow and Formula Tracker and filtered version (trackers), and its deadline targets " +
+        "(deadlines). Requires rights to edit the Project's targets. Use before makerble_set_project_targets.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Project's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/projects/${id}/targets`),
+    },
+
+    {
+      name: "makerble_set_project_targets",
+      description:
+        "Set a Project's targets, as its Set Targets page does. Only metrics and trackers already on the Project (see " +
+        "makerble_get_project_targets) can be given a target; to add a metric use makerble_add_metric_to, and to add a " +
+        "tracker makerble_add_cohort_tracker_to_project, makerble_add_workflow_tracker_to_project or " +
+        "makerble_add_formula_tracker_to_project. Anything not on " +
+        "the Project is refused and nothing is saved. " +
+        "deadlines, when sent, replaces all the Project's deadline targets; send [] to clear them. Returns the targets.\n" +
+        "Before changing anything, show the user the current targets and what you will change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          year_start_date: { type: "string", description: "The day the Project's target year starts, YYYY-MM-DD." },
+          metrics: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string", enum: ["Change", "Indicator"] },
+                metric_id: { type: "number" },
+                target: { type: "number", description: "A whole number, 0 or more." },
+              },
+              required: ["metric_type", "metric_id", "target"],
+            },
+          },
+          trackers: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tracker_type: { type: "string", enum: ["CohortTracker", "WorkflowTracker", "FormulaTracker", "FilteredMetric"] },
+                tracker_id: { type: "number" },
+                target: { type: "number" },
+              },
+              required: ["tracker_type", "tracker_id", "target"],
+            },
+          },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets: what to reach by a date. Replaces them all.",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string" },
+                metric_id: { type: "number" },
+                date: { type: "string", description: "YYYY-MM-DD." },
+                number: { type: "number" },
+              },
+              required: ["metric_type", "metric_id", "date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/projects/${id}/targets`, body),
     },
 
     {
