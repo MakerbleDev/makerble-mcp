@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 149 Makerble MCP tool definitions.
+ * All 150 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2401,6 +2401,44 @@ export function buildTools(api) {
       },
       handler: ({ id, project_id, album_id, ...targets }) =>
         patch(album_id ? `/formula_trackers/${id}/albums/${album_id}` : `/formula_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_get_formula_tracker_results",
+      description:
+        "Get a Formula Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, as its card and popup " +
+        "show it: the number, how it is displayed (display_value, e.g. \"37.5%\" or \"2.4 h per child\"; \"–\" " +
+        "when there isn't enough data), its target, and the trackers behind it (trackers: [{type, id, name, " +
+        "type_name, unit, number}]) with the formula written out in words (formula) and with their numbers in " +
+        "place (formula_with_values, e.g. \"4 ÷ 8 × 100\"). number is null when a tracker it uses has no result " +
+        "or it divides by 0. Each timeframe is worked out from that timeframe's own tracker numbers, so a Year to " +
+        "Date percentage is Year to Date numerator ÷ Year to Date denominator; on an Album the trackers are " +
+        "worked out on the Album as a whole, then the formula. result_kind 'additive' adds up across periods; " +
+        "'snapshot' is read as_of the window's last day (or today while that is still to come). timeframe is " +
+        "'period' (the day after the previous Target Deadline up to the deadline), 'year_to_date' (the start of " +
+        "the Project's year up to the deadline) or 'all_time' (default). as_of is the deadline the window ends " +
+        "on (YYYY-MM-DD); without it the window ends at the next Target Deadline, or today when there is none, " +
+        "as on the Results Canvas. When the formula only adds Workflow Trackers that count items (itemised: " +
+        "true, e.g. External referrals + Internal referrals), data lists the items counted, newest first, a page " +
+        "at a time ([{contact_id, contact_name, detail, project_id, case_id, happened_at}]); items you may not " +
+        "see are counted in hidden_count but never listed. Otherwise data is empty. Pass project_id or " +
+        "album_id; the tracker must be on that Project, or one of the Album's Projects. Requires rights to see " +
+        "that Results Canvas. Find trackers with makerble_list_formula_trackers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          timeframe: { type: "string", enum: ["period", "year_to_date", "all_time"], description: "Default all_time" },
+          as_of: { type: "string", description: "The deadline the window ends on, YYYY-MM-DD" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Items per page, default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...params }) =>
+        get(album_id ? `/formula_trackers/${id}/albums/${album_id}/results` : `/formula_trackers/${id}/projects/${project_id}/results`, params),
     },
 
     {
