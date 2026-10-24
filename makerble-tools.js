@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 134 Makerble MCP tool definitions.
+ * All 137 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -180,6 +180,106 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/projects/${id}`),
+    },
+
+    {
+      name: "makerble_get_project_form",
+      description:
+        "Get what the Create Project form offers in an organisation, before creating or editing a Project with " +
+        "makerble_create_project or makerble_update_project. Returns the Project Types (each with its solutions) and " +
+        "the organisation's Project Categories. Each category lists its form fields in order: standard fields with " +
+        "the parameter that sets them (e.g. project[help_statement] for Short Description, project[reporter_ids] for " +
+        "Changemakers), custom questions with the field_id their answer goes under in custom_fields, and dropdowns " +
+        "with the field_id their choices go under in sub_ratios (use makerble_list_answer_choices for the choices). " +
+        "is_mandatory marks the fields the form requires. Get the organisation id from makerble_list_charities.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) to create the Project in." },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/projects/form", { charity_id }),
+    },
+
+    {
+      name: "makerble_create_project",
+      description:
+        "Create a Project in an organisation, as the Create Project page does, with the same permissions: the user must " +
+        "be allowed to create projects there (an Organisation Admin, or a colleague with project creation switched on). " +
+        "The user becomes the Project's Manager unless editor_ids is given. Any Project Automation the new Project " +
+        "matches is applied. Returns the Project.\n" +
+        "Workflow: (1) Look before you make: call makerble_list_projects and check the organisation doesn't already " +
+        "have this Project; suggest using or editing an existing one instead of a near-duplicate. " +
+        "(2) makerble_get_project_form → project_type_id, project_category_id and the category's fields. " +
+        "(3) makerble_create_project with the fields the category's form asks for. " +
+        "(4) Set its Project Preferences and targets separately once those tools exist.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) to create the Project in." },
+          name: { type: "string", description: "The Project's name." },
+          project_type_id: { type: "number", description: "From makerble_get_project_form. Required." },
+          solution_group_id: { type: "number", description: "One of the chosen Project Type's solutions, from makerble_get_project_form." },
+          project_category_id: { type: "number", description: "One of the organisation's Project Categories. Defaults to its default category." },
+          help_statement: { type: "string", description: "Short Description." },
+          help_description: { type: "string", description: "Long Description." },
+          location: { type: "string" },
+          editor_ids: { type: "array", items: { type: "number" }, description: "Managers (Project Editors) by user id." },
+          reporter_ids: { type: "array", items: { type: "number" }, description: "Changemakers (Project Reporters) by user id." },
+          observer_ids: { type: "array", items: { type: "number" }, description: "Analysts (Project Observers) by user id." },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Surveys (Story Categories) to use in the Project, on top of the Project Category's own." },
+          privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+            description: "Who can see the Project. only_certain_individual uses individual_list.",
+          },
+          individual_list: { type: "array", items: { type: "number" }, description: "User ids the Project is shared with, for only_certain_individual." },
+          custom_fields: { type: "object", description: "Answers to the category's custom questions: { \"<field_id>\": value }." },
+          sub_ratios: { type: "object", description: "Choices in the category's dropdowns: { \"<field_id>\": [choice ids] }." },
+        },
+        required: ["charity_id", "name", "project_type_id"],
+      },
+      handler: ({ charity_id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
+        post("/projects", { charity_id, project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_update_project",
+      description:
+        "Edit a Project's details, as the Edit Project page does, with the same permissions (a Manager of the Project or " +
+        "an Organisation Admin; a Changemaker can't). Only what you send changes. A colleague list you send replaces " +
+        "that role's colleagues; one you leave out is kept. story_category_ids adds Surveys (Story Categories) to the " +
+        "Project and never removes or stops any. Returns the Project.\n" +
+        "Before changing anything, show the user the Project's current values (makerble_get_project) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          name: { type: "string" },
+          project_type_id: { type: "number" },
+          solution_group_id: { type: "number" },
+          project_category_id: { type: "number", description: "One of the organisation's Project Categories." },
+          help_statement: { type: "string", description: "Short Description." },
+          help_description: { type: "string", description: "Long Description." },
+          location: { type: "string" },
+          editor_ids: { type: "array", items: { type: "number" }, description: "Replaces the Managers (Project Editors)." },
+          reporter_ids: { type: "array", items: { type: "number" }, description: "Replaces the Changemakers (Project Reporters)." },
+          observer_ids: { type: "array", items: { type: "number" }, description: "Replaces the Analysts (Project Observers)." },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Surveys to add to the Project." },
+          privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+          },
+          individual_list: { type: "array", items: { type: "number" } },
+          custom_fields: { type: "object", description: "Answers to the category's custom questions: { \"<field_id>\": value }." },
+          sub_ratios: { type: "object", description: "Choices in the category's dropdowns: { \"<field_id>\": [choice ids] }." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
+        patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
     },
 
     {
