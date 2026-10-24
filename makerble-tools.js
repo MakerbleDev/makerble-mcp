@@ -1302,7 +1302,8 @@ export function buildTools(api) {
       name: "makerble_get_checklist",
       description:
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
-        "which say what counts as done, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
+        "which say what counts as done, due_within_days: the deadline, in days after the Checklist is added " +
+        "to a Contact, null for none, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
         "owner_relationship_side and a readable owner_description), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
@@ -1339,6 +1340,7 @@ export function buildTools(api) {
         "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
         "(see makerble_list_checklist_action_types). Actions keep the order given." +
         " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
+        " Each action may have a deadline (due_within_days); leave it out for none." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
         "makerble_list_surveys, makerble_list_survey_campaigns, makerble_list_survey_waves, " +
         "makerble_list_contact_bio_forms etc., and owners with makerble_get_checklist_owner_options and " +
@@ -1359,6 +1361,13 @@ export function buildTools(api) {
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                due_within_days: {
+                  type: "integer",
+                  minimum: 0,
+                  maximum: 3650,
+                  description: "'Due within N days of the checklist being added': the action is due this many days after the " +
+                    "Checklist is added to a Contact (0 = the same day). Leave it out for no deadline",
+                },
                 only_this_project: {
                   type: "boolean",
                   description: "'Only count records in this project': for project_scopable types (surveys, events, labelled stories, cases, " +
@@ -1409,6 +1418,12 @@ export function buildTools(api) {
                 title: { type: "string" },
                 description: { type: "string" },
                 criteria: { type: "object" },
+                due_within_days: {
+                  type: ["integer", "null"],
+                  minimum: 0,
+                  maximum: 3650,
+                  description: "Days after the Checklist is added to a Contact that the action is due; null removes the deadline",
+                },
                 only_this_project: { type: "boolean", description: "'Only count records in this project' (project_scopable types only)" },
                 owner_kind: {
                   type: "string",
@@ -1460,7 +1475,10 @@ export function buildTools(api) {
         "(completion_method: detected or manual) and with what record (proof_type and proof_id, e.g. Story " +
         "123; proof_deleted true once that record was deleted). A done action stays done. Actions are " +
         "ticked in the background a few seconds after the record is saved, so re-check shortly after " +
-        "creating a story or role. Each action also says who is responsible " +
+        "creating a story or role. Each action has a deadline when its Checklist sets one: due_on (the date, " +
+        "the day the Checklist was added to the Contact plus the action's due_within_days; null for none), " +
+        "done_late (done after due_on) and overdue (not done and due_on has passed). Use overdue to find " +
+        "the steps that need chasing. Each action also says who is responsible " +
         "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
         "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
         "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
