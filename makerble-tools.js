@@ -1161,12 +1161,18 @@ export function buildTools(api) {
         "(4) Call this tool. " +
         "\nRecipients: beneficiary_ids must be Contacts already in the Survey Campaign's Project. emails can be any " +
         "address: it is matched to an existing Contact of the organisation, or a new Contact is created. " +
+        "A Contact created from an email joins the organisation but NOT the Survey Campaign's Project, so to pass " +
+        "their id in beneficiary_ids later, first call makerble_add_contacts_to_project (or reuse their existing " +
+        "link from makerble_list_survey_links). " +
         "At most 200 beneficiary_ids + emails per call. " +
         "\nlink_expiry: 'use_once' (default) — the link stops working after one response; " +
         "'evergreen' — the link stays active for repeat responses. " +
         "Requires Project Editor or Organisation Editor access. " +
         "Returns send_survey_id and data: [{beneficiary_id, email, survey_token, survey_url, link_expiry, " +
-        "is_anonymised, send_survey_wave_id, expired, created_at}].",
+        "is_anonymised, send_survey_wave_id, expired, created_at}]. " +
+        "A 422 for refused Contacts lists them in invalid_beneficiary_ids, split into beneficiary_ids_not_in_project " +
+        "(in the organisation but not the Project: add them with makerble_add_contacts_to_project, then retry) and " +
+        "beneficiary_ids_not_found (not Contacts of the organisation).",
       inputSchema: {
         type: "object",
         properties: {
