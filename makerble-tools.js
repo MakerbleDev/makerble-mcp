@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 151 Makerble MCP tool definitions.
+ * All 159 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -72,7 +72,7 @@ export function makeApiClient(baseUrl, email, token) {
     post: (path, body) => request("POST", path, body),
     patch: (path, body) => request("PATCH", path, body),
     put: (path, body) => request("PUT", path, body),
-    del: (path) => request("DELETE", path),
+    del: (path, body) => request("DELETE", path, body),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
       const res = await fetch(url, {
@@ -284,6 +284,203 @@ export function buildTools(api) {
       },
       handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
         patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_list_albums",
+      description:
+        "List the Albums (Portfolios; Bundles in the API) the user can work with: those they made, manage or are an " +
+        "Album Analyst of, and their organisations' Albums. An Album groups Projects so their results can be seen " +
+        "together. Returns each Album's id, name, owner (owner_type Charity for an organisation's Album, User for a " +
+        "personal one), managers, Album Analysts, project_ids and target type. Paginated; use last_synced_datetime " +
+        "for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Albums changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/albums", p),
+    },
+
+    {
+      name: "makerble_get_album",
+      description:
+        "Get one Album (Portfolio) by id: its settings, managers (manager_ids), Album Analysts (analyst_ids), " +
+        "project_ids, and pending_project_ids (Projects from another organisation invited to join, until their " +
+        "managers accept). An Album the user can't see returns not found.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Album's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/albums/${id}`),
+    },
+
+    {
+      name: "makerble_create_album",
+      description:
+        "Make an Album (Portfolio), as the Make an Album form does. Its owner is an organisation the user is an " +
+        "editor of (owner_type Charity with owner_id) or the user themself (owner_type User, a personal Album). The " +
+        "user becomes its manager. Projects in project_ids join straight away when they belong to the organisation " +
+        "or the user; another organisation's Project is invited instead and shows in pending_project_ids. Returns the Album.\n" +
+        "Workflow: (1) Look before you make: call makerble_list_albums and check the organisation doesn't already " +
+        "have this Album; suggest using or editing an existing one instead of a near-duplicate. " +
+        "(2) makerble_list_projects for the Project ids. (3) makerble_create_album. " +
+        "(4) makerble_update_album for its description, managers and Album Analysts, and makerble_set_album_targets for its targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The Album's name." },
+          owner_type: { type: "string", enum: ["Charity", "User"], description: "Charity for an organisation's Album, User for a personal one." },
+          owner_id: { type: "number", description: "The organisation (Charity) id when owner_type is Charity." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to put in the Album." },
+        },
+        required: ["name", "owner_type"],
+      },
+      handler: (body) => post("/albums", body),
+    },
+
+    {
+      name: "makerble_update_album",
+      description:
+        "Change an Album's (Portfolio's) settings, as its Edit Album and Album Edit pages do. Only the Album's managers " +
+        "may. Only what you send changes. manager_ids and analyst_ids replace the Album's managers and Album Analysts " +
+        "(the Album's maker always stays a manager). To add or remove Projects use makerble_add_projects_to_album and " +
+        "makerble_remove_projects_from_album. Returns the Album.\n" +
+        "Before changing anything, show the user the Album's current values (makerble_get_album) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          name: { type: "string" },
+          description: { type: "string" },
+          owner_type: { type: "string", enum: ["Charity", "User"] },
+          owner_id: { type: "number", description: "The organisation (Charity) id when owner_type is Charity." },
+          manager_ids: { type: "array", items: { type: "number" }, description: "Replaces the Album's managers, by user id." },
+          analyst_ids: { type: "array", items: { type: "number" }, description: "Replaces the Album Analysts, by user id. [] removes them all." },
+          automatically_create_survey_progress_board: { type: "boolean", description: "Give each Survey on the Album's Projects a progress board." },
+          default_results_template_id: {
+            type: ["number", "null"],
+            description: "The Impact Framework the Album's Progress Panel opens on (one of the organisation's); null for All metrics.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/albums/${id}`, body),
+    },
+
+    {
+      name: "makerble_add_projects_to_album",
+      description:
+        "Add Projects to an Album (Portfolio), keeping the ones already in it. Only the Album's managers may. A Project " +
+        "from another organisation is invited instead and shows in pending_project_ids until its managers accept. " +
+        "Returns the Album.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to add." },
+        },
+        required: ["id", "project_ids"],
+      },
+      handler: ({ id, project_ids }) => post(`/albums/${id}/projects`, { project_ids }),
+    },
+
+    {
+      name: "makerble_remove_projects_from_album",
+      description:
+        "Take Projects out of an Album (Portfolio). The Projects themselves don't change. Only the Album's managers may. " +
+        "Returns the Album. Confirm with the user before removing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to remove." },
+        },
+        required: ["id", "project_ids"],
+      },
+      handler: ({ id, project_ids }) => del(`/albums/${id}/projects`, { project_ids }),
+    },
+
+    {
+      name: "makerble_get_album_targets",
+      description:
+        "Get an Album's (Portfolio's) targets, as its Set Targets page shows them. target_type automatic_target means " +
+        "the Album adds up its Projects' targets from year_start_date; manual_target means it has its own: a one-off " +
+        "target on each Activity and Outcome metric on the Album (metrics: Change or Indicator), on each Cohort, " +
+        "Workflow and Formula Tracker and filtered version (trackers), and deadline targets (deadlines). Requires " +
+        "rights to edit the Album's targets. Use before makerble_set_album_targets to show the user the current values.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Album's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/albums/${id}/targets`),
+    },
+
+    {
+      name: "makerble_set_album_targets",
+      description:
+        "Set an Album's (Portfolio's) targets, as its Set Targets page does. Only metrics and trackers already on the " +
+        "Album (see makerble_get_album_targets) can be given a target; anything else is refused and nothing is saved. " +
+        "Metric, tracker and deadline targets are only saved while the Album uses manual targets (target_type " +
+        "manual_target). deadlines, when sent, replaces all the Album's deadline targets; send [] to clear them. " +
+        "Returns the targets.\n" +
+        "Before changing anything, show the user the current targets and what you will change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          target_type: { type: "string", enum: ["manual_target", "automatic_target"] },
+          year_start_date: { type: "string", description: "The day the Album's target year starts, YYYY-MM-DD." },
+          metrics: {
+            type: "array",
+            description: "One-off targets on the Album's Activity (Change) and Outcome (Indicator) metrics.",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string", enum: ["Change", "Indicator"] },
+                metric_id: { type: "number" },
+                target: { type: "number", description: "A whole number, 0 or more." },
+              },
+              required: ["metric_type", "metric_id", "target"],
+            },
+          },
+          trackers: {
+            type: "array",
+            description: "One-off targets on the Album's trackers.",
+            items: {
+              type: "object",
+              properties: {
+                tracker_type: { type: "string", enum: ["CohortTracker", "WorkflowTracker", "FormulaTracker", "FilteredMetric"] },
+                tracker_id: { type: "number" },
+                target: { type: "number", description: "A whole number, 0 or more; a percentage (0-100) for a percentage tracker." },
+              },
+              required: ["tracker_type", "tracker_id", "target"],
+            },
+          },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets: what to reach by a date, for a metric or tracker on the Album. Replaces them all.",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string", description: "Change, Indicator, CohortTracker, WorkflowTracker, FormulaTracker or FilteredMetric." },
+                metric_id: { type: "number" },
+                date: { type: "string", description: "YYYY-MM-DD." },
+                number: { type: "number" },
+              },
+              required: ["metric_type", "metric_id", "date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/albums/${id}/targets`, body),
     },
 
     {
