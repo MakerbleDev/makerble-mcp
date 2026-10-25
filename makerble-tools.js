@@ -4432,8 +4432,9 @@ export function buildTools(api) {
         "Demographics tab of Manage Contacts shows. Use it to answer 'how many young people do we work with' or 'what " +
         "is the age breakdown of this project'. Give album_id or project_id to count only that Album's or Project's " +
         "Contacts, by its own age bands if it has them (source says whose bands were used). data lists each band " +
-        "with its number of contacts; 'Under X' appears only if someone is younger than the first band, and 'No date " +
-        "of birth' only if someone has none. Bands with fewer Contacts than the Organisation's Minimum Results " +
+        "with its number of contacts; 'Under X' appears only if someone is younger than the first band, 'Date of " +
+        "birth in the future' only if someone's Date of Birth is after today (a data-entry error the user may want " +
+        "to fix), and 'No date of birth' only if someone has none. Bands with fewer Contacts than the Organisation's Minimum Results " +
         "Threshold have contacts: null and are added up under 'Below Threshold'; don't try to work out the hidden " +
         "numbers. total_count is every Contact counted. Ages are as of today.",
       inputSchema: {
