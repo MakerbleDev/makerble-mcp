@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 164 Makerble MCP tool definitions.
+ * All 166 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4362,6 +4362,59 @@ export function buildTools(api) {
         required: ["query"],
       },
       handler: (p) => get("/impact_store/search", p),
+    },
+
+    // ── Explore Surveys (CP-8869) ─────────────────────────────────────────────
+    {
+      name: "makerble_explore_surveys",
+      description:
+        "Find a ready-made Survey (Story Category) in the Makerble ImpactStore: the Surveys other organisations " +
+        "and Makerble have published for everyone, as the Explore Surveys page lists them. Use it when the user " +
+        "wants a validated scale or a tried-and-tested questionnaire, e.g. 'a wellbeing survey for children' or " +
+        "'a short feedback form for an event'. Filter by theme (mental_health_and_wellbeing, " +
+        "children_and_young_people, employment_and_skills, community_and_culture, health, organisational), " +
+        "audience, i.e. who answers it (children_under_16, young_people_16_to_25, adults, staff_and_volunteers), " +
+        "time to complete (under_5, 5_to_15, over_15 minutes) and feature (validated: an industry-recognised " +
+        "scale; verdicts: classifies each respondent automatically; repeats: meant to be asked at intervals). " +
+        "Several options in one filter match any of them; different filters must all match. Returns a page of " +
+        "Surveys, each with id, name, description, shared_by, question_count, estimated_minutes, themes, " +
+        "audiences, libraries_count (how many organisations use it), yours and added_to_a_project, plus facets: " +
+        "each filter option with how many Surveys it would return. Then call makerble_get_explore_survey to read " +
+        "a Survey's sections and questions before suggesting it. To search every kind of ImpactStore item by " +
+        "words at once, use makerble_search_impact_store; to search the user's own organisation's Surveys, use " +
+        "makerble_search_library.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Survey's name or description, e.g. 'wellbeing'" },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational"] } },
+          audience: { type: "array", items: { type: "string", enum: ["children_under_16", "young_people_16_to_25", "adults", "staff_and_volunteers"] }, description: "Who answers it" },
+          time: { type: "array", items: { type: "string", enum: ["under_5", "5_to_15", "over_15"] }, description: "Time to complete, in minutes" },
+          feature: { type: "array", items: { type: "string", enum: ["validated", "verdicts", "repeats"] } },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (most organisations using it first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Surveys per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/surveys", p),
+    },
+
+    {
+      name: "makerble_get_explore_survey",
+      description:
+        "Preview one ImpactStore Survey (Story Category) from makerble_explore_surveys, as its Preview panel on " +
+        "Explore Surveys shows it: the same fields plus sections, each with its title (null for questions before " +
+        "the first section header) and its question titles in order. Use it to check a Survey asks what the " +
+        "user needs before suggesting they add it to a project, which they do in Makerble with Add to a project " +
+        "on Explore Surveys. Returns 404 for a Survey that isn't published to the ImpactStore.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Survey's id from makerble_explore_surveys" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/surveys/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
