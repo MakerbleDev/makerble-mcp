@@ -2243,8 +2243,8 @@ export function buildTools(api) {
         "Makerble's own features create, rather than Contacts tagged in updates. Its source says what it " +
         "counts: 'signpostings' (Signpostings made from a Project), 'internal_referrals' (Contacts in a " +
         "Project added to another of the Organisation's Projects), 'cases_created' (Cases created on a " +
-        "Project), 'cases_closed' (each time one of those Cases is closed) or 'cases_open' (the Cases open " +
-        "at the end of each timeframe). count_mode is 'items' (each signposting, referral, Case or closing; " +
+        "Project), 'cases_closed' (each time one of those Cases is closed), 'cases_open' (the Cases open " +
+        "at the end of each timeframe) or 'time_spent' (hours logged in Timesheets, unit 'hours'). count_mode is 'items' (each signposting, referral, Case or closing; " +
         "result_kind 'additive', adds up across periods, except cases_open which is always 'snapshot') or " +
         "'contacts' (each Contact once; result_kind 'snapshot'). Only an Organisation's editors and reporters, and its project managers, " +
         "can see them.",
@@ -2288,7 +2288,7 @@ export function buildTools(api) {
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           project_id: { type: "number", description: "The Project to preview the result on" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "See makerble_create_workflow_tracker" },
         },
@@ -2316,7 +2316,17 @@ export function buildTools(api) {
         "with that Case Form (IDs from makerble_list_case_forms); leave it out for any Case Form. " +
         "Confidential Cases are counted but only listed to people who can see them. count_mode 'items' " +
         "(default) counts each signposting, referral, Case or closing and adds up across periods (except " +
-        "cases_open); 'contacts' counts each Contact once and is a snapshot. Requires an editor or reporter of the Organisation." +
+        "cases_open); 'contacts' counts each Contact once and is a snapshot. 'time_spent' adds up the hours " +
+        "logged in Timesheets on the Project (or an Album's Projects, each entry once), to 1 decimal place: Task " +
+        "and Update (Story) Timesheets are dated by their Update, or by when the Task was done, and Event " +
+        "Timesheets by when the Event started, so time logged later lands in the period the work happened; " +
+        "Timesheets on draft Updates aren't counted. It always counts 'items' and its unit is 'hours'. Its " +
+        "settings: kinds (any of 'updates_and_tasks', 'event_staff' for Event Workers and Event Managers, " +
+        "'event_guests' for Contacts at Events; default the first two), and optionally only some colleagues' " +
+        "time: user_ids (makerble_list_users) and/or roles ('editor': Organisation Admins and Project " +
+        "Managers, 'reporter': Changemakers, 'observer': Observers), which leave Event guests' time as it is. " +
+        "Use it in a Formula Tracker for e.g. hours per flagged child (Time spent ÷ a Cohort Tracker). " +
+        "Requires an editor or reporter of the Organisation." +
         "\nWorkflow: (1) makerble_list_projects for Project IDs. (2) makerble_preview_workflow_tracker to " +
         "check the count. (3) makerble_create_workflow_tracker. (4) makerble_add_workflow_tracker_to_project " +
         "to place it in a column of a Project's Impact Scorecard, optionally with a target. Albums pick it " +
@@ -2327,13 +2337,15 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           name: { type: "string", description: "Shown next to the result, e.g. 'Signpostings made'" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: {
             type: "object",
             description:
               "internal_referrals: {destinations: 'any'|'only'|'except', project_ids: [number]}; " +
-              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); signpostings: none",
+              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); " +
+              "time_spent: {kinds: ['updates_and_tasks'|'event_staff'|'event_guests'], user_ids: [number], " +
+              "roles: ['editor'|'reporter'|'observer']} (all optional); signpostings: none",
           },
         },
         required: ["charity_id", "name", "source"],
@@ -2354,7 +2366,7 @@ export function buildTools(api) {
           id: { type: "number" },
           name: { type: "string" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "Replaces the stored settings" },
         },
@@ -2457,7 +2469,9 @@ export function buildTools(api) {
         "Get a Workflow Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the items " +
         "behind it (e.g. each signposting: the Contact (Beneficiary), who they were signposted to and when; each " +
         "internal referral: the Contact, the Project they were added to and when; each Case: the Contact, the Case's " +
-        "title and case_id, and when it was created, closed or last opened). On an Album the item or " +
+        "title and case_id, and when it was created, closed or last opened; each Time spent entry: whose time it is " +
+        "(user_id, user_name, or the Contact for an Event guest's), its hours, the Update, Task or Event it was " +
+        "logged on (story_id, task_id or event_id) and that item's date; number is then hours). On an Album the item or " +
         "Contact is counted once across its open Projects, so an Album's result is never the sum of its " +
         "Projects'. result_kind 'additive' (counting each item) adds up across periods; 'snapshot' (counting each " +
         "Contact once, or the Cases open) is worked out for the window on its own, read as_of its last day (or today while that is " +
