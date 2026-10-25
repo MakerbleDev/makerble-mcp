@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 163 Makerble MCP tool definitions.
+ * All 164 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1703,6 +1703,11 @@ export function buildTools(api) {
                   description: "'Only count records in this project': for project_scopable types (surveys, events, labelled stories, cases, " +
                     "project states), count only records made in the Project the Checklist was added to the Contact through",
                 },
+                allow_manual_completion: {
+                  type: "boolean",
+                  description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
+                    "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1755,6 +1760,10 @@ export function buildTools(api) {
                   description: "Days after the Checklist is added to a Contact that the action is due; null removes the deadline",
                 },
                 only_this_project: { type: "boolean", description: "'Only count records in this project' (project_scopable types only)" },
+                allow_manual_completion: {
+                  type: "boolean",
+                  description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1802,13 +1811,14 @@ export function buildTools(api) {
         "each, done_count of actions_count and every action with done true/false. A done action has a " +
         "completion saying when it was done (completed_at: when the record that did it was made, e.g. the " +
         "survey's date), by whom (completed_by_user_id, completed_by_name; null when unknown), how " +
-        "(completion_method: detected or manual) and with what record (proof_type and proof_id, e.g. Story " +
+        "(completion_method: detected, or manual when a colleague ticked it off by hand) and with what record (proof_type and proof_id, e.g. Story " +
         "123; proof_deleted true once that record was deleted). A done action stays done. Actions are " +
         "ticked in the background a few seconds after the record is saved, so re-check shortly after " +
         "creating a story or role. Each action has a deadline when its Checklist sets one: due_on (the date, " +
         "the day the Checklist was added to the Contact plus the action's due_within_days; null for none), " +
         "done_late (done after due_on) and overdue (not done and due_on has passed). Use overdue to find " +
-        "the steps that need chasing. Each action also says who is responsible " +
+        "the steps that need chasing. allow_manual_completion says whether an action can be ticked off by " +
+        "hand (makerble_mark_contact_checklist_action_done). Each action also says who is responsible " +
         "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
         "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
         "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
@@ -1894,6 +1904,41 @@ export function buildTools(api) {
       handler: async ({ beneficiary_id, checklist_id, action_id, use_checklist_default, ...owner }) => {
         const path = `/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/owner`;
         return use_checklist_default ? del(path) : patch(path, owner);
+      },
+    },
+
+    {
+      name: "makerble_mark_contact_checklist_action_done",
+      description:
+        "Tick off by hand one action of a Contact's (beneficiary's) Checklist, for a step that leaves no " +
+        "record Makerble can detect: a phone call, a home visit, a paper consent form (the 'Mark as done…' " +
+        "link on their profile's Checklists box). Only actions whose Checklist allows it can be ticked off " +
+        "this way: allow_manual_completion true in makerble_get_contact_checklists. The note is saved as a " +
+        "Story on the Contact's timeline, which becomes the action's proof; completion_method is then " +
+        "'manual'. completed_on is the date it happened (YYYY-MM-DD, today or earlier). When the Contact is " +
+        "in more than one Project you can record stories in and the Checklist wasn't added through one of " +
+        "them, give project_id to say which Project the Story goes in. Requires edit access to the Contact. " +
+        "Send undo: true to take it back: only the colleague who marked it, or an Organisation Admin, can; " +
+        "the Story stays on the timeline. Attaching an evidence file isn't possible here; use the API " +
+        "directly (multipart) or the profile page for that. Returns {checklist_id, action_id, done, completion}." +
+        "\nWorkflow: (1) makerble_get_contact_checklists for the checklist_id and an action id with " +
+        "allow_manual_completion true and done false. (2) this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action's id" },
+          completed_on: { type: "string", description: "Date it happened, YYYY-MM-DD; today or earlier" },
+          note: { type: "string", description: "What happened. Required unless undo is true" },
+          project_id: { type: "number", description: "The Project to record the note's Story in, when there is a choice" },
+          undo: { type: "boolean", description: "Take back a tick made by hand instead" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id, undo, ...completion }) => {
+        const path = `/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/completion`;
+        return undo ? del(path) : post(path, completion);
       },
     },
 
