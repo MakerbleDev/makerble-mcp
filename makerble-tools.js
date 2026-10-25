@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 174 Makerble MCP tool definitions.
+ * All 175 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4496,6 +4496,90 @@ export function buildTools(api) {
         required: ["organisation_id", "title", "stage"],
       },
       handler: (p) => post("/outcomes", p),
+    },
+
+    {
+      name: "makerble_create_survey",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Survey " +
+        "(a Story Category) with all its questions in one call, in the order given (at most 50). Each " +
+        "question either reuses an item by id (metric_id for a Metric / Indicator, field_id for a Field / " +
+        "Custom Field, activity_tracker_id for an Activity tracker / Change) or defines a new one: new_metric " +
+        "(name, metric_type scale, value or binary, default_question; a scale Metric also needs list_id for " +
+        "an existing List / Ratio Set or list {name, choices} for a new one; optional outcome_id, unit_id, " +
+        "success_direction) or new_field (field_name, field_data_type; section_title makes a heading). Prefer " +
+        "reusing a Metric and List: results recorded against a copy don't add up with the original. Typical " +
+        "workflow: search the library for each question's Metric, List or Field, then call this once with the " +
+        "reused ids and only the missing items defined inline. Nothing is created unless everything is: an " +
+        "invalid question creates nothing and the error names it (e.g. 'Question 3: ...'). If a new Metric, " +
+        "List or Field has the same or a near-identical name (ignoring case, spacing and punctuation) to one " +
+        "in the organisation or the public library, nothing is created and you get a 409 error listing the " +
+        "duplicates with the question number each belongs to: reuse them, or call again with force: true only " +
+        "if none fits. The Survey stays visible only to the organisation unless you are Makerble staff and " +
+        "send approved: true. Returns data: the Survey as makerble_get_library_item shows it (id, type " +
+        "'survey', name, owner, questions in order with the item behind each) and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The Survey's name, e.g. 'Job readiness check-in'" },
+          description: { type: "string", description: "What the Survey is for" },
+          intro_message: { type: "string", description: "Shown to people before they start" },
+          departments: { type: "array", items: { type: "string" }, description: "Cause area (Department) names, e.g. ['Health']" },
+          causes: { type: "array", items: { type: "string" }, description: "Cause names, for the Explore filters" },
+          sub_causes: { type: "array", items: { type: "string" }, description: "Sub Cause names" },
+          questions: {
+            type: "array",
+            description: "The questions in order. Each has exactly one of metric_id, field_id, activity_tracker_id, new_metric or new_field",
+            items: {
+              type: "object",
+              properties: {
+                metric_id: { type: "number", description: "Reuse this Metric (Indicator)" },
+                field_id: { type: "number", description: "Reuse this Field (Custom Field)" },
+                activity_tracker_id: { type: "number", description: "Reuse this Activity tracker (Change)" },
+                new_metric: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    metric_type: { type: "string", enum: ["scale", "value", "binary"] },
+                    default_question: { type: "string", description: "The question as people see it, e.g. 'How confident do you feel?'" },
+                    list_id: { type: "number", description: "Scale only: an existing List (Ratio Set) of answers" },
+                    list: {
+                      type: "object",
+                      description: "Scale only: a new List instead of list_id",
+                      properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+                      required: ["name", "choices"],
+                    },
+                    outcome_id: { type: "number", description: "The Outcome it measures (optional)" },
+                    unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
+                    success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
+                    description: { type: "string" },
+                  },
+                  required: ["name", "metric_type", "default_question"],
+                },
+                new_field: {
+                  type: "object",
+                  properties: {
+                    field_name: { type: "string" },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"] },
+                    section_text: { type: "string", description: "section_title only: the text under the heading" },
+                    private: { type: "boolean" },
+                  },
+                  required: ["field_name", "field_data_type"],
+                },
+                is_mandatory: { type: "boolean" },
+                choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Scale Metrics: how many answers may be picked (default single_choice)" },
+                choice_value: { type: "number", description: "With limited_choice: how many" },
+                external_description: { type: "string", description: "Help text shown to the person answering" },
+              },
+            },
+          },
+          approved: { type: "boolean", description: "Makerble staff only: show the Survey to every organisation and approve its new Metrics and Lists" },
+          force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "questions"],
+      },
+      handler: (p) => post("/surveys", p),
     },
 
     {
