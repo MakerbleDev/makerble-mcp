@@ -1658,6 +1658,9 @@ export function buildTools(api) {
         "survey_waves '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
         "campaign without Waves>'. The two 'for a relative' types take relatives: [{relationship_side, " +
         "beneficiary_category_ids or survey_waves}], where the side is the relative's own (e.g. the Son). " +
+        "Instead of specific values, criteria {any: true} counts any record of the kind ('Any [noun]' on " +
+        "the Create Checklist page, named by any_name, e.g. 'Any relationship'). Criteria with nothing " +
+        "chosen are 'Not set yet': the action is saved but can't be done until something is chosen. " +
         "Action types with no criteria_keys are done by any record of the kind (e.g. create_task).",
       inputSchema: { type: "object", properties: {} },
       handler: () => get("/checklists/action_types"),
@@ -1667,8 +1670,9 @@ export function buildTools(api) {
       name: "makerble_create_checklist",
       description:
         "Create a Checklist for an Organisation. Requires an Organisation editor or reporter. Each action " +
-        "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
-        "(see makerble_list_checklist_action_types). Actions keep the order given." +
+        "needs an action_type and, unless that type has no criteria_keys, criteria: specific values, or " +
+        "{any: true} for any record of the kind (see makerble_list_checklist_action_types). An action " +
+        "with no criteria is saved as 'Not set yet' and can't be done until they are set. Actions keep the order given." +
         " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
         " Each action may have a deadline (due_within_days); leave it out for none." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
@@ -1690,7 +1694,7 @@ export function buildTools(api) {
                 action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task" },
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
-                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
                 due_within_days: {
                   type: "integer",
                   minimum: 0,
@@ -1759,7 +1763,7 @@ export function buildTools(api) {
                 position: { type: "number" },
                 title: { type: "string" },
                 description: { type: "string" },
-                criteria: { type: "object" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
                 due_within_days: {
                   type: ["integer", "null"],
                   minimum: 0,
