@@ -4667,8 +4667,9 @@ export function buildTools(api) {
         "value, and groups below the Organisation's Minimum Results Threshold come back with contacts: null and are " +
         "added up under 'Below Threshold' (don't try to work out the hidden numbers). percent is of contacts_count. " +
         "tiles ('How the work is going', one per Results Canvas column) and workload give each chosen metric's or " +
-        "tracker's All-time result as the Results Canvas shows it; value is null for a tracker with no single " +
-        "number. The Album's or Project's editors choose what appears with makerble_set_snapshot_settings.",
+        "tracker's result for the Results Canvas's current period (from the day after the last deadline to the next), " +
+        "or all time when there are no deadlines; timeframe says which and gives the dates. value is null for a " +
+        "tracker with no single number. The Album's or Project's editors choose what appears with makerble_set_snapshot_settings.",
       inputSchema: {
         type: "object",
         properties: {
