@@ -1708,6 +1708,13 @@ export function buildTools(api) {
                   description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
                     "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
                 },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': what a colleague sees when they start this action for a Contact " +
+                    "before the actions above it on the Checklist are done. 'remind' (default) shows a reminder they can dismiss; " +
+                    "'ask_reason' ('Warn and ask for a reason to skip') makes them give a reason, which is logged",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1763,6 +1770,11 @@ export function buildTools(api) {
                 allow_manual_completion: {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': 'remind' or 'ask_reason' (ask for a reason to skip). Left as it is when not sent",
                 },
                 owner_kind: {
                   type: "string",
