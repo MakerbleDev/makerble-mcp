@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 176 Makerble MCP tool definitions.
+ * All 177 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4642,6 +4642,94 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "department", "contact_role", "questions"],
       },
       handler: (p) => post("/contact_forms", p),
+    },
+
+    {
+      name: "makerble_create_impact_framework",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates an " +
+        "Impact Framework (a Template): an organisation's theory of change, from the activities it delivers " +
+        "to the outcomes it wants, in one call. Give its entries in order, each with its stage and exactly " +
+        "one item: activity_tracker_id or new_activity_tracker {name, category (a cause area such as " +
+        "'Education' or 'Health'), description} for an Activity or Attendance tracker (a Change) in 'Activity " +
+        "outputs' or 'Participation outputs'; or outcome_id or new_outcome {title, description} for an " +
+        "Outcome in 'Short-term outcomes', 'Medium-term outcomes' or 'Long-term outcomes'. An Outcome entry " +
+        "can also have new_metrics: Metrics (Indicators) measuring it, each {name, metric_type scale, value " +
+        "or binary, default_question; a scale Metric needs list_id or list {name, choices}}. At most 50 " +
+        "entries and new Metrics together. Nothing is created unless everything is: an invalid entry creates " +
+        "nothing and the error names it ('Entry 2: ...'). If a new tracker, Outcome, Metric or List has the " +
+        "same or a near-identical name to one in the organisation or the public library, nothing is created " +
+        "and you get a 409 error listing the duplicates with the entry number each belongs to: reuse them, or " +
+        "call again with force: true only if none fits. It stays private to the organisation unless you are " +
+        "Makerble staff and send approved: true. Returns data: the framework as makerble_get_library_item " +
+        "shows it (id, type 'impact_framework', name, owner, stages with their Activity trackers and " +
+        "Outcomes) and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The Impact Framework's name, e.g. 'Youth employment'" },
+          description: { type: "string", description: "What the Impact Framework is for" },
+          color: { type: "string", description: "Optional colour as a hex code, e.g. '#2a9d8f'" },
+          causes: { type: "array", items: { type: "string" }, description: "Cause names, e.g. ['Education']" },
+          department: { type: "string", description: "Optional cause area (Department) name" },
+          entries: {
+            type: "array",
+            description: "In order. Each has a stage and exactly one of activity_tracker_id, new_activity_tracker, outcome_id or new_outcome",
+            items: {
+              type: "object",
+              properties: {
+                stage: { type: "string", enum: ["Activity outputs", "Participation outputs", "Short-term outcomes", "Medium-term outcomes", "Long-term outcomes"] },
+                activity_tracker_id: { type: "number", description: "Reuse this Activity or Attendance tracker (Change)" },
+                new_activity_tracker: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "What is counted, e.g. 'Workshops delivered'" },
+                    category: { type: "string", description: "The cause area it belongs to, e.g. 'Education', 'Health', 'Poverty'" },
+                    description: { type: "string" },
+                    instruction: { type: "string", description: "Guidance for staff recording it" },
+                  },
+                  required: ["name", "category"],
+                },
+                outcome_id: { type: "number", description: "Reuse this Outcome" },
+                new_outcome: {
+                  type: "object",
+                  properties: { title: { type: "string" }, description: { type: "string" }, instruction: { type: "string" } },
+                  required: ["title"],
+                },
+                new_metrics: {
+                  type: "array",
+                  description: "Outcome entries only: new Metrics (Indicators) measuring this Outcome",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      metric_type: { type: "string", enum: ["scale", "value", "binary"] },
+                      default_question: { type: "string" },
+                      list_id: { type: "number", description: "Scale only: an existing List (Ratio Set)" },
+                      list: {
+                        type: "object",
+                        description: "Scale only: a new List instead of list_id",
+                        properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+                        required: ["name", "choices"],
+                      },
+                      unit_id: { type: "number", description: "Value only (optional)" },
+                      success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
+                      description: { type: "string" },
+                    },
+                    required: ["name", "metric_type", "default_question"],
+                  },
+                },
+              },
+              required: ["stage"],
+            },
+          },
+          approved: { type: "boolean", description: "Makerble staff only: share it in the public library and approve its new items" },
+          force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "entries"],
+      },
+      handler: (p) => post("/impact_frameworks", p),
     },
 
     {
