@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 174 Makerble MCP tool definitions.
+ * All 178 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1708,6 +1708,13 @@ export function buildTools(api) {
                   description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
                     "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
                 },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': what a colleague sees when they start this action for a Contact " +
+                    "before the actions above it on the Checklist are done. 'remind' (default) shows a reminder they can dismiss; " +
+                    "'ask_reason' ('Warn and ask for a reason to skip') makes them give a reason, which is logged",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1763,6 +1770,11 @@ export function buildTools(api) {
                 allow_manual_completion: {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': 'remind' or 'ask_reason' (ask for a reason to skip). Left as it is when not sent",
                 },
                 owner_kind: {
                   type: "string",
@@ -1833,6 +1845,95 @@ export function buildTools(api) {
         required: ["beneficiary_id"],
       },
       handler: ({ beneficiary_id, ...p }) => get(`/beneficiaries/${beneficiary_id}/checklists`, p),
+    },
+
+    {
+      name: "makerble_get_contact_next_step",
+      description:
+        "Get what to do next for a Contact (beneficiary), as on the Next step card of their profile: the first " +
+        "action not yet done on each of their Checklists, the most pressing first (overdue, then the earliest " +
+        "due_on, then by checklist name). data[0] is the next step. Each step gives the checklist " +
+        "(checklist_id, checklist_name), its place in it (number of total, e.g. step 4 of 6), the action " +
+        "(action_id, action_type, action_name e.g. 'Invite to an event', title, description), its deadline " +
+        "(due_on, overdue), if_earlier_steps_not_done ('remind', or 'ask_reason' when a colleague must give a " +
+        "reason to skip it) and who is responsible (owner_description, responsible_user_ids). others_count is " +
+        "how many other checklists are waiting; all_done is true when every action on the Contact's " +
+        "checklists is done. Use it to tell a colleague what to do next for a Contact; to see every action, " +
+        "use makerble_get_contact_checklists. Only Contacts you can see are returned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+        },
+        required: ["beneficiary_id"],
+      },
+      handler: ({ beneficiary_id }) => get(`/beneficiaries/${beneficiary_id}/checklists/next_step`),
+    },
+
+    {
+      name: "makerble_check_contact_checklist_step",
+      description:
+        "Before doing a Checklist action for a Contact (beneficiary), check whether its earlier steps on the same " +
+        "Checklist are done (the 'soft gate'). Returns gated (true when earlier steps aren't done), missing (each " +
+        "{action_id, number, action_type, title, required_first}) and reason_required (true when a missing step is " +
+        "set to 'Warn and ask for a reason to skip', shown to colleagues as Required first). Nothing is blocked: " +
+        "workflow: (1) call this; (2) if gated, tell the user which steps are missing and suggest doing the first " +
+        "one instead; (3) if they still want to go ahead, call makerble_skip_contact_checklist_steps, with a reason " +
+        "when reason_required is true; (4) then do the action. Get checklist_id and action_id from " +
+        "makerble_get_contact_next_step or makerble_get_contact_checklists.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action about to be done" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id }) =>
+        get(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/gate`),
+    },
+
+    {
+      name: "makerble_skip_contact_checklist_steps",
+      description:
+        "Record that a Checklist action is being done for a Contact before its earlier steps are done (going past " +
+        "the soft gate found with makerble_check_contact_checklist_step). Saves who, when, which steps were skipped " +
+        "and the reason, and puts it on the Contact's timeline as a story. A reason is required when a missing step " +
+        "is Required first (reason_required). Needs edit access to the Contact. Returns the skip: " +
+        "{id, checklist_action_id, skipped_actions: [{id, title, required_first}], reason, user_id, story_id, created_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action being done early" },
+          reason: { type: "string", description: "Why it is being done before the earlier steps (max 2000 characters)" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id, reason }) =>
+        post(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/skips`, { reason }),
+    },
+
+    {
+      name: "makerble_list_checklist_skips",
+      description:
+        "List the times colleagues did a Checklist's actions before the earlier steps were done (skipped steps, the " +
+        "exceptions shown on the Checklist's Board), newest first: who (user_id, user_name), for which Contact " +
+        "(beneficiary_id), which action (checklist_action_id, action_title), which steps were skipped and the reason. " +
+        "Only Contacts you can see are included. Use it to spot where a process isn't being followed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only skips saved after this (ISO 8601)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/skips`, p),
     },
 
     {
