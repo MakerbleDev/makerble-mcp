@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 164 Makerble MCP tool definitions.
+ * All 167 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2288,8 +2288,8 @@ export function buildTools(api) {
         "Makerble's own features create, rather than Contacts tagged in updates. Its source says what it " +
         "counts: 'signpostings' (Signpostings made from a Project), 'internal_referrals' (Contacts in a " +
         "Project added to another of the Organisation's Projects), 'cases_created' (Cases created on a " +
-        "Project), 'cases_closed' (each time one of those Cases is closed) or 'cases_open' (the Cases open " +
-        "at the end of each timeframe). count_mode is 'items' (each signposting, referral, Case or closing; " +
+        "Project), 'cases_closed' (each time one of those Cases is closed), 'cases_open' (the Cases open " +
+        "at the end of each timeframe) or 'time_spent' (hours logged in Timesheets, unit 'hours'). count_mode is 'items' (each signposting, referral, Case or closing; " +
         "result_kind 'additive', adds up across periods, except cases_open which is always 'snapshot') or " +
         "'contacts' (each Contact once; result_kind 'snapshot'). Only an Organisation's editors and reporters, and its project managers, " +
         "can see them.",
@@ -2333,7 +2333,7 @@ export function buildTools(api) {
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           project_id: { type: "number", description: "The Project to preview the result on" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "See makerble_create_workflow_tracker" },
         },
@@ -2361,7 +2361,17 @@ export function buildTools(api) {
         "with that Case Form (IDs from makerble_list_case_forms); leave it out for any Case Form. " +
         "Confidential Cases are counted but only listed to people who can see them. count_mode 'items' " +
         "(default) counts each signposting, referral, Case or closing and adds up across periods (except " +
-        "cases_open); 'contacts' counts each Contact once and is a snapshot. Requires an editor or reporter of the Organisation." +
+        "cases_open); 'contacts' counts each Contact once and is a snapshot. 'time_spent' adds up the hours " +
+        "logged in Timesheets on the Project (or an Album's Projects, each entry once), to 1 decimal place: Task " +
+        "and Update (Story) Timesheets are dated by their Update, or by when the Task was done, and Event " +
+        "Timesheets by when the Event started, so time logged later lands in the period the work happened; " +
+        "Timesheets on draft Updates aren't counted. It always counts 'items' and its unit is 'hours'. Its " +
+        "settings: kinds (any of 'updates_and_tasks', 'event_staff' for Event Workers and Event Managers, " +
+        "'event_guests' for Contacts at Events; default the first two), and optionally only some colleagues' " +
+        "time: user_ids (makerble_list_users) and/or roles ('editor': Organisation Admins and Project " +
+        "Managers, 'reporter': Changemakers, 'observer': Observers), which leave Event guests' time as it is. " +
+        "Use it in a Formula Tracker for e.g. hours per flagged child (Time spent ÷ a Cohort Tracker). " +
+        "Requires an editor or reporter of the Organisation." +
         "\nWorkflow: (1) makerble_list_projects for Project IDs. (2) makerble_preview_workflow_tracker to " +
         "check the count. (3) makerble_create_workflow_tracker. (4) makerble_add_workflow_tracker_to_project " +
         "to place it in a column of a Project's Impact Scorecard, optionally with a target. Albums pick it " +
@@ -2372,13 +2382,15 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           name: { type: "string", description: "Shown next to the result, e.g. 'Signpostings made'" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: {
             type: "object",
             description:
               "internal_referrals: {destinations: 'any'|'only'|'except', project_ids: [number]}; " +
-              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); signpostings: none",
+              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); " +
+              "time_spent: {kinds: ['updates_and_tasks'|'event_staff'|'event_guests'], user_ids: [number], " +
+              "roles: ['editor'|'reporter'|'observer']} (all optional); signpostings: none",
           },
         },
         required: ["charity_id", "name", "source"],
@@ -2399,7 +2411,7 @@ export function buildTools(api) {
           id: { type: "number" },
           name: { type: "string" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "Replaces the stored settings" },
         },
@@ -2502,7 +2514,9 @@ export function buildTools(api) {
         "Get a Workflow Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the items " +
         "behind it (e.g. each signposting: the Contact (Beneficiary), who they were signposted to and when; each " +
         "internal referral: the Contact, the Project they were added to and when; each Case: the Contact, the Case's " +
-        "title and case_id, and when it was created, closed or last opened). On an Album the item or " +
+        "title and case_id, and when it was created, closed or last opened; each Time spent entry: whose time it is " +
+        "(user_id, user_name, or the Contact for an Event guest's), its hours, the Update, Task or Event it was " +
+        "logged on (story_id, task_id or event_id) and that item's date; number is then hours). On an Album the item or " +
         "Contact is counted once across its open Projects, so an Album's result is never the sum of its " +
         "Projects'. result_kind 'additive' (counting each item) adds up across periods; 'snapshot' (counting each " +
         "Contact once, or the Cases open) is worked out for the window on its own, read as_of its last day (or today while that is " +
@@ -4370,6 +4384,96 @@ export function buildTools(api) {
         required: ["item_type", "id"],
       },
       handler: ({ item_type, id }) => get(`/library/${encodeURIComponent(item_type)}/${id}/usage`),
+    },
+
+    {
+      name: "makerble_search_impact_store",
+      description:
+        "Search the Makerble ImpactStore (the Explore pages) for a ready-made, well-tested Survey (Story " +
+        "Category), Contact Form (Beneficiary Category), Case Form (Custom Form for cases), Impact Framework " +
+        "(Template), Report Template, Toolkit (Collection) or Project Type published for any organisation to " +
+        "reuse. Use it before making one of these from scratch: " +
+        "reusing an ImpactStore item is faster, usually better, and lets organisations compare results. Only " +
+        "published items are searched, and withdrawn ones never appear. Pass the key words of what the user " +
+        "wants (e.g. 'wellbeing young people'), not a whole sentence: items matching more of the words come " +
+        "first and items matching none are left out. Optionally narrow by item_type and by cause (a cause or " +
+        "subcause name from the Explore page, e.g. 'Health' or 'Mental health'). Returns the {page, page_size, " +
+        "page_count, total_count, data} envelope; each item has id, type, type_label, name, a one-line " +
+        "description, causes, used_by_count (how many organisations use it), explore_url (its Explore page, to " +
+        "show the user; null for a Project Type) and matched_words (how many of your words it matched; an item matching only one of " +
+        "several words is probably not a good match). Typical workflow: search with per_page 3, show the user " +
+        "the good matches with their explore_url, and if they want one, read it in full with " +
+        "makerble_get_library_item using the same type and id (Report Templates excepted).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The key words of what the user wants, e.g. 'wellbeing survey young people'" },
+          item_type: {
+            type: "string",
+            enum: ["survey", "contact_form", "case_form", "impact_framework", "report_template", "toolkit", "project_type"],
+            description: "Only this kind of item (default every kind): survey (Survey), contact_form (Contact Form), case_form (Case Form), impact_framework (Impact Framework), report_template (Report Template), toolkit (Toolkit), project_type (Project Type)",
+          },
+          cause: { type: "string", description: "Only items tagged with this cause or subcause, e.g. 'Mental health'" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Results per page (default 10, max 200); 3 is enough to offer the user a choice" },
+          last_synced_datetime: { type: "string", description: "ISO 8601; only items updated after this time" },
+        },
+        required: ["query"],
+      },
+      handler: (p) => get("/impact_store/search", p),
+    },
+
+    // ── Explore Surveys (CP-8869) ─────────────────────────────────────────────
+    {
+      name: "makerble_explore_surveys",
+      description:
+        "Find a ready-made Survey (Story Category) in the Makerble ImpactStore: the Surveys other organisations " +
+        "and Makerble have published for everyone, as the Explore Surveys page lists them. Use it when the user " +
+        "wants a validated scale or a tried-and-tested questionnaire, e.g. 'a wellbeing survey for children' or " +
+        "'a short feedback form for an event'. Filter by theme (mental_health_and_wellbeing, " +
+        "children_and_young_people, employment_and_skills, community_and_culture, health, organisational), " +
+        "audience, i.e. who answers it (children_under_16, young_people_16_to_25, adults, staff_and_volunteers), " +
+        "time to complete (under_5, 5_to_15, over_15 minutes) and feature (validated: an industry-recognised " +
+        "scale; verdicts: classifies each respondent automatically; repeats: meant to be asked at intervals). " +
+        "Several options in one filter match any of them; different filters must all match. Returns a page of " +
+        "Surveys, each with id, name, description, shared_by, question_count, estimated_minutes, themes, " +
+        "audiences, libraries_count (how many organisations use it), yours and added_to_a_project, plus facets: " +
+        "each filter option with how many Surveys it would return. Then call makerble_get_explore_survey to read " +
+        "a Survey's sections and questions before suggesting it. To search every kind of ImpactStore item by " +
+        "words at once, use makerble_search_impact_store; to search the user's own organisation's Surveys, use " +
+        "makerble_search_library.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Survey's name or description, e.g. 'wellbeing'" },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational"] } },
+          audience: { type: "array", items: { type: "string", enum: ["children_under_16", "young_people_16_to_25", "adults", "staff_and_volunteers"] }, description: "Who answers it" },
+          time: { type: "array", items: { type: "string", enum: ["under_5", "5_to_15", "over_15"] }, description: "Time to complete, in minutes" },
+          feature: { type: "array", items: { type: "string", enum: ["validated", "verdicts", "repeats"] } },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (most organisations using it first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Surveys per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/surveys", p),
+    },
+
+    {
+      name: "makerble_get_explore_survey",
+      description:
+        "Preview one ImpactStore Survey (Story Category) from makerble_explore_surveys, as its Preview panel on " +
+        "Explore Surveys shows it: the same fields plus sections, each with its title (null for questions before " +
+        "the first section header) and its question titles in order. Use it to check a Survey asks what the " +
+        "user needs before suggesting they add it to a project, which they do in Makerble with Add to a project " +
+        "on Explore Surveys. Returns 404 for a Survey that isn't published to the ImpactStore.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Survey's id from makerble_explore_surveys" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/surveys/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
