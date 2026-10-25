@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 176 Makerble MCP tool definitions.
+ * All 178 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4754,6 +4754,47 @@ export function buildTools(api) {
         required: ["owner_type", "id"],
       },
       handler: ({ owner_type, id, ...body }) => put(`/${owner_type}s/${id}/snapshot_settings`, body),
+    },
+
+    {
+      name: "makerble_get_snapshot",
+      description:
+        "Get an Album's (Portfolio / Bundle) or Project's Snapshot: the headline numbers Today › Snapshot shows on " +
+        "one page. Use it for questions like 'give me a summary of this programme' or 'what's the gender split of " +
+        "the young people we work with'. Give album_id or project_id; with neither, you get the user's pinned " +
+        "Album or Project, or else the last one they viewed (404 when there's neither). panels ('Who we're working " +
+        "with') count the Contacts (Beneficiaries) the user can view by Ratio Set (e.g. Gender), age band and, on " +
+        "an Album, Project, by the Demographics tab's rules: 'No Data' / 'No date of birth' for Contacts without a " +
+        "value, and groups below the Organisation's Minimum Results Threshold come back with contacts: null and are " +
+        "added up under 'Below Threshold' (don't try to work out the hidden numbers). percent is of contacts_count. " +
+        "tiles ('How the work is going', one per Results Canvas column) and workload give each chosen metric's or " +
+        "tracker's result for the Results Canvas's current period (from the day after the last deadline to the next), " +
+        "or all time when there are no deadlines; timeframe says which and gives the dates. value is null for a " +
+        "tracker with no single number. The Album's or Project's editors choose what appears with makerble_set_snapshot_settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (params) => get("/snapshot", params),
+    },
+
+    {
+      name: "makerble_pin_snapshot",
+      description:
+        "Pin an Album (Portfolio / Bundle) or Project as the user's own Snapshot, as the Pin as my Snapshot button " +
+        "on Today › Snapshot does, so the Snapshot (and makerble_get_snapshot without an id) opens it. Only changes " +
+        "the user's own Snapshot. Give album_id or project_id. Returns what is now pinned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (body) => put("/snapshot/pin", body),
     },
   ];
 }
