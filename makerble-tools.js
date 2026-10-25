@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 170 Makerble MCP tool definitions.
+ * All 171 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1833,6 +1833,29 @@ export function buildTools(api) {
         required: ["beneficiary_id"],
       },
       handler: ({ beneficiary_id, ...p }) => get(`/beneficiaries/${beneficiary_id}/checklists`, p),
+    },
+
+    {
+      name: "makerble_get_contact_next_step",
+      description:
+        "Get what to do next for a Contact (beneficiary), as on the Next step card of their profile: the first " +
+        "action not yet done on each of their Checklists, the most pressing first (overdue, then the earliest " +
+        "due_on, then by checklist name). data[0] is the next step. Each step gives the checklist " +
+        "(checklist_id, checklist_name), its place in it (number of total, e.g. step 4 of 6), the action " +
+        "(action_id, action_type, action_name e.g. 'Invite to an event', title, description), its deadline " +
+        "(due_on, overdue), if_earlier_steps_not_done ('remind', or 'ask_reason' when a colleague must give a " +
+        "reason to skip it) and who is responsible (owner_description, responsible_user_ids). others_count is " +
+        "how many other checklists are waiting; all_done is true when every action on the Contact's " +
+        "checklists is done. Use it to tell a colleague what to do next for a Contact; to see every action, " +
+        "use makerble_get_contact_checklists. Only Contacts you can see are returned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+        },
+        required: ["beneficiary_id"],
+      },
+      handler: ({ beneficiary_id }) => get(`/beneficiaries/${beneficiary_id}/checklists/next_step`),
     },
 
     {
