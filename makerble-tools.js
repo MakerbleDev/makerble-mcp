@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 171 Makerble MCP tool definitions.
+ * All 174 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1856,6 +1856,72 @@ export function buildTools(api) {
         required: ["beneficiary_id"],
       },
       handler: ({ beneficiary_id }) => get(`/beneficiaries/${beneficiary_id}/checklists/next_step`),
+    },
+
+    {
+      name: "makerble_check_contact_checklist_step",
+      description:
+        "Before doing a Checklist action for a Contact (beneficiary), check whether its earlier steps on the same " +
+        "Checklist are done (the 'soft gate'). Returns gated (true when earlier steps aren't done), missing (each " +
+        "{action_id, number, action_type, title, required_first}) and reason_required (true when a missing step is " +
+        "set to 'Warn and ask for a reason to skip', shown to colleagues as Required first). Nothing is blocked: " +
+        "workflow: (1) call this; (2) if gated, tell the user which steps are missing and suggest doing the first " +
+        "one instead; (3) if they still want to go ahead, call makerble_skip_contact_checklist_steps, with a reason " +
+        "when reason_required is true; (4) then do the action. Get checklist_id and action_id from " +
+        "makerble_get_contact_next_step or makerble_get_contact_checklists.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action about to be done" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id }) =>
+        get(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/gate`),
+    },
+
+    {
+      name: "makerble_skip_contact_checklist_steps",
+      description:
+        "Record that a Checklist action is being done for a Contact before its earlier steps are done (going past " +
+        "the soft gate found with makerble_check_contact_checklist_step). Saves who, when, which steps were skipped " +
+        "and the reason, and puts it on the Contact's timeline as a story. A reason is required when a missing step " +
+        "is Required first (reason_required). Needs edit access to the Contact. Returns the skip: " +
+        "{id, checklist_action_id, skipped_actions: [{id, title, required_first}], reason, user_id, story_id, created_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action being done early" },
+          reason: { type: "string", description: "Why it is being done before the earlier steps (max 2000 characters)" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id, reason }) =>
+        post(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/skips`, { reason }),
+    },
+
+    {
+      name: "makerble_list_checklist_skips",
+      description:
+        "List the times colleagues did a Checklist's actions before the earlier steps were done (skipped steps, the " +
+        "exceptions shown on the Checklist's Board), newest first: who (user_id, user_name), for which Contact " +
+        "(beneficiary_id), which action (checklist_action_id, action_title), which steps were skipped and the reason. " +
+        "Only Contacts you can see are included. Use it to spot where a process isn't being followed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only skips saved after this (ISO 8601)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/skips`, p),
     },
 
     {
