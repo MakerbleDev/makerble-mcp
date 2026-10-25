@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 174 Makerble MCP tool definitions.
+ * All 176 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4697,6 +4697,63 @@ export function buildTools(api) {
         required: ["organisation_id"],
       },
       handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/age_band_counts`, params),
+    },
+
+    // ── Snapshot (CP-8903) ────────────────────────────────────────────────────
+    {
+      name: "makerble_get_snapshot_settings",
+      description:
+        "Get what an Album's (Portfolio / Bundle) or Project's Snapshot shows, and every choice there is: the " +
+        "Snapshot tab of its Preferences. The Snapshot (under Today in the sidebar) is a one-page summary with three " +
+        "sections. 'Who we're working with' (panels): how its Contacts (Beneficiaries) split by a Ratio Set such as " +
+        "Gender, by Age band (from Date of Birth) and, on an Album, by Project. 'How the work is going' (tiles): one " +
+        "headline number per Results Canvas column (activities, engagement, potential, behaviour, growth; " +
+        "column_label is the name the canvas shows). 'Workload': up to three Workflow, Cohort or Formula Trackers. " +
+        "Returns panels in display order, tiles (choice null = hidden), workload, and under choices the panels, the " +
+        "metrics in each column (Progress Trackers (Changes), Indicators and filtered versions) and the trackers, " +
+        "which can go on any tile. Each has a key to pass to makerble_set_snapshot_settings. customised is false " +
+        "while the defaults apply (Age band and the first two Ratio Sets; the first metric in each column; no " +
+        "Workload). Anyone in the Organisation (or who can see the Album) can read it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["album", "project"], description: "Whose Snapshot" },
+          id: { type: "number", description: "The Album's or Project's ID" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id }) => get(`/${owner_type}s/${id}/snapshot_settings`),
+    },
+
+    {
+      name: "makerble_set_snapshot_settings",
+      description:
+        "Choose what an Album's (Portfolio / Bundle) or Project's Snapshot shows: the Snapshot tab of its " +
+        "Preferences. Call makerble_get_snapshot_settings first and use the keys it lists under choices. Send any of: " +
+        "panels, the panel keys in display order (e.g. ['age_band', 'ratio_set:12']; 'split_by_project' is for " +
+        "Albums only; [] shows none); tiles, an object of Results Canvas column => key, using a metric from that " +
+        "column or any tracker, or null to hide the tile (e.g. { activities: 'Change:31', engagement: null }); " +
+        "workload, up to three tracker keys or nulls. Whatever you leave out stays as it is. Only the Album's " +
+        "managers, or a Project's Project Managers and Organisation Admins, can change it. Returns the settings after " +
+        "the change, as makerble_get_snapshot_settings does; a key that can't go where you put it is refused with " +
+        "an error naming it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["album", "project"], description: "Whose Snapshot" },
+          id: { type: "number", description: "The Album's or Project's ID" },
+          panels: { type: "array", items: { type: "string" }, description: "Panel keys in display order" },
+          tiles: {
+            type: "object",
+            description: "Results Canvas column => metric or tracker key, or null to hide that tile",
+            properties: Object.fromEntries(["activities", "engagement", "potential", "behaviour", "growth"].map((column) => [column, { type: ["string", "null"] }])),
+            additionalProperties: false,
+          },
+          workload: { type: "array", maxItems: 3, items: { type: ["string", "null"] }, description: "Up to three tracker keys; null hides a tile" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id, ...body }) => put(`/${owner_type}s/${id}/snapshot_settings`, body),
     },
   ];
 }
