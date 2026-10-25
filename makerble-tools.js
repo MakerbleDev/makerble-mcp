@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 167 Makerble MCP tool definitions.
+ * All 170 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4527,6 +4527,75 @@ export function buildTools(api) {
         required: ["organisation_id", "user_id", "contract_id"],
       },
       handler: ({ organisation_id, user_id, ...body }) => put(`/organisations/${organisation_id}/seats/${user_id}`, body),
+    },
+
+    // ── Age bands (CP-8902) ───────────────────────────────────────────────────
+    {
+      name: "makerble_get_age_bands",
+      description:
+        "Get the age bands an Organisation (Charity), Album (Portfolio / Bundle) or Project uses to group Contacts " +
+        "(Beneficiaries) by age. Ages are worked out from each Contact's Date of Birth as of today. Bands are stored as " +
+        "the age each starts at: starts [0, 13, 18, 25] means the bands 0–12, 13–17, 18–24 and 25 and over (returned " +
+        "in words as bands). Every Organisation has bands (by default those four); an Album or Project can have its " +
+        "own and otherwise uses its Organisation's. source says whose bands they are: 'organisation', 'album' or " +
+        "'project'. Anyone in the Organisation (or who can see the Album) can read them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["organisation", "album", "project"], description: "Whose age bands to get" },
+          id: { type: "number", description: "The Organisation's, Album's or Project's ID" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id }) => get(`/${{ organisation: "organisations", album: "albums", project: "projects" }[owner_type]}/${id}/age_bands`),
+    },
+
+    {
+      name: "makerble_set_age_bands",
+      description:
+        "Change the age bands of an Organisation (Charity), Album (Portfolio / Bundle) or Project: the Age bands " +
+        "section of its Preferences page. Send starts, the age each band starts at (whole numbers 0 to 120, in any " +
+        "order; Makerble sorts them and drops duplicates): e.g. a youth programme might use [10, 14, 18, 22] for " +
+        "10–13, 14–17, 18–21 and 22 and over. For an Album or Project, send use_organisation_bands: true instead to " +
+        "remove its own bands so it follows its Organisation's. Changing an Organisation's bands changes them for " +
+        "every Album and Project without bands of its own. Only the Organisation's admins can change its bands, an " +
+        "Album's managers the Album's, and Project Managers or Organisation Admins a Project's. Returns the bands " +
+        "after the change, as makerble_get_age_bands does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["organisation", "album", "project"], description: "Whose age bands to change" },
+          id: { type: "number", description: "The Organisation's, Album's or Project's ID" },
+          starts: { type: "array", items: { type: "number" }, description: "The age each band starts at" },
+          use_organisation_bands: { type: "boolean", description: "Albums and Projects only: true goes back to the Organisation's bands" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id, ...body }) => put(`/${{ organisation: "organisations", album: "albums", project: "projects" }[owner_type]}/${id}/age_bands`, body),
+    },
+
+    {
+      name: "makerble_count_contacts_by_age_band",
+      description:
+        "Count an Organisation's Contacts (Beneficiaries) in each age band: what the Age band card on the " +
+        "Demographics tab of Manage Contacts shows. Use it to answer 'how many young people do we work with' or 'what " +
+        "is the age breakdown of this project'. Give album_id or project_id to count only that Album's or Project's " +
+        "Contacts, by its own age bands if it has them (source says whose bands were used). data lists each band " +
+        "with its number of contacts; 'Under X' appears only if someone is younger than the first band, 'Date of " +
+        "birth in the future' only if someone's Date of Birth is after today (a data-entry error the user may want " +
+        "to fix), and 'No date of birth' only if someone has none. Bands with fewer Contacts than the Organisation's Minimum Results " +
+        "Threshold have contacts: null and are added up under 'Below Threshold'; don't try to work out the hidden " +
+        "numbers. total_count is every Contact counted. Ages are as of today.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          album_id: { type: "number", description: "Optional: count only this Album's Contacts" },
+          project_id: { type: "number", description: "Optional: count only this Project's Contacts" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/age_band_counts`, params),
     },
   ];
 }
