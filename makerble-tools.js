@@ -3042,13 +3042,21 @@ export function buildTools(api) {
     {
       name: "makerble_list_outcomes",
       description:
-        "List all Outcomes. Each has a stage (short/medium/long-term) placing it in Progress Panel cols 3–5.",
+        "List the Outcomes the signed-in user can see: their own, those of every organisation where they are an editor, reporter or observer, and those used by one of their Projects. " +
+        "Each has a stage (short/medium/long-term) placing it in Progress Panel cols 3–5. " +
+        "The Outcome library shared by all organisations (the public library) is left out unless include_public_library is true. " +
+        "Set it when looking for an existing Outcome to reuse rather than listing the organisation's own.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Also return public-library Outcomes from other organisations. Default false.",
+          },
         },
       },
       handler: (p) => get("/outcomes", p),
@@ -3056,13 +3064,23 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_outcome",
-      description: "Get a single Outcome by ID.",
+      description:
+        "Get a single Outcome by ID. Returns not-found for an Outcome the signed-in user cannot see. " +
+        "A public-library Outcome owned by another organisation is only returned when include_public_library is true.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number" } },
+        properties: {
+          id: { type: "number" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Allow a public-library Outcome from another organisation to be returned. Default false.",
+          },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/outcomes/${id}`),
+      handler: ({ id, include_public_library }) =>
+        get(`/outcomes/${id}`, { include_public_library }),
     },
 
     {
