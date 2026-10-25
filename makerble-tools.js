@@ -4506,8 +4506,7 @@ export function buildTools(api) {
         "question either reuses an item by id (metric_id for a Metric / Indicator, field_id for a Field / " +
         "Custom Field, activity_tracker_id for an Activity tracker / Change) or defines a new one: new_metric " +
         "(name, metric_type scale, value or binary, default_question; a scale Metric also needs list_id for " +
-        "an existing List / Ratio Set or list {name, choices} for a new one; optional outcome_id, unit_id, " +
-        "success_direction) or new_field (field_name, field_data_type; section_title makes a heading). Prefer " +
+        "an existing List / Ratio Set or list {name, choices} for a new one; outcome_id for the Outcome it measures; optional unit_id, success_direction) or new_field (field_name, field_data_type; section_title makes a heading). Prefer " +
         "reusing a Metric and List: results recorded against a copy don't add up with the original. Typical " +
         "workflow: search the library for each question's Metric, List or Field, then call this once with the " +
         "reused ids and only the missing items defined inline. Nothing is created unless everything is: an " +
@@ -4550,12 +4549,12 @@ export function buildTools(api) {
                       properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
                       required: ["name", "choices"],
                     },
-                    outcome_id: { type: "number", description: "The Outcome it measures (optional)" },
+                    outcome_id: { type: "number", description: "The Outcome (from makerble_search_library, or makerble_create_outcome) that this Metric measures" },
                     unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
                     success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
                     description: { type: "string" },
                   },
-                  required: ["name", "metric_type", "default_question"],
+                  required: ["name", "metric_type", "default_question", "outcome_id"],
                 },
                 new_field: {
                   type: "object",
