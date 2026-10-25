@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 175 Makerble MCP tool definitions.
+ * All 176 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4579,6 +4579,69 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "questions"],
       },
       handler: (p) => post("/surveys", p),
+    },
+
+    {
+      name: "makerble_create_contact_form",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a " +
+        "Contact Form (a Beneficiary Category) with all its fields in one call, in the order given (at most " +
+        "50): the form an organisation fills in about each Contact of one kind, e.g. 'Young person " +
+        "registration'. Each field either reuses an item by id (field_id for a Field / Custom Field, list_id " +
+        "for a List / Ratio Set of answer choices) or defines a new one: new_field (field_name, " +
+        "field_data_type; section_title makes a heading) or new_list (name, choices). Only organisations that " +
+        "use Contact Forms can have one (otherwise 403). Nothing is created unless everything is: an invalid " +
+        "field creates nothing and the error names it ('Question 2: ...'). If a new Field or List has the " +
+        "same or a near-identical name to one in the organisation or the public library, nothing is created " +
+        "and you get a 409 error listing the duplicates with the question number each belongs to: reuse them, " +
+        "or call again with force: true only if none fits. Only the organisation uses the form unless you are " +
+        "Makerble staff and send approved: true. Returns data: the form as makerble_get_library_item shows it " +
+        "(id, type 'contact_form', name, owner, fields in order) and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The form's name, e.g. 'Young person registration'" },
+          department: { type: "string", enum: ["Personal", "Professional", "Public Impact"], description: "Which area of a Contact's life it covers" },
+          contact_role: { type: "string", description: "What the Contacts are to the organisation, e.g. 'Participant', 'Student', 'Client'" },
+          contact_type: { type: "string", description: "'Person' (default), 'Organisation', 'Animal' or 'Object'" },
+          questions: {
+            type: "array",
+            description: "The fields in order. Each has exactly one of field_id, list_id, new_field or new_list",
+            items: {
+              type: "object",
+              properties: {
+                field_id: { type: "number", description: "Reuse this Field (Custom Field)" },
+                list_id: { type: "number", description: "Reuse this List (Ratio Set) of answer choices" },
+                new_field: {
+                  type: "object",
+                  properties: {
+                    field_name: { type: "string" },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"] },
+                    section_text: { type: "string", description: "section_title only: the text under the heading" },
+                    private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
+                  },
+                  required: ["field_name", "field_data_type"],
+                },
+                new_list: {
+                  type: "object",
+                  properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+                  required: ["name", "choices"],
+                },
+                is_mandatory: { type: "boolean" },
+                choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Lists: how many answers may be picked (default single_choice)" },
+                choice_value: { type: "number", description: "With limited_choice: how many" },
+                layout: { type: "string", enum: ["compact", "expanded"], description: "Lists: chosen for you if left out" },
+                external_description: { type: "string", description: "Help text shown to the person filling it in" },
+              },
+            },
+          },
+          approved: { type: "boolean", description: "Makerble staff only: let every organisation use the form, and approve its new Lists" },
+          force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "department", "contact_role", "questions"],
+      },
+      handler: (p) => post("/contact_forms", p),
     },
 
     {
