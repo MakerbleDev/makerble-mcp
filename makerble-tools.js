@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 178 Makerble MCP tool definitions.
+ * All 179 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1643,6 +1643,37 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/checklists/${id}`),
+    },
+
+    {
+      name: "makerble_get_checklist_progress",
+      description:
+        "See where the Contacts on a Checklist have got to: the pipeline shown in the Progress section of the " +
+        "Checklist's profile page. For each action, in order, returns completed_count (Contacts who have done it), " +
+        "furthest_count (Contacts for whom it is the furthest action done) and waiting_count (Contacts for whom it " +
+        "is the first action not done, so someone who did steps 1 and 3 is waiting on step 2), each with the first " +
+        "list_limit (30) Contacts as {beneficiary_id, name}. Also returns contacts_count and complete_count (every " +
+        "action done). Only Contacts the user can see are counted. Use it to answer 'who is stuck on which step' or " +
+        "'how many have finished intake'. Each Contact in a waiting list also has days_waiting (since the Checklist " +
+        "was added or the previous action was done), overdue (the action is past its due date), skipped_a_step (a " +
+        "colleague logged starting a later action first) and responsible (who is responsible for that action). Also " +
+        "returns overdue_count and complete (the first Contacts with every action done). Pass project_id to count only " +
+        "Contacts in one of the Projects the Checklist is added to (see makerble_get_checklist's projects), and " +
+        "responsible to count only Contacts whose waiting action a person or Team is responsible for.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          responsible: {
+            type: "string",
+            description: "Optional: 'me' (the signed-in user, directly or through one of their Teams), 'user:<user id>' " +
+              "or 'team:<team id>'. Only Contacts whose waiting action they are responsible for are counted.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/checklists/${id}/progress`, params),
     },
 
     {
