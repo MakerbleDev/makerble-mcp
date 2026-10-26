@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 186 Makerble MCP tool definitions.
+ * All 188 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4974,6 +4974,57 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/surveys/${id}`),
+    },
+
+    // ── Explore Report Templates (CP-8870) ────────────────────────────────────
+    {
+      name: "makerble_explore_report_templates",
+      description:
+        "Find a ready-made Report Template in the Makerble ImpactStore: the question sets for funder reports, " +
+        "trustee updates, contract monitoring returns and other reports that organisations and Makerble have " +
+        "published for everyone, as the Explore Report Templates page lists them. Use it when the user has a " +
+        "report to write and wants a template rather than starting from scratch, e.g. 'an end of grant report " +
+        "for a funder' or 'a quarterly update for our trustees'. Filter by recipient, i.e. who it's for (funder, " +
+        "trustees, local_authority: a commissioner or contract, corporate_partner, internal), theme " +
+        "(children_and_young_people, community, employment, governance, health_and_wellbeing, volunteering) and " +
+        "output, the answer formats its questions ask for (narrative, number, chart). Several options in one " +
+        "filter match any of them; different filters must all match. Returns a page of Report Templates, each " +
+        "with id, slug, name, description, recipient, theme, question_count, answer_formats, shared_by, " +
+        "libraries_count (how many organisations have it in their library), yours and in_your_library, plus " +
+        "facets: each filter option with how many Report Templates it would return. Then call " +
+        "makerble_get_explore_report_template to read its questions before suggesting it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the name or description, or who it's for or its theme, e.g. 'end of grant'" },
+          recipient: { type: "array", items: { type: "string", enum: ["funder", "trustees", "local_authority", "corporate_partner", "internal"] }, description: "Who it's for" },
+          theme: { type: "array", items: { type: "string", enum: ["children_and_young_people", "community", "employment", "governance", "health_and_wellbeing", "volunteering"] } },
+          output: { type: "array", items: { type: "string", enum: ["narrative", "number", "chart"] }, description: "Answer formats any of its questions ask for" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (in the most organisations' libraries first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Report Templates per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/report_templates", p),
+    },
+
+    {
+      name: "makerble_get_explore_report_template",
+      description:
+        "Preview one ImpactStore Report Template from makerble_explore_report_templates, as its Preview panel on " +
+        "Explore Report Templates shows it: the same fields plus questions, each with its title and the answer " +
+        "formats it asks for (narrative, number, chart), in order. Use it to check a template asks what the " +
+        "user's funder or board needs before suggesting it. The user adds it to their organisation's library " +
+        "in Makerble with Add to your library on Explore Report Templates. Returns 404 for a Report Template " +
+        "that isn't in the ImpactStore.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Report Template's id from makerble_explore_report_templates" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/report_templates/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
