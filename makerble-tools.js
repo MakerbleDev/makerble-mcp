@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 187 Makerble MCP tool definitions.
+ * All 189 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1965,6 +1965,55 @@ export function buildTools(api) {
         required: ["beneficiary_id"],
       },
       handler: ({ beneficiary_id }) => get(`/beneficiaries/${beneficiary_id}/checklists/next_step`),
+    },
+
+    {
+      name: "makerble_get_focus",
+      description:
+        "Get what needs the signed-in user next, as on their Focus page (Today › Focus): one list from every " +
+        "source they haven't switched off, most overdue first. Today the only source is Checklist Actions " +
+        "(type 'checklist_actions'): for each Contact (beneficiary) and Checklist, the first step not yet done, " +
+        "when the user is responsible for it. Each item has id, type, title (the step), contact {id, name}, " +
+        "context (e.g. 'Checklist Action · Intake · step 2 of 5', plus who is responsible when it isn't the user), " +
+        "url, due_on, due_text (e.g. '15 days overdue', 'Due today', 'No due date'), section ('overdue', 'today', " +
+        "'this_week' for the next 7 days, or 'later' for later or undated) and action {label, url, method}. The " +
+        "response also gives counts (all, and per type), sections [{key, label, count}], sources [{key, label, " +
+        "shown}] and teams (true when the user is in a Team, so scope='teams' is available). Use it to answer " +
+        "'what should I do next?' or 'what's overdue for me?'; then use makerble_get_contact_next_step or " +
+        "makerble_get_contact_checklists for a Contact's detail. Only Contacts the user can see are included, " +
+        "and there is no view of everyone's work: use a Checklist's progress for that.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scope: {
+            type: "string",
+            enum: ["me", "teams"],
+            description: "'me' (default): what the user is responsible for. 'teams': also what their Teams are responsible for.",
+          },
+          type: { type: "string", description: "Only items of this type, e.g. 'checklist_actions'." },
+          section: { type: "string", enum: ["overdue", "today", "this_week", "later"], description: "Only items in this section." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+      },
+      handler: (params) => get("/focus", params),
+    },
+
+    {
+      name: "makerble_set_focus_sources",
+      description:
+        "Choose which sources the signed-in user's Focus page (Today › Focus) shows, as its ⚙ 'What Focus shows " +
+        "you' panel does. Pass the keys to show; every other source is switched off. Keys come from the sources " +
+        "list of makerble_get_focus (today only 'checklist_actions', labelled Checklist Actions). Saved for this " +
+        "user only; their email and web notification settings are unchanged. Returns sources [{key, label, shown}].",
+      inputSchema: {
+        type: "object",
+        properties: {
+          shown_sources: { type: "array", items: { type: "string" }, description: "The source keys to show; [] for none" },
+        },
+        required: ["shown_sources"],
+      },
+      handler: ({ shown_sources }) => patch("/focus/settings", { shown_sources }),
     },
 
     {
