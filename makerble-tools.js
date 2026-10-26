@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 179 Makerble MCP tool definitions.
+ * All 183 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -61,7 +61,10 @@ export function makeApiClient(baseUrl, email, token) {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!res.ok) {
-      const msg = data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
+      // A 409 from a create endpoint lists the items to reuse instead (CP-8888).
+      const msg = data?.duplicates
+        ? { error: data.error, duplicates: data.duplicates }
+        : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
       throw new McpError(ErrorCode.InternalError, `Makerble API error: ${JSON.stringify(msg)}`);
     }
     return data;
@@ -4538,6 +4541,115 @@ export function buildTools(api) {
         required: ["item_type", "id"],
       },
       handler: ({ item_type, id }) => get(`/library/${encodeURIComponent(item_type)}/${id}/usage`),
+    },
+
+    // ── Create library building blocks (CP-8888) ──────────────────────────────
+    {
+      name: "makerble_create_list",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a List " +
+        "(a Ratio Set): the answer choices for a multiple-choice question or a scale Metric, e.g. 'Agree - " +
+        "Disagree' with choices Strongly agree, Agree, Neutral, Disagree, Strongly disagree. The choices keep " +
+        "the order you give, at most 50. The List stays private to the organisation. If the organisation or " +
+        "the public library already has one with the same or a near-identical name (ignoring case, spacing " +
+        "and punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "List as makerble_get_library_item shows it (id, type 'list', name, owner, choices with their ids) " +
+        "and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The List's name, e.g. 'Agree - Disagree'" },
+          choices: { type: "array", items: { type: "string" }, description: "The answer choices in order, each different" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "choices"],
+      },
+      handler: (p) => post("/lists", p),
+    },
+
+    {
+      name: "makerble_create_unit",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Unit: " +
+        "the unit of measure shown beside a number answer, e.g. 'hours', 'km' or '\u00a3'. Units are shared by " +
+        "every organisation, so only Makerble staff may create one (anyone else gets 403); everyone else " +
+        "should reuse an existing Unit. A Unit that already exists is never changed. If the organisation or " +
+        "the public library already has one with the same or a near-identical name (ignoring case, spacing " +
+        "and punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "Unit (id, type 'unit', name, owner 'Makerble', alignment) and approved (true: every organisation can " +
+        "use it).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The Unit as it appears beside the number, e.g. 'hours'" },
+          alignment: { type: "string", enum: ["left", "right"], description: "Which side of the number it goes: left (e.g. £10) or right (e.g. 10 hours)" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["name", "alignment"],
+      },
+      handler: (p) => post("/units", p),
+    },
+
+    {
+      name: "makerble_create_field",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Field " +
+        "(a Custom Field): a question with a free answer rather than a Metric, e.g. 'Date of birth' (date), " +
+        "'Postcode' (text) or 'Number of children' (number), for use on a Survey or Contact Form. A " +
+        "section_title Field is a heading, with section_text shown under it. If the organisation or the " +
+        "public library already has one with the same or a near-identical name (ignoring case, spacing and " +
+        "punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "Field (id, type 'field', name, owner, field_type; a section_title Field has only id, type and name) " +
+        "and approved (always false: Fields are not shared in the public library).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"], description: "The kind of answer" },
+          section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
+          private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["organisation_id", "field_name", "field_data_type"],
+      },
+      handler: (p) => post("/fields", p),
+    },
+
+    {
+      name: "makerble_create_outcome",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates an " +
+        "Outcome: a change an organisation wants to see in the people it works with, e.g. 'Improved " +
+        "confidence'. Metrics (Indicators) measure progress towards it. An Outcome you create stays " +
+        "unapproved and private to the organisation unless you are Makerble staff; approved, private and " +
+        "is_default are honoured for Makerble staff only and ignored for everyone else. If the organisation " +
+        "or the public library already has one with the same or a near-identical name (ignoring case, spacing " +
+        "and punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "Outcome as makerble_get_library_item shows it (id, type 'outcome', name, owner, description) and " +
+        "approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          title: { type: "string", description: "The Outcome, e.g. 'Improved confidence'" },
+          stage: { type: "string", enum: ["Short-term outcomes", "Medium-term outcomes", "Long-term outcomes"], description: "When the change is expected" },
+          description: { type: "string", description: "What the Outcome means" },
+          instruction: { type: "string", description: "Guidance for staff recording it" },
+          department: { type: "string", description: "Optional cause area (Department) name, e.g. 'Health'" },
+          approved: { type: "boolean", description: "Makerble staff only: approve it for the public library" },
+          private: { type: "boolean", description: "Makerble staff only: false to share it in the public library" },
+          is_default: { type: "boolean", description: "Makerble staff only: offer it by default to every organisation" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["organisation_id", "title", "stage"],
+      },
+      handler: (p) => post("/outcomes", p),
     },
 
     {
