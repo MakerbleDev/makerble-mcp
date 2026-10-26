@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 188 Makerble MCP tool definitions.
+ * All 190 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5025,6 +5025,53 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/report_templates/${id}`),
+    },
+
+    // ── Explore Dropdowns (CP-8870) ───────────────────────────────────────────
+    {
+      name: "makerble_explore_dropdowns",
+      description:
+        "Find a ready-made Dropdown (an answer-choice list, Ratio Set) in the Makerble ImpactStore: the scales " +
+        "and category lists other organisations and Makerble have shared, as the Explore Dropdowns page lists " +
+        "them. Use it before creating a list of answer choices, so the user's data lines up with other " +
+        "organisations', e.g. 'a 5-point agreement scale' or 'standard ethnicity categories'. Filter by " +
+        "designed_for (surveys_and_trackers, or forms: bio, event and project forms), choices, the number of " +
+        "answer choices (up_to_10, 11_to_100, over_100) and theme (scales, demographics). Several options in one " +
+        "filter match any of them; different filters must all match. Returns a page of Dropdowns, each with id, " +
+        "title, choice_count, designed_for, themes, shared_by, used_in_count (how many surveys, trackers and forms " +
+        "use it) and yours, plus facets: each filter option with how many Dropdowns it would return. Then call " +
+        "makerble_get_explore_dropdown to read its answer choices. The user copies one into their organisation " +
+        "in Makerble with Add to organisation on Explore Dropdowns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Dropdown's title or any answer choice, e.g. 'ethnicity'" },
+          designed_for: { type: "array", items: { type: "string", enum: ["surveys_and_trackers", "forms"] } },
+          choices: { type: "array", items: { type: "string", enum: ["up_to_10", "11_to_100", "over_100"] }, description: "Number of answer choices" },
+          theme: { type: "array", items: { type: "string", enum: ["scales", "demographics"] } },
+          chip: { type: "string", enum: ["Scales", "Demographics", "Equality monitoring"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (used in the most surveys, trackers and forms first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Dropdowns per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/dropdowns", p),
+    },
+
+    {
+      name: "makerble_get_explore_dropdown",
+      description:
+        "Read one ImpactStore Dropdown (Ratio Set) from makerble_explore_dropdowns: the same fields plus every " +
+        "answer choice, in order. Use it to check the choices suit the user's survey, tracker or form before " +
+        "suggesting it. Returns 404 for a Dropdown that isn't shared to the ImpactStore and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Dropdown's id from makerble_explore_dropdowns" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/dropdowns/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
