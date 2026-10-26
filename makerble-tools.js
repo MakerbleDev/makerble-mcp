@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 194 Makerble MCP tool definitions.
+ * All 196 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5169,6 +5169,59 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/ideas/${id}`),
+    },
+
+    // ── Explore Metrics (CP-8870) ─────────────────────────────────────────────
+    {
+      name: "makerble_explore_metrics",
+      description:
+        "Find ready-made metrics in the Makerble ImpactStore across the stages of change, as the Explore Metrics " +
+        "page lists them: progress trackers (kind 'change': Activities and Engagement, which count deliveries " +
+        "and attendance), outcome indicators (kind 'indicator': Ability, Behaviour and Effect, each a Choice " +
+        "tracker (a scale), an Achievement tracker (yes or no) or a Numerical tracker (a value)) and Financial " +
+        "Values (kind 'financial_value', a £ value on an outcome). Use it before creating a metric, e.g. 'a " +
+        "confidence scale' or 'how to count session attendance'. Filter by stage (activities, engagement, " +
+        "ability, behaviour, effect, financial_values), answer_format (count, scale, yes_no, value), audience " +
+        "(public_impact, personal, professional) and shared_by (makerble, others). Several options in one " +
+        "filter match any of them; different filters must all match. Returns a page of metrics, each with kind, " +
+        "id, name, stage, whats_inside (e.g. '5-level scale'), shared_by, libraries_count (how many organisations " +
+        "use it on a project) and yours, plus facets. Then call makerble_get_explore_metric for its details and " +
+        "answer choices. The user adds a tracker or indicator to a project in Makerble with Add to a project on " +
+        "Explore Metrics, or makerble_add_metric_to.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the metric's name or description, e.g. 'confidence'" },
+          stage: { type: "array", items: { type: "string", enum: ["activities", "engagement", "ability", "behaviour", "effect", "financial_values"] }, description: "Stage of change" },
+          answer_format: { type: "array", items: { type: "string", enum: ["count", "scale", "yes_no", "value"] } },
+          audience: { type: "array", items: { type: "string", enum: ["public_impact", "personal", "professional"] } },
+          shared_by: { type: "array", items: { type: "string", enum: ["makerble", "others"] } },
+          chip: { type: "string", enum: ["Wellbeing", "Employment", "Housing", "Attendance", "SDGs"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (on the most organisations' projects first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/metrics", p),
+    },
+
+    {
+      name: "makerble_get_explore_metric",
+      description:
+        "Preview one metric from makerble_explore_metrics, as its Preview panel on Explore Metrics shows it: the " +
+        "same fields plus its description, details (its key facts by label, such as the Outcomes an indicator " +
+        "sits under, or a Financial Value's amount, year and source) and the answer choices of a scale or yes-or-no " +
+        "indicator. Use it to check a metric measures what the user needs before suggesting it. Returns 404 for a " +
+        "metric that isn't published and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["change", "indicator", "financial_value"], description: "The metric's kind from makerble_explore_metrics" },
+          id: { type: "number", description: "The metric's id from makerble_explore_metrics" },
+        },
+        required: ["kind", "id"],
+      },
+      handler: ({ kind, id }) => get(`/explore/metrics/${kind}/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
