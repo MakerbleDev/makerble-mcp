@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 177 Makerble MCP tool definitions.
+ * All 186 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1649,6 +1649,37 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_checklist_progress",
+      description:
+        "See where the Contacts on a Checklist have got to: the pipeline shown in the Progress section of the " +
+        "Checklist's profile page. For each action, in order, returns completed_count (Contacts who have done it), " +
+        "furthest_count (Contacts for whom it is the furthest action done) and waiting_count (Contacts for whom it " +
+        "is the first action not done, so someone who did steps 1 and 3 is waiting on step 2), each with the first " +
+        "list_limit (30) Contacts as {beneficiary_id, name}. Also returns contacts_count and complete_count (every " +
+        "action done). Only Contacts the user can see are counted. Use it to answer 'who is stuck on which step' or " +
+        "'how many have finished intake'. Each Contact in a waiting list also has days_waiting (since the Checklist " +
+        "was added or the previous action was done), overdue (the action is past its due date), skipped_a_step (a " +
+        "colleague logged starting a later action first) and responsible (who is responsible for that action). Also " +
+        "returns overdue_count and complete (the first Contacts with every action done). Pass project_id to count only " +
+        "Contacts in one of the Projects the Checklist is added to (see makerble_get_checklist's projects), and " +
+        "responsible to count only Contacts whose waiting action a person or Team is responsible for.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          responsible: {
+            type: "string",
+            description: "Optional: 'me' (the signed-in user, directly or through one of their Teams), 'user:<user id>' " +
+              "or 'team:<team id>'. Only Contacts whose waiting action they are responsible for are counted.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/checklists/${id}/progress`, params),
+    },
+
+    {
       name: "makerble_list_checklist_action_types",
       description:
         "List the actions a Checklist can contain (e.g. add_role 'Add a role', complete_survey 'Complete a " +
@@ -1661,6 +1692,9 @@ export function buildTools(api) {
         "survey_waves '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
         "campaign without Waves>'. The two 'for a relative' types take relatives: [{relationship_side, " +
         "beneficiary_category_ids or survey_waves}], where the side is the relative's own (e.g. the Son). " +
+        "Instead of specific values, criteria {any: true} counts any record of the kind ('Any [noun]' on " +
+        "the Create Checklist page, named by any_name, e.g. 'Any relationship'). Criteria with nothing " +
+        "chosen are 'Not set yet': the action is saved but can't be done until something is chosen. " +
         "Action types with no criteria_keys are done by any record of the kind (e.g. create_task).",
       inputSchema: { type: "object", properties: {} },
       handler: () => get("/checklists/action_types"),
@@ -1670,8 +1704,9 @@ export function buildTools(api) {
       name: "makerble_create_checklist",
       description:
         "Create a Checklist for an Organisation. Requires an Organisation editor or reporter. Each action " +
-        "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
-        "(see makerble_list_checklist_action_types). Actions keep the order given." +
+        "needs an action_type and, unless that type has no criteria_keys, criteria: specific values, or " +
+        "{any: true} for any record of the kind (see makerble_list_checklist_action_types). An action " +
+        "with no criteria is saved as 'Not set yet' and can't be done until they are set. Actions keep the order given." +
         " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
         " Each action may have a deadline (due_within_days); leave it out for none." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
@@ -1693,7 +1728,7 @@ export function buildTools(api) {
                 action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task" },
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
-                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
                 due_within_days: {
                   type: "integer",
                   minimum: 0,
@@ -1710,6 +1745,13 @@ export function buildTools(api) {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
                     "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
+                },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': what a colleague sees when they start this action for a Contact " +
+                    "before the actions above it on the Checklist are done. 'remind' (default) shows a reminder they can dismiss; " +
+                    "'ask_reason' ('Warn and ask for a reason to skip') makes them give a reason, which is logged",
                 },
                 owner_kind: {
                   type: "string",
@@ -1755,7 +1797,7 @@ export function buildTools(api) {
                 position: { type: "number" },
                 title: { type: "string" },
                 description: { type: "string" },
-                criteria: { type: "object" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
                 due_within_days: {
                   type: ["integer", "null"],
                   minimum: 0,
@@ -1766,6 +1808,11 @@ export function buildTools(api) {
                 allow_manual_completion: {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': 'remind' or 'ask_reason' (ask for a reason to skip). Left as it is when not sent",
                 },
                 owner_kind: {
                   type: "string",
@@ -1836,6 +1883,95 @@ export function buildTools(api) {
         required: ["beneficiary_id"],
       },
       handler: ({ beneficiary_id, ...p }) => get(`/beneficiaries/${beneficiary_id}/checklists`, p),
+    },
+
+    {
+      name: "makerble_get_contact_next_step",
+      description:
+        "Get what to do next for a Contact (beneficiary), as on the Next step card of their profile: the first " +
+        "action not yet done on each of their Checklists, the most pressing first (overdue, then the earliest " +
+        "due_on, then by checklist name). data[0] is the next step. Each step gives the checklist " +
+        "(checklist_id, checklist_name), its place in it (number of total, e.g. step 4 of 6), the action " +
+        "(action_id, action_type, action_name e.g. 'Invite to an event', title, description), its deadline " +
+        "(due_on, overdue), if_earlier_steps_not_done ('remind', or 'ask_reason' when a colleague must give a " +
+        "reason to skip it) and who is responsible (owner_description, responsible_user_ids). others_count is " +
+        "how many other checklists are waiting; all_done is true when every action on the Contact's " +
+        "checklists is done. Use it to tell a colleague what to do next for a Contact; to see every action, " +
+        "use makerble_get_contact_checklists. Only Contacts you can see are returned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+        },
+        required: ["beneficiary_id"],
+      },
+      handler: ({ beneficiary_id }) => get(`/beneficiaries/${beneficiary_id}/checklists/next_step`),
+    },
+
+    {
+      name: "makerble_check_contact_checklist_step",
+      description:
+        "Before doing a Checklist action for a Contact (beneficiary), check whether its earlier steps on the same " +
+        "Checklist are done (the 'soft gate'). Returns gated (true when earlier steps aren't done), missing (each " +
+        "{action_id, number, action_type, title, required_first}) and reason_required (true when a missing step is " +
+        "set to 'Warn and ask for a reason to skip', shown to colleagues as Required first). Nothing is blocked: " +
+        "workflow: (1) call this; (2) if gated, tell the user which steps are missing and suggest doing the first " +
+        "one instead; (3) if they still want to go ahead, call makerble_skip_contact_checklist_steps, with a reason " +
+        "when reason_required is true; (4) then do the action. Get checklist_id and action_id from " +
+        "makerble_get_contact_next_step or makerble_get_contact_checklists.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action about to be done" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id }) =>
+        get(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/gate`),
+    },
+
+    {
+      name: "makerble_skip_contact_checklist_steps",
+      description:
+        "Record that a Checklist action is being done for a Contact before its earlier steps are done (going past " +
+        "the soft gate found with makerble_check_contact_checklist_step). Saves who, when, which steps were skipped " +
+        "and the reason, and puts it on the Contact's timeline as a story. A reason is required when a missing step " +
+        "is Required first (reason_required). Needs edit access to the Contact. Returns the skip: " +
+        "{id, checklist_action_id, skipped_actions: [{id, title, required_first}], reason, user_id, story_id, created_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action being done early" },
+          reason: { type: "string", description: "Why it is being done before the earlier steps (max 2000 characters)" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id, reason }) =>
+        post(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/skips`, { reason }),
+    },
+
+    {
+      name: "makerble_list_checklist_skips",
+      description:
+        "List the times colleagues did a Checklist's actions before the earlier steps were done (skipped steps, the " +
+        "exceptions shown on the Checklist's Board), newest first: who (user_id, user_name), for which Contact " +
+        "(beneficiary_id), which action (checklist_action_id, action_title), which steps were skipped and the reason. " +
+        "Only Contacts you can see are included. Use it to spot where a process isn't being followed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only skips saved after this (ISO 8601)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/skips`, p),
     },
 
     {
@@ -3045,13 +3181,21 @@ export function buildTools(api) {
     {
       name: "makerble_list_outcomes",
       description:
-        "List all Outcomes. Each has a stage (short/medium/long-term) placing it in Progress Panel cols 3–5.",
+        "List the Outcomes the signed-in user can see: their own, those of every organisation where they are an editor, reporter or observer, and those used by one of their Projects. " +
+        "Each has a stage (short/medium/long-term) placing it in Progress Panel cols 3–5. " +
+        "The Outcome library shared by all organisations (the public library) is left out unless include_public_library is true. " +
+        "Set it when looking for an existing Outcome to reuse rather than listing the organisation's own.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Also return public-library Outcomes from other organisations. Default false.",
+          },
         },
       },
       handler: (p) => get("/outcomes", p),
@@ -3059,13 +3203,23 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_outcome",
-      description: "Get a single Outcome by ID.",
+      description:
+        "Get a single Outcome by ID. Returns not-found for an Outcome the signed-in user cannot see. " +
+        "A public-library Outcome owned by another organisation is only returned when include_public_library is true.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number" } },
+        properties: {
+          id: { type: "number" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Allow a public-library Outcome from another organisation to be returned. Default false.",
+          },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/outcomes/${id}`),
+      handler: ({ id, include_public_library }) =>
+        get(`/outcomes/${id}`, { include_public_library }),
     },
 
     {
@@ -4942,6 +5096,104 @@ export function buildTools(api) {
         required: ["organisation_id"],
       },
       handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/age_band_counts`, params),
+    },
+
+    // ── Snapshot (CP-8903) ────────────────────────────────────────────────────
+    {
+      name: "makerble_get_snapshot_settings",
+      description:
+        "Get what an Album's (Portfolio / Bundle) or Project's Snapshot shows, and every choice there is: the " +
+        "Snapshot tab of its Preferences. The Snapshot (under Today in the sidebar) is a one-page summary with three " +
+        "sections. 'Who we're working with' (panels): how its Contacts (Beneficiaries) split by a Ratio Set such as " +
+        "Gender, by Age band (from Date of Birth) and, on an Album, by Project. 'How the work is going' (tiles): one " +
+        "headline number per Results Canvas column (activities, engagement, potential, behaviour, growth; " +
+        "column_label is the name the canvas shows). 'Workload': up to three Workflow, Cohort or Formula Trackers. " +
+        "Returns panels in display order, tiles (choice null = hidden), workload, and under choices the panels, the " +
+        "metrics in each column (Progress Trackers (Changes), Indicators and filtered versions) and the trackers, " +
+        "which can go on any tile. Each has a key to pass to makerble_set_snapshot_settings. customised is false " +
+        "while the defaults apply (Age band and the first two Ratio Sets; the first metric in each column; no " +
+        "Workload). Anyone in the Organisation (or who can see the Album) can read it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["album", "project"], description: "Whose Snapshot" },
+          id: { type: "number", description: "The Album's or Project's ID" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id }) => get(`/${owner_type}s/${id}/snapshot_settings`),
+    },
+
+    {
+      name: "makerble_set_snapshot_settings",
+      description:
+        "Choose what an Album's (Portfolio / Bundle) or Project's Snapshot shows: the Snapshot tab of its " +
+        "Preferences. Call makerble_get_snapshot_settings first and use the keys it lists under choices. Send any of: " +
+        "panels, the panel keys in display order (e.g. ['age_band', 'ratio_set:12']; 'split_by_project' is for " +
+        "Albums only; [] shows none); tiles, an object of Results Canvas column => key, using a metric from that " +
+        "column or any tracker, or null to hide the tile (e.g. { activities: 'Change:31', engagement: null }); " +
+        "workload, up to three tracker keys or nulls. Whatever you leave out stays as it is. Only the Album's " +
+        "managers, or a Project's Project Managers and Organisation Admins, can change it. Returns the settings after " +
+        "the change, as makerble_get_snapshot_settings does; a key that can't go where you put it is refused with " +
+        "an error naming it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["album", "project"], description: "Whose Snapshot" },
+          id: { type: "number", description: "The Album's or Project's ID" },
+          panels: { type: "array", items: { type: "string" }, description: "Panel keys in display order" },
+          tiles: {
+            type: "object",
+            description: "Results Canvas column => metric or tracker key, or null to hide that tile",
+            properties: Object.fromEntries(["activities", "engagement", "potential", "behaviour", "growth"].map((column) => [column, { type: ["string", "null"] }])),
+            additionalProperties: false,
+          },
+          workload: { type: "array", maxItems: 3, items: { type: ["string", "null"] }, description: "Up to three tracker keys; null hides a tile" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id, ...body }) => put(`/${owner_type}s/${id}/snapshot_settings`, body),
+    },
+
+    {
+      name: "makerble_get_snapshot",
+      description:
+        "Get an Album's (Portfolio / Bundle) or Project's Snapshot: the headline numbers Today › Snapshot shows on " +
+        "one page. Use it for questions like 'give me a summary of this programme' or 'what's the gender split of " +
+        "the young people we work with'. Give album_id or project_id; with neither, you get the user's pinned " +
+        "Album or Project, or else the last one they viewed (404 when there's neither). panels ('Who we're working " +
+        "with') count the Contacts (Beneficiaries) the user can view by Ratio Set (e.g. Gender), age band and, on " +
+        "an Album, Project, by the Demographics tab's rules: 'No Data' / 'No date of birth' for Contacts without a " +
+        "value, and groups below the Organisation's Minimum Results Threshold come back with contacts: null and are " +
+        "added up under 'Below Threshold' (don't try to work out the hidden numbers). percent is of contacts_count. " +
+        "tiles ('How the work is going', one per Results Canvas column) and workload give each chosen metric's or " +
+        "tracker's result for the Results Canvas's current period (from the day after the last deadline to the next), " +
+        "or all time when there are no deadlines; timeframe says which and gives the dates. value is null for a " +
+        "tracker with no single number. The Album's or Project's editors choose what appears with makerble_set_snapshot_settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (params) => get("/snapshot", params),
+    },
+
+    {
+      name: "makerble_pin_snapshot",
+      description:
+        "Pin an Album (Portfolio / Bundle) or Project as the user's own Snapshot, as the Pin as my Snapshot button " +
+        "on Today › Snapshot does, so the Snapshot (and makerble_get_snapshot without an id) opens it. Only changes " +
+        "the user's own Snapshot. Give album_id or project_id. Returns what is now pinned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (body) => put("/snapshot/pin", body),
     },
   ];
 }
