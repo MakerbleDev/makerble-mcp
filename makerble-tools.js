@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 192 Makerble MCP tool definitions.
+ * All 194 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5122,6 +5122,53 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/impact_frameworks/${id}`),
+    },
+
+    // ── Explore Ideas (CP-8870) ───────────────────────────────────────────────
+    {
+      name: "makerble_explore_ideas",
+      description:
+        "Find Ideas (Tips) in the Makerble ImpactStore: short write-ups of an approach other organisations have " +
+        "tried, what happened and what they would change, as the Explore Ideas page lists them. Use it when the " +
+        "user wants to learn from others' practice, e.g. 'ideas for measuring community cohesion' or 'what have " +
+        "my colleagues shared?'. Filter by shared_by, relative to the user (anyone, colleagues: colleagues in " +
+        "their organisations and projects, following: people they follow, me), theme, audience (public_impact, " +
+        "personal, professional) and person (user ids of colleagues or people they follow; others are ignored). " +
+        "Several options in one filter match any of them; different filters must all match. Returns a page of " +
+        "Ideas, each with id, title, themes, reading_minutes, shared_by, saved_count (how many collections it is " +
+        "saved to) and yours, plus facets: each filter option with how many Ideas it would return. Then call " +
+        "makerble_get_explore_idea to read one. The user saves one in Makerble with Save idea on Explore Ideas.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Idea's title or text, e.g. 'cohesion'" },
+          shared_by: { type: "array", items: { type: "string", enum: ["anyone", "colleagues", "following", "me"] } },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational", "global_goals", "inclusion", "education_and_training", "leadership"] } },
+          audience: { type: "array", items: { type: "string", enum: ["public_impact", "personal", "professional"] } },
+          person: { type: "array", items: { type: "string" }, description: "User ids of colleagues or people the user follows" },
+          chip: { type: "string", enum: ["Community", "Young people", "Training", "Leadership"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (saved to the most collections first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Ideas per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/ideas", p),
+    },
+
+    {
+      name: "makerble_get_explore_idea",
+      description:
+        "Read one Idea (Tip) from makerble_explore_ideas: the same fields plus its full text, without formatting. " +
+        "Use it to summarise what another organisation tried before suggesting the user saves or follows it. " +
+        "Returns 404 for an Idea that isn't approved and shared with everyone.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Idea's id from makerble_explore_ideas" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/ideas/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
