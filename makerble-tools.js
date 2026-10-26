@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 186 Makerble MCP tool definitions.
+ * All 187 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1637,7 +1637,8 @@ export function buildTools(api) {
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
         "which say what counts as done, due_within_days: the deadline, in days after the Checklist is added " +
         "to a Contact, null for none, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
-        "owner_relationship_side and a readable owner_description), the Projects that offer it with their assignment_mode " +
+        "owner_relationship_side and a readable owner_description, and stage_id), its stages (Participant Journey stages: " +
+        "id, name, icon, position and colour, in order), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
       inputSchema: {
@@ -1680,6 +1681,26 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_checklist_journey",
+      description:
+        "See a Checklist as its Participant Journey: the Journey view on the Checklist's profile page, which shows " +
+        "the steps left to right, grouped into stages (e.g. Sign up → Arrange support → Provide support → Monitor " +
+        "progress → Achieve the goal). Returns columns in order: each stage with its stage_id, name, icon and colour, " +
+        "and its steps (action_id, number, title, action_type and action_name, which is 'Not set yet' while no action " +
+        "type is chosen). A Checklist without stages has one column per step, named 'Step 1', 'Step 2' and so on, with " +
+        "a null stage_id. Each step also has done_count (Contacts who have done it) and waiting_count (Contacts for whom " +
+        "it is the first step not done), out of contacts_count, counting only Contacts the user can see. Use it to " +
+        "describe or present an Organisation's participant journey; for who is waiting where, use " +
+        "makerble_get_checklist_progress. To add or change stages, use makerble_update_checklist.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Checklist ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/checklists/${id}/journey`),
+    },
+
+    {
       name: "makerble_list_checklist_action_types",
       description:
         "List the actions a Checklist can contain (e.g. add_role 'Add a role', complete_survey 'Complete a " +
@@ -1709,6 +1730,11 @@ export function buildTools(api) {
         "with no criteria is saved as 'Not set yet' and can't be done until they are set. Actions keep the order given." +
         " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
         " Each action may have a deadline (due_within_days); leave it out for none." +
+        " To map a participant journey, group the actions into stages (Participant Journey stages, each a name and an " +
+        "icon): list the stages with a key of your choosing and give each action the stage_key of its stage. Stages keep " +
+        "the order given and each stage's actions sit together. An action may leave out action_type to be saved as 'Not " +
+        "set yet', e.g. when sketching a journey before deciding how each step is recorded; it can't be done until a type " +
+        "is chosen." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
         "makerble_list_surveys, makerble_list_survey_campaigns, makerble_list_survey_waves, " +
         "makerble_list_contact_bio_forms etc., and owners with makerble_get_checklist_owner_options and " +
@@ -1720,12 +1746,26 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           name: { type: "string" },
           description: { type: "string" },
+          stages: {
+            type: "array",
+            description: "Optional Participant Journey stages, in order. Actions join one with stage_key",
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string", description: "Any short label unique in this request, e.g. 'signup', named by actions' stage_key" },
+                name: { type: "string", description: "e.g. 'Sign up', 'Arrange support'" },
+                icon: { type: "string", enum: ["clipboard", "calendar", "people", "chart", "flag", "message", "home", "heart", "school", "book"], description: "The stage's icon (default clipboard)" },
+              },
+              required: ["key", "name"],
+            },
+          },
           actions: {
             type: "array",
             items: {
               type: "object",
               properties: {
-                action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task" },
+                action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task. Leave it out for 'Not set yet'" },
+                stage_key: { type: "string", description: "Optional: the key of the stage this action belongs to" },
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
                 criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
@@ -1765,7 +1805,7 @@ export function buildTools(api) {
                   description: "For owner_kind 'relationship': '<relationship_category_id>:parent|child', the colleague's own side",
                 },
               },
-              required: ["action_type"],
+              required: ["title"],
             },
           },
         },
@@ -1779,13 +1819,31 @@ export function buildTools(api) {
       description:
         "Update a Checklist's name, description or actions. Requires an Organisation editor or reporter. " +
         "To change an action send its id with the new fields; to remove one send {id, _destroy: true}; " +
-        "actions without an id are added. Get the current actions with makerble_get_checklist first.",
+        "actions without an id are added. Get the current actions with makerble_get_checklist first." +
+        " Stages (Participant Journey stages) work the same way: send an existing stage's id to rename it, change its " +
+        "icon or move it (position), {id, _destroy: true} to remove it, and a new stage with a key. An action joins a " +
+        "stage with stage_key: a new stage's key, or an existing stage's id as a string; an empty stage_key takes it out " +
+        "of its stage. A stage left without actions is removed.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number" },
           name: { type: "string" },
           description: { type: "string" },
+          stages: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number", description: "An existing stage's ID" },
+                key: { type: "string", description: "For a new stage: any short label unique in this request, named by actions' stage_key" },
+                _destroy: { type: "boolean" },
+                name: { type: "string" },
+                icon: { type: "string", enum: ["clipboard", "calendar", "people", "chart", "flag", "message", "home", "heart", "school", "book"] },
+                position: { type: "number" },
+              },
+            },
+          },
           actions: {
             type: "array",
             items: {
@@ -1793,7 +1851,8 @@ export function buildTools(api) {
               properties: {
                 id: { type: "number" },
                 _destroy: { type: "boolean" },
-                action_type: { type: "string" },
+                action_type: { type: "string", description: "Empty for 'Not set yet'" },
+                stage_key: { type: "string", description: "A new stage's key, or an existing stage's id as a string; empty for no stage" },
                 position: { type: "number" },
                 title: { type: "string" },
                 description: { type: "string" },
