@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 190 Makerble MCP tool definitions.
+ * All 192 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5072,6 +5072,56 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/dropdowns/${id}`),
+    },
+
+    // ── Explore Impact Frameworks (CP-8870) ───────────────────────────────────
+    {
+      name: "makerble_explore_impact_frameworks",
+      description:
+        "Find a ready-made Impact Framework (Template) in the Makerble ImpactStore: sets of outcomes and progress " +
+        "trackers across the stages of change, shared for everyone by Makerble and other organisations, as the " +
+        "Explore Impact Frameworks page lists them. Use it when the user wants to decide what to measure, e.g. " +
+        "'outcomes for a youth employability programme' or 'the SDG 4 framework'. Filter by theme, by set (a " +
+        "platform-wide Framework Set's id from the facets, such as the UN Sustainable Development Goals, or 'none' " +
+        "for frameworks in no set) and by size, the number of outcomes (up_to_5, 6_to_10, over_10). Several " +
+        "options in one filter match any of them; different filters must all match. Returns a page of Impact " +
+        "Frameworks, each with id, name, description, themes, framework_sets (with each set's short code, e.g. " +
+        "'SDG 4'), outcome_count, progress_tracker_count, shared_by, libraries_count (how many organisations use " +
+        "it on a project) and yours, plus facets: each filter option with how many it would return. Then call " +
+        "makerble_get_explore_impact_framework to read its outcomes before suggesting it. The user adds one to " +
+        "projects in Makerble with Add to projects on Explore Impact Frameworks.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Impact Framework's name or description, e.g. 'inclusion'" },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational", "global_goals", "inclusion", "education_and_training", "leadership"] } },
+          set: { type: "array", items: { type: "string" }, description: "Framework Set ids from the facets, or 'none'" },
+          size: { type: "array", items: { type: "string", enum: ["up_to_5", "6_to_10", "over_10"] }, description: "Number of outcomes" },
+          chip: { type: "string", enum: ["SDGs", "Inclusion", "Employment", "Wellbeing"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (on the most organisations' projects first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Impact Frameworks per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/impact_frameworks", p),
+    },
+
+    {
+      name: "makerble_get_explore_impact_framework",
+      description:
+        "Preview one ImpactStore Impact Framework (Template) from makerble_explore_impact_frameworks, as its " +
+        "Preview panel shows it: the same fields plus stages, each stage of change (Activities, Engagement, " +
+        "Ability, Behaviour or Effect) with the outcomes and progress trackers in it. Use it to check the " +
+        "framework measures what the user's programme sets out to change before suggesting it. Returns 404 " +
+        "for an Impact Framework that isn't public and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Impact Framework's id from makerble_explore_impact_frameworks" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/impact_frameworks/${id}`),
     },
 
     // ── Seats (CP-8881) ───────────────────────────────────────────────────────
