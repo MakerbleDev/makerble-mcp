@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 193 Makerble MCP tool definitions.
+ * All 194 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1698,6 +1698,34 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/checklists/${id}/journey`),
+    },
+
+    {
+      name: "makerble_sketch_checklist",
+      description:
+        "Draft a participant journey Checklist from what an Organisation has already set up in one of its Projects " +
+        "('Sketched from your setup' on the Checklists page). Nothing is saved. Without project_id it picks the running " +
+        "Project with the most Contacts (beneficiaries) that has at least two of: an active Signup Page, a Contact Form " +
+        "(other than the Organisation's default), a Waiting List or Alumni status, and a Survey (Story Category); with " +
+        "project_id it drafts from that Project. The draft uses the five Participant Journey stages, leaving out any " +
+        "with nothing found: Sign up (one 'Complete a form' step per Signup Page), Arrange support (the Contact Forms, " +
+        "then Waiting List → Enrolled), Provide support (each Survey's first Wave, and 'Invite to an event' for the " +
+        "Project's Event Formats), Monitor progress (later Waves) and Achieve the goal (Move to Alumni). Every step " +
+        "already says what counts as done. Returns project_id, project_name, name ('<Project> journey'), summary (one " +
+        "sentence on what was found) and checklist: {name, stages, actions} in exactly the shape " +
+        "makerble_create_checklist takes. All are null when no Project has enough to draft from. Requires someone " +
+        "who can create Checklists for the Organisation." +
+        "\nWorkflow: (1) makerble_sketch_checklist. (2) Show the user the stages and steps and adjust them as asked " +
+        "(rename, remove, add). (3) makerble_create_checklist with charity_id and the checklist's name, stages and actions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "Optional: draft from this Project instead of the one Makerble would choose" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/checklists/sketch", p),
     },
 
     {
