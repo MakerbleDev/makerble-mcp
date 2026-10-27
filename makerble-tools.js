@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 189 Makerble MCP tool definitions.
+ * All 193 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5302,6 +5302,106 @@ export function buildTools(api) {
         },
       },
       handler: (body) => put("/snapshot/pin", body),
+    },
+
+    // ─── Suggested merges and merge rules (CP-6834) ─────────────────────────
+
+    {
+      name: "makerble_list_suggested_merges",
+      description:
+        "List Suggested Merges: sets of two or more Contacts (Beneficiaries) in an Organisation that Makerble " +
+        "thinks are the same person and that are waiting for someone to review them. They come from Merge Rules " +
+        "set to Suggest mode (source 'merge_rule') and from contacts with similar names (source 'name_scan'). " +
+        "Returns only suggestions where the user can see every Contact: id, status, source, merge_rule {id, name}, " +
+        "match_strength ('high' or 'medium'), matched_fields, contacts [{id, name, created_at, created_by}], " +
+        "reviewed_by and reviewed_at, High first then newest. Pass beneficiary_id to see the suggestions for one " +
+        "Contact, e.g. after an import. status defaults to 'pending' (waiting for review); 'merged', 'rejected' " +
+        "(marked Not duplicates) and 'stale' (a Contact was deleted) show past decisions. Listing merges nothing. " +
+        "To act on one, use makerble_review_suggested_merge.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          beneficiary_id: { type: "number", description: "Only suggestions that include this Contact" },
+          status: { type: "string", enum: ["pending", "merged", "rejected", "stale"] },
+          source: { type: "string", enum: ["merge_rule", "name_scan"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/suggested_merges", p),
+    },
+
+    {
+      name: "makerble_review_suggested_merge",
+      description:
+        "Decide a Suggested Merge from makerble_list_suggested_merges. decision 'merge' merges its Contacts into " +
+        "one, keeping the Contact created first unless you give winner_contact_id (one of its Contacts); the others " +
+        "are merged into it within a few minutes, and someone can undo it with Unmerge on the Merge Contacts page. " +
+        "decision 'not_duplicates' records that they are different people, so they are not suggested together " +
+        "again from any source. ALWAYS show the user the Contacts and get their confirmation in the chat before " +
+        "merging; never merge on your own initiative. Returns the suggested merge with its new status, and for a " +
+        "merge the ids of the merge requests created.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Suggested Merge ID" },
+          decision: { type: "string", enum: ["merge", "not_duplicates"] },
+          winner_contact_id: { type: "number", description: "When merging, the Contact to keep" },
+        },
+        required: ["id", "decision"],
+      },
+      handler: ({ id, decision, winner_contact_id }) =>
+        decision === "merge"
+          ? post(`/suggested_merges/${id}/merge`, { winner_id: winner_contact_id })
+          : post(`/suggested_merges/${id}/reject`, {}),
+    },
+
+    {
+      name: "makerble_list_merge_rules",
+      description:
+        "List an Organisation's Merge Rules (custom rules that find duplicate Contacts). Each has id, name, " +
+        "conditions [{id, field_name}] (the Contact fields that must be identical), match_type ('and': every " +
+        "condition must match; 'or': any one), merge_mode ('automatic': matching Contacts are merged within 2 hours, " +
+        "keeping the one created first; 'suggest': matches go to Suggested Merges for someone to review) and status " +
+        "('Active' or 'Inactive'). Organisation Admins and Creators (editors and reporters) can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/merge_rules", p),
+    },
+
+    {
+      name: "makerble_save_merge_rule",
+      description:
+        "Create a Merge Rule (give charity_id, name, conditions and merge_mode) or change one (give its id and only " +
+        "what changes). conditions are Contact field ids (Current Fields of the Organisation's Contact forms; see " +
+        "makerble_list_merge_rules for ones already in use). match_type 'and' needs every condition to be identical, " +
+        "'or' any one. merge_mode 'suggest' is the safe choice: matches appear in Suggested Merges and nothing is " +
+        "merged until someone reviews them; 'automatic' merges matching Contacts within 2 hours without asking, so " +
+        "confirm with the user before choosing it. status 'Inactive' turns a rule off. Returns the saved rule.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Merge Rule ID, to change an existing rule" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID, to create a rule" },
+          name: { type: "string" },
+          conditions: { type: "array", items: { type: "number" }, description: "Contact field (Current Field) ids" },
+          match_type: { type: "string", enum: ["and", "or"] },
+          merge_mode: { type: "string", enum: ["automatic", "suggest"] },
+          status: { type: "string", enum: ["Active", "Inactive"] },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/merge_rules/${id}`, body) : post("/merge_rules", body)),
     },
   ];
 }
