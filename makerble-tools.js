@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 189 Makerble MCP tool definitions.
+ * All 191 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2014,6 +2014,39 @@ export function buildTools(api) {
         required: ["shown_sources"],
       },
       handler: ({ shown_sources }) => patch("/focus/settings", { shown_sources }),
+    },
+
+    {
+      name: "makerble_get_start_page",
+      description:
+        "Get the signed-in user's start page: the Today page they land on after signing in and whenever they " +
+        "click Home or the Makerble logo, chosen under Personal Settings › Preferences › Start page. Returns " +
+        "start_page (the key of their choice; 'newsfeed' when they've never chosen) and options [{key, label, " +
+        "description}], the pages they can choose: 'newsfeed' (Newsfeed, formerly My Home, the default), 'focus' " +
+        "(Focus, their next steps across Checklists), 'snapshot' (Snapshot, their organisation's headline numbers) " +
+        "and 'autopilot' (Autopilot, only offered when Autopilot is on for one of their organisations). Use it " +
+        "before makerble_set_start_page to see which pages can be chosen.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/start_page"),
+    },
+
+    {
+      name: "makerble_set_start_page",
+      description:
+        "Set the signed-in user's start page, as Personal Settings › Preferences › Start page does: the Today " +
+        "page they land on after signing in and when they click Home or the Makerble logo. start_page must be " +
+        "the key of one of the options makerble_get_start_page returns ('newsfeed', 'focus', 'snapshot' or " +
+        "'autopilot'); a page not offered to this user is refused. Saved for this user only. If Focus is chosen " +
+        "but they can neither see nor create a Checklist, Home takes them to Newsfeed with a note saying why. " +
+        "Returns start_page and options, as makerble_get_start_page does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          start_page: { type: "string", enum: ["newsfeed", "focus", "snapshot", "autopilot"], description: "The start page's key" },
+        },
+        required: ["start_page"],
+      },
+      handler: ({ start_page }) => patch("/start_page", { start_page }),
     },
 
     {
