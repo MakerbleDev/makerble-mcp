@@ -4781,7 +4781,8 @@ export function buildTools(api) {
       description:
         "Read one library item in full, to reuse it or copy it. Use the type and id from " +
         "makerble_search_library. A Survey returns its questions in order, each with the Metric, List, Field or " +
-        "Activity tracker behind it, plus section titles. A Metric returns metric_type, default_question, unit, " +
+        "Activity tracker behind it, plus section titles, its Shared Intervals (intervals) and, on a question " +
+        "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}. A Metric returns metric_type, default_question, unit, " +
         "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
         "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
         "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
@@ -4944,8 +4945,18 @@ export function buildTools(api) {
         "in the organisation or the public library, nothing is created and you get a 409 error listing the " +
         "duplicates with the question number each belongs to: reuse them, or call again with force: true only " +
         "if none fits. The Survey stays visible only to the organisation unless you are Makerble staff and " +
-        "send approved: true. Returns data: the Survey as makerble_get_library_item shows it (id, type " +
-        "'survey', name, owner, questions in order with the item behind each) and approved.",
+        "send approved: true. " +
+        "\nSurveys answered more than once (e.g. at the start and end of a programme): keep ONE Survey with the " +
+        "same Metrics and give its Shared Intervals in intervals, e.g. ['Baseline', 'Endpoint'], so Distance " +
+        "Travelled works; never make a second Survey with new Metrics for the end. A question can then be reworded " +
+        "or hidden in an Interval with by_interval (Adjust When), e.g. {interval: 'Endpoint', question: 'How " +
+        "confident do you feel now, after the course?'}, or for one kind of respondent (participant, colleague, " +
+        "observer, public); leave out interval for every Interval and respondent for everyone. Where two entries " +
+        "cover the same Interval and respondent, the one naming more wins; two naming the same amount are " +
+        "refused. only_in_intervals shows a question only in those Intervals (e.g. course satisfaction only at " +
+        "Endpoint). Projects the Survey is added to later use its Intervals. " +
+        "\nReturns data: the Survey as makerble_get_library_item shows it (id, type 'survey', name, owner, " +
+        "intervals, questions in order with the item behind each and any by_interval wording) and approved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -4956,6 +4967,11 @@ export function buildTools(api) {
           departments: { type: "array", items: { type: "string" }, description: "Cause area (Department) names, e.g. ['Health']" },
           causes: { type: "array", items: { type: "string" }, description: "Cause names, for the Explore filters" },
           sub_causes: { type: "array", items: { type: "string" }, description: "Sub Cause names" },
+          intervals: {
+            type: "array",
+            items: { type: "string" },
+            description: "The Survey's Shared Intervals in order, when it is answered more than once, e.g. ['Baseline', 'Midpoint', 'Endpoint'] (at most 10)",
+          },
           questions: {
             type: "array",
             description: "The questions in order. Each has exactly one of metric_id, field_id, activity_tracker_id, new_metric or new_field",
@@ -4999,6 +5015,28 @@ export function buildTools(api) {
                 choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Scale Metrics: how many answers may be picked (default single_choice)" },
                 choice_value: { type: "number", description: "With limited_choice: how many" },
                 external_description: { type: "string", description: "Help text shown to the person answering" },
+                by_interval: {
+                  type: "array",
+                  description: "Needs intervals: how this question is reworded or hidden in them (Adjust When)",
+                  items: {
+                    type: "object",
+                    properties: {
+                      interval: { type: "string", description: "One of intervals; leave out for every Interval" },
+                      respondent: {
+                        type: "string",
+                        enum: ["participant", "colleague", "observer", "public"],
+                        description: "Who answers: participant (the Contact), colleague, observer (a 360° observer) or public (anyone with the universal link); leave out for everyone",
+                      },
+                      question: { type: "string", description: "The wording there, e.g. 'How confident do you feel now, after the course?'" },
+                      hide: { type: "boolean", description: "true to hide the question there instead of rewording it" },
+                    },
+                  },
+                },
+                only_in_intervals: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Needs intervals: show this question only in these, e.g. ['Endpoint']",
+                },
               },
             },
           },
