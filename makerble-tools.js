@@ -4872,7 +4872,9 @@ export function buildTools(api) {
         "Read one library item in full, to reuse it or copy it. Use the type and id from " +
         "makerble_search_library. A Survey returns its questions in order, each with the Metric, List, Field or " +
         "Activity tracker behind it, plus section titles, its Shared Intervals (intervals) and, on a question " +
-        "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}. A Metric returns metric_type, default_question, unit, " +
+        "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}, and its Display " +
+        "If (display_if: [{question, answers}]) and Skip To (skip_to: [{answers, question}]) rules by question " +
+        "number. A Metric returns metric_type, default_question, unit, " +
         "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
         "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
         "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
@@ -5045,8 +5047,14 @@ export function buildTools(api) {
         "cover the same Interval and respondent, the one naming more wins; two naming the same amount are " +
         "refused. only_in_intervals shows a question only in those Intervals (e.g. course satisfaction only at " +
         "Endpoint). Projects the Survey is added to later use its Intervals. " +
+        "\nQuestions that only apply after a certain answer: display_if {question, answers} shows a question only " +
+        "when an earlier question (by number, counting section headings) is answered with one of answers. skip_to [{answers, question}] on a question jumps forward past the questions " +
+        "in between to a later question that isn't mandatory; each answer in one entry only. The question whose " +
+        "answer decides must be a scale Metric (one with a List): for yes/no use a scale Metric on a Yes - No List, " +
+        "not a binary Metric. A Survey can't skip to its end: end it with an optional question to skip to. " +
         "\nReturns data: the Survey as makerble_get_library_item shows it (id, type 'survey', name, owner, " +
-        "intervals, questions in order with the item behind each and any by_interval wording) and approved.",
+        "intervals, questions in order with the item behind each and any by_interval, display_if and skip_to) and " +
+        "approved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5126,6 +5134,27 @@ export function buildTools(api) {
                   type: "array",
                   items: { type: "string" },
                   description: "Needs intervals: show this question only in these, e.g. ['Endpoint']",
+                },
+                display_if: {
+                  type: "object",
+                  description: "Display If: show this question only when an earlier scale question is answered with one of answers",
+                  properties: {
+                    question: { type: "number", description: "The earlier question's number, e.g. 2" },
+                    answers: { type: "array", items: { type: "string" }, description: "Answers from its List, e.g. ['No']" },
+                  },
+                  required: ["question", "answers"],
+                },
+                skip_to: {
+                  type: "array",
+                  description: "Skip To, on a scale question: for these answers, jump forward to a later question that isn't mandatory",
+                  items: {
+                    type: "object",
+                    properties: {
+                      answers: { type: "array", items: { type: "string" }, description: "Answers from this question's List, e.g. ['No']" },
+                      question: { type: "number", description: "The later question's number to jump to" },
+                    },
+                    required: ["answers", "question"],
+                  },
                 },
               },
             },
