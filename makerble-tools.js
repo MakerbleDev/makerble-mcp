@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 215 Makerble MCP tool definitions.
+ * All 216 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5217,6 +5217,29 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "questions"],
       },
       handler: (p) => post("/surveys", p),
+    },
+
+    {
+      name: "makerble_add_survey_to_projects",
+      description:
+        "Add a Survey (Story Category) to Projects, as the 'Add survey to project(s)' popup on a Survey's page does, " +
+        "so people in those Projects can answer it and its results show there. Use it to put an existing Survey to " +
+        "work (one from makerble_search_library or makerble_list_surveys) or one you have just made with " +
+        "makerble_create_survey. The Survey must be one the user can see in their library (their organisation's or " +
+        "the public library), and the user must manage each Project or be an Admin of its organisation. A closed " +
+        "Project, or one whose Project Category doesn't allow other Surveys, can't take it. Every Project is " +
+        "checked first, so if one is refused (404 or 422, naming it) none is added. A Project that already uses " +
+        "the Survey is left as it is. Returns data: survey_id, added_project_ids and existing_project_ids (those " +
+        "that already used it).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          survey_id: { type: "number", description: "The Survey's (Story Category's) id" },
+          project_ids: { type: "array", items: { type: "number" }, description: "The Projects to add it to" },
+        },
+        required: ["survey_id", "project_ids"],
+      },
+      handler: ({ survey_id, project_ids }) => post(`/surveys/${survey_id}/projects`, { project_ids }),
     },
 
     {
