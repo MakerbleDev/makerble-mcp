@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 203 Makerble MCP tool definitions.
+ * All 210 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5646,6 +5646,226 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/merge_rules/${id}`, body) : post("/merge_rules", body)),
+    },
+
+    // ─── Automations (CP-8842) ────────────────────────────────────────────────
+
+    {
+      name: "makerble_list_automations",
+      description:
+        "List an Organisation's automations, to look before you make one: suggest switching on or copying an " +
+        "existing automation rather than making a near-duplicate. Three kinds: 'contact' = Contact Automations " +
+        "(AlertTrigger): when Contacts in a Project meet a criteria (e.g. enrolled for 60 minutes, a Survey " +
+        "verdict), do actions (send a Survey, in-app alert, change status, add Flags); 'project' = Project " +
+        "Automations: settings copied onto every new or edited Project that matches a saved project filter; " +
+        "'template' = Automation Templates: saved Contact Automations that can be applied to other Projects " +
+        "(makerble_apply_automation_template). Leave kind out to get all three. Each item has active (false = " +
+        "paused). Organisation editors and observers can see them; Contact Automations also show to Project " +
+        "Managers of their Project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["contact", "project", "template"], description: "Leave out for all three" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID (filters Project Automations and Templates)" },
+          project_id: { type: "number", description: "Only Contact Automations on this Project" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+      },
+      handler: async ({ kind, charity_id, project_id, page, per_page }) => {
+        const paging = { page, per_page };
+        const lists = {
+          contact: () => get("/contact_automations", { project_id, ...paging }),
+          project: () => get("/project_automations", { charity_id, ...paging }),
+          template: () => get("/automation_templates", { charity_id, ...paging }),
+        };
+        if (kind) return lists[kind]();
+        const [contact_automations, project_automations, automation_templates] = await Promise.all(
+          [lists.contact(), lists.project(), lists.template()]
+        );
+        return { contact_automations, project_automations, automation_templates };
+      },
+    },
+
+    {
+      name: "makerble_get_automation_options",
+      description:
+        "What a new automation can use, so you never guess a field name, condition or id. kind 'contact' (give " +
+        "project_id): the criteria fields of a Contact Automation on that Project (contact_fields and survey_fields " +
+        "by current_field_id, each with its conditions and, for a Ratio Set or scale Indicator, its states; " +
+        "other_fields by key, e.g. 'minutes_since_contact_enrolled', with value_unit; relationships; event_states) " +
+        "and its actions' choices (surveys with their verdicts, statuses, flags, colleagues, in_app_alert_recipients). " +
+        "kind 'project' (give charity_id): a Project Automation's saved_filters, contact_forms, surveys, " +
+        "event_formats, colleagues, contact_automation_templates, setting names and default_story_privacy_values.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["contact", "project"] },
+          project_id: { type: "number", description: "For kind 'contact'" },
+          charity_id: { type: "number", description: "For kind 'project'" },
+        },
+        required: ["kind"],
+      },
+      handler: ({ kind, project_id, charity_id }) =>
+        kind === "contact"
+          ? get("/contact_automations/options", { project_id })
+          : get("/project_automations/options", { charity_id }),
+    },
+
+    {
+      name: "makerble_create_contact_automation",
+      description:
+        "Create a Contact Automation (AlertTrigger) on a Project: when its Contacts meet the criteria, the actions " +
+        "run (it is checked regularly, and acts once per Contact until that alert is resolved). It is the same as " +
+        "one made on the Contact Automations page. Automations can email and send Surveys to many Contacts, so " +
+        "confirm with the user first and say how many Contacts match. criteria (choose one field): field (an " +
+        "other_fields key), current_field_id, relationship_category_id or event_state_id; then condition (a key " +
+        "from that field's conditions) and value (minutes for the 'Amount of time' fields), or state_ids (Ratio Set " +
+        "states), or text. For field 'survey_verdict_is' give survey_id and verdict_ids. actions (any of): " +
+        "send_survey {survey_id, via_email, via_sms, email_message, sms_message, expire}; in_app_alert {message (up " +
+        "to 40 characters), recipients, user_ids}; change_status [{status_id or 'removed'}] on this Project; flags " +
+        "[{flag_id, description}]. Every id must come from makerble_get_automation_options. active defaults to " +
+        "true; send false to save it paused. Requires an editor of the Organisation or of the Project." +
+        "\nWorkflow: (1) makerble_list_automations to look for an existing one. (2) makerble_get_automation_options " +
+        "kind 'contact'. (3) makerble_create_contact_automation with active false. (4) makerble_preview_automation " +
+        "to see who it would act on. (5) After the user approves, makerble_set_automation_active to switch it on.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          active: { type: "boolean", description: "Default true; false saves it paused" },
+          criteria: {
+            type: "object",
+            properties: {
+              field: { type: "string", description: "An other_fields key, e.g. 'minutes_since_contact_enrolled'" },
+              current_field_id: { type: "number" },
+              relationship_category_id: { type: "number" },
+              event_state_id: { type: "number" },
+              condition: { type: "string" },
+              value: { type: "number" },
+              state_ids: { type: "array", items: { type: "number" } },
+              text: { type: "string" },
+              survey_id: { type: "number", description: "For field 'survey_verdict_is'" },
+              verdict_ids: { type: "array", items: { type: "number" } },
+            },
+            required: ["condition"],
+          },
+          actions: {
+            type: "object",
+            properties: {
+              send_survey: {
+                type: "object",
+                properties: {
+                  survey_id: { type: "number" }, via_email: { type: "boolean" }, via_sms: { type: "boolean" },
+                  email_message: { type: "string" }, sms_message: { type: "string" },
+                  expire: { type: "boolean", description: "Default true: the link works once" },
+                },
+                required: ["survey_id"],
+              },
+              in_app_alert: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  recipients: { type: "array", items: { type: "string", enum: ["beneficiary_workers", "project_editors", "charity_editors", "charity_relationships"] } },
+                  user_ids: { type: "array", items: { type: "number" } },
+                },
+              },
+              change_status: { type: "array", items: { type: "object", properties: { status_id: { type: ["number", "string"] } } } },
+              flags: { type: "array", items: { type: "object", properties: { flag_id: { type: "number" }, description: { type: "string" } } } },
+            },
+          },
+        },
+        required: ["project_id", "criteria"],
+      },
+      handler: (body) => post("/contact_automations", body),
+    },
+
+    {
+      name: "makerble_preview_automation",
+      description:
+        "List the Contacts a Contact Automation would act on if it ran now, paginated (only Contacts you can see). " +
+        "It leaves out Contacts it has already acted on and not resolved. Works on a paused automation, so create " +
+        "one with active false, preview it, and show the user how many match before switching it on.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Contact Automation ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/contact_automations/${id}/matching_contacts`, params),
+    },
+
+    {
+      name: "makerble_set_automation_active",
+      description:
+        "Pause or resume an automation. kind 'contact' (a Contact Automation: paused, it acts on nobody) or " +
+        "'project' (a Project Automation: paused, new and edited Projects skip it). Resuming a Contact Automation " +
+        "lets it send Surveys and messages to every Contact it matches, so confirm with the user first. Requires " +
+        "an editor of the Organisation (or, for a Contact Automation, of its Project).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["contact", "project"] },
+          id: { type: "number" },
+          active: { type: "boolean" },
+        },
+        required: ["kind", "id", "active"],
+      },
+      handler: ({ kind, id, active }) =>
+        post(`/${kind === "contact" ? "contact_automations" : "project_automations"}/${id}/${active ? "resume" : "pause"}`),
+    },
+
+    {
+      name: "makerble_create_project_automation",
+      description:
+        "Create a Project Automation: whenever a Project matching its saved project filter is created or edited, " +
+        "these settings are copied onto it (Contact forms, statuses, baseline Surveys, Event Formats, Cases, " +
+        "default privacy). It is the same as one made on the Project Automations page and goes last in priority. " +
+        "saved_filter_id comes from makerble_get_automation_options kind 'project' (a user saves project filters " +
+        "on the Projects page). settings: true/false for any of the setting names listed there (any left out take " +
+        "the page's own defaults: statuses, Events, Timesheets, Cases and the Survey Progress Board on), " +
+        "default_story_privacy, and id lists: contact_form_ids, edit_contact_form_ids, custom_field_category_ids " +
+        "(Contact Forms); enrolled_state_baseline_survey_ids, waiting_list_state_baseline_survey_ids, " +
+        "alumni_state_baseline_survey_ids, declined_state_baseline_survey_ids, required_story_category_ids, " +
+        "required_case_story_category_ids (Surveys); event_category_ids (Event Formats); event_creator_ids " +
+        "(colleagues); contact_automation_template_ids. An unknown setting is refused. active defaults to true. " +
+        "Requires an editor of the Organisation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string" },
+          saved_filter_id: { type: "number" },
+          active: { type: "boolean", description: "Default true; false saves it paused" },
+          settings: { type: "object", description: "See the description" },
+        },
+        required: ["charity_id", "name", "saved_filter_id"],
+      },
+      handler: (body) => post("/project_automations", body),
+    },
+
+    {
+      name: "makerble_apply_automation_template",
+      description:
+        "Apply an Automation Template to a Project: copies its Contact Automation onto the Project, the same as " +
+        "'+ Add to Project' on the Automation Templates page. Template IDs from makerble_list_automations kind " +
+        "'template'. If the Project hasn't got the template's Survey, or (for an Event criteria) Events switched " +
+        "on and its Event Format, it is refused with what to add first. A template can be applied to a Project " +
+        "once. active defaults to true; send false to add it paused. Returns the new Contact Automation. Requires " +
+        "an editor of the Organisation or the Project, and a Project in the template's Organisation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Automation Template ID" },
+          project_id: { type: "number" },
+          active: { type: "boolean", description: "Default true; false adds it paused" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, ...body }) => post(`/automation_templates/${id}/apply`, body),
     },
   ];
 }
