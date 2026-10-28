@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 194 Makerble MCP tool definitions.
+ * All 195 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3565,6 +3565,26 @@ export function buildTools(api) {
       },
       handler: ({ ratio_set_ids, ...p }) =>
         get("/sub_ratios", { ...p, ...(ratio_set_ids ? { ratio_set_ids } : {}) }),
+    },
+
+    {
+      name: "makerble_get_dropdown_records_populated",
+      description:
+        "See which records hold answers from a Dropdown field (a Ratio Set, also called a List), before deleting " +
+        "or replacing it. Use the id from makerble_list_dropdown_fields. Returns title, deletable (true once the " +
+        "Dropdown is in no form and no record holds its answers, as Manage Dropdowns' Delete requires) and records: " +
+        "for each record type (Contacts, Stories, Projects, Events, Surveys, Ideas), organisations (id, name and " +
+        "count of those records in each organisation the user is an Organisation Admin of) and external_usage, true " +
+        "if records in other organisations hold its answers (not counted). Counts only, no records. Shown as " +
+        "'Records populated' in a Dropdown's Actions on Manage Dropdowns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Dropdown's (Ratio Set's) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/ratio_sets/${id}/records_populated`),
     },
 
     // ── Signup Pages / Offline Collector ────────────────────────────────────────
