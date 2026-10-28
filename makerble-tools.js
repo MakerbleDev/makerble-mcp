@@ -4874,7 +4874,8 @@ export function buildTools(api) {
         "Activity tracker behind it, plus section titles, its Shared Intervals (intervals) and, on a question " +
         "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}, and its Display " +
         "If (display_if: [{question, answers}]) and Skip To (skip_to: [{answers, question}]) rules by question " +
-        "number, and its Question Grids (question_grids: [{outcome_id, heading, questions}]). A Metric returns metric_type, default_question, unit, " +
+        "number, its Question Grids (question_grids: [{outcome_id, heading, questions}]) and its scoring " +
+        "({questions, verdicts: [{name, from, to}]}, when it is scored). A Metric returns metric_type, default_question, unit, " +
         "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
         "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
         "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
@@ -5056,8 +5057,14 @@ export function buildTools(api) {
         "question_grids [{outcome_id, questions}]: the Outcome they all measure first (its title is the grid's " +
         "heading) and their numbers. Every scale question of that Outcome in the Survey must be in the grid and use " +
         "the same List; grid questions can't have display_if or skip_to. " +
+        "\nScoring and Verdicts (a score with bands such as Low / Medium / High): give each new scale Metric points " +
+        "for every answer on its List ({Never: 0, Sometimes: 1, Often: 2}), then scoring {questions, verdicts: " +
+        "[{name, from, to, description}]}: the questions whose points add up and the bands, lowest first. Only new " +
+        "Metrics can be given points (a reused Metric's points are shared by every Survey using it, so score a reused " +
+        "Metric only if it already has points). The bands must cover every possible total with no gaps or overlaps. " +
+        "Look for a published instrument with makerble_explore_surveys first. " +
         "\nReturns data: the Survey as makerble_get_library_item shows it (id, type 'survey', name, owner, " +
-        "intervals, question_grids with each grid's heading, questions in order with the item behind each and any " +
+        "intervals, question_grids with each grid's heading, scoring, questions in order with the item behind each and any " +
         "by_interval, display_if and skip_to) and approved.",
       inputSchema: {
         type: "object",
@@ -5100,6 +5107,11 @@ export function buildTools(api) {
                     unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
                     success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
                     description: { type: "string" },
+                    points: {
+                      type: "object",
+                      description: "Scale only, for a scored Survey: whole-number points for every answer on its List, e.g. {\"Never\": 0, \"Often\": 2}",
+                      additionalProperties: { type: "integer" },
+                    },
                   },
                   required: ["name", "metric_type", "default_question", "outcome_id"],
                 },
@@ -5162,6 +5174,28 @@ export function buildTools(api) {
                 },
               },
             },
+          },
+          scoring: {
+            type: "object",
+            description: "A scored Survey (Verdicts): the questions whose points add up, and the bands of totals",
+            properties: {
+              questions: { type: "array", items: { type: "number" }, description: "The numbers of the scale questions to add up" },
+              verdicts: {
+                type: "array",
+                description: "The bands, lowest first, covering every possible total with no gaps or overlaps",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "e.g. 'Low'" },
+                    from: { type: "number" },
+                    to: { type: "number" },
+                    description: { type: "string", description: "What this band means, shown with it" },
+                  },
+                  required: ["name", "from", "to"],
+                },
+              },
+            },
+            required: ["questions", "verdicts"],
           },
           question_grids: {
             type: "array",
