@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 195 Makerble MCP tool definitions.
+ * All 196 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4273,6 +4273,39 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...p }) => get(`/events/${id}/register`, p),
+    },
+
+    {
+      name: "makerble_update_register_cell",
+      description:
+        "Save one answer on the Register of a recurring event series: one guest's (Contact's) answer to one " +
+        "question of the attendance Survey (Story Category) for one event, as the pencil in a Register cell does. " +
+        "Use makerble_get_event_register first to find the event ids, contact ids and question ids (columns[]." +
+        "current_field_id, and events[].totals[].current_field_id for Activity metrics) and each question's type. " +
+        "The answer goes in the guest's latest attendance Story for that event; if they have none, they are added " +
+        "to the event's latest Story, or a Story is created. Only that one answer changes, and compulsory questions " +
+        "may be left unanswered. value by type: scale = an array of answer choice (sub-ratio) ids, e.g. [12] " +
+        "(makerble_list_answer_choices lists them; the Survey may allow only one); binary or participation = true " +
+        "or false; value = a number of 0 or more; custom_field = text, a date as YYYY-MM-DD or a time as HH:MM; an " +
+        "empty value clears the answer. For an Activity metric (counted once per event) leave out contact_id and " +
+        "send the event's total as a whole number. The contact must already be a guest at the event " +
+        "(makerble_add_event_guests adds one). Event Workers and Event Managers of the event, its Project Managers " +
+        "and Organisation Admins may save answers. Returns { event_id, contact_id, current_field_id, story_id, answer }.\n" +
+        "Before saving, tell the user which guest, event and question you will change and the new answer.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          event_id: { type: "number", description: "The event the answer is for" },
+          contact_id: { type: "number", description: "The guest (Contact id); leave out for an Activity metric total" },
+          current_field_id: { type: "number", description: "The question, from makerble_get_event_register's columns" },
+          value: {
+            description: "The answer: sub-ratio ids, true/false, a number, text, YYYY-MM-DD or HH:MM. Empty clears it.",
+            anyOf: [{ type: "array", items: { type: "number" } }, { type: "boolean" }, { type: "number" }, { type: "string" }],
+          },
+        },
+        required: ["event_id", "current_field_id", "value"],
+      },
+      handler: ({ event_id, ...body }) => patch(`/events/${event_id}/register/cells`, body),
     },
 
     {
