@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 196 Makerble MCP tool definitions.
+ * All 197 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4244,6 +4244,25 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...p }) => get(`/events/${id}/guests`, p),
+    },
+
+    {
+      name: "makerble_list_registers",
+      description:
+        "List the Registers of the recurring event series the signed-in user staffs: each series in which they are " +
+        "an Event Worker or Event Manager of an event starting today or later, soonest next event first, as the " +
+        "Registers tab of the Events tile on My Homepage shows them. Use it to answer 'which registers do I need to " +
+        "fill in?' and to find a series' master_event_id for makerble_get_event_register. Returns { page, page_size, " +
+        "page_count, total_count, data: [{ master_event_id, name (the series name), project: {id, name}, " +
+        "next_event: {id, name, start_datetime} }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Series per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get(`/registers`, p),
     },
 
     {
