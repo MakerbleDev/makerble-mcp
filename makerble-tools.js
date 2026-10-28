@@ -4784,7 +4784,7 @@ export function buildTools(api) {
         "Activity tracker behind it, plus section titles, its Shared Intervals (intervals) and, on a question " +
         "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}, and its Display " +
         "If (display_if: [{question, answers}]) and Skip To (skip_to: [{answers, question}]) rules by question " +
-        "number. A Metric returns metric_type, default_question, unit, " +
+        "number, and its Question Grids (question_grids: [{outcome_id, heading, questions}]). A Metric returns metric_type, default_question, unit, " +
         "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
         "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
         "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
@@ -4962,9 +4962,13 @@ export function buildTools(api) {
         "in between to a later question that isn't mandatory; each answer in one entry only. The question whose " +
         "answer decides must be a scale Metric (one with a List): for yes/no use a scale Metric on a Yes - No List, " +
         "not a binary Metric. A Survey can't skip to its end: end it with an optional question to skip to. " +
+        "\nQuestion Grids: several statements on one scale (e.g. Agree - Disagree) shown as one table. Give " +
+        "question_grids [{outcome_id, questions}]: the Outcome they all measure first (its title is the grid's " +
+        "heading) and their numbers. Every scale question of that Outcome in the Survey must be in the grid and use " +
+        "the same List; grid questions can't have display_if or skip_to. " +
         "\nReturns data: the Survey as makerble_get_library_item shows it (id, type 'survey', name, owner, " +
-        "intervals, questions in order with the item behind each and any by_interval, display_if and skip_to) and " +
-        "approved.",
+        "intervals, question_grids with each grid's heading, questions in order with the item behind each and any " +
+        "by_interval, display_if and skip_to) and approved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5067,6 +5071,18 @@ export function buildTools(api) {
                   },
                 },
               },
+            },
+          },
+          question_grids: {
+            type: "array",
+            description: "Question Grids: scale questions measuring one Outcome first and sharing one List, shown as one table headed by the Outcome's title",
+            items: {
+              type: "object",
+              properties: {
+                outcome_id: { type: "number", description: "The Outcome the grid's questions all measure first; its title is the grid's heading" },
+                questions: { type: "array", items: { type: "number" }, description: "The question numbers in the grid: every scale question of that Outcome, at least two" },
+              },
+              required: ["outcome_id", "questions"],
             },
           },
           approved: { type: "boolean", description: "Makerble staff only: show the Survey to every organisation and approve its new Metrics and Lists" },
