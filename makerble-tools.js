@@ -296,7 +296,7 @@ export function buildTools(api) {
         "Forms) create and edit Contacts (contact_form_ids, edit_contact_form_ids), which Contact statuses are " +
         "switched on (beneficiary_state_ids: Waiting List, Enrolled, Alumni, Declined) with each status's form and " +
         "baseline Surveys, editorial control (which bio forms each role may edit), Events (is_creation_of_events_required, " +
-        "event_creator_ids, event_category_ids for Event Formats), Cases (is_creation_of_new_cases_enabled, " +
+        "event_creator_ids, event_category_ids for Event Formats, display_register_for_event_series), Cases (is_creation_of_new_cases_enabled, " +
         "case_creator_ids, custom_field_category_id for the Case Form), Timesheets, the default privacy of new Stories, " +
         "and the Mailchimp list. Requires a Project Manager or Organisation Admin. Use it before " +
         "makerble_update_project_settings to show the user the current values.",
@@ -327,6 +327,11 @@ export function buildTools(api) {
           contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms used to create Contacts." },
           edit_contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms that can be added to a Contact's bio." },
           is_creation_of_events_required: { type: "boolean", description: "Enable Events." },
+          display_register_for_event_series: {
+            type: "boolean",
+            description: "Display a register for each event series (a Register page per recurring Event). Switching it on also " +
+              "switches on edit_story_on_event_attendance; switching Events on switches it on.",
+          },
           event_creator_ids: { type: "array", items: { type: "number" }, description: "Users who may create Events besides Project Managers." },
           event_category_ids: { type: "array", items: { type: "number" }, description: "The Project's Event Formats." },
           is_creation_of_new_cases_enabled: { type: "boolean", description: "Enable Cases." },
