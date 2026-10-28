@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 191 Makerble MCP tool definitions.
+ * All 203 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -296,7 +296,7 @@ export function buildTools(api) {
         "Forms) create and edit Contacts (contact_form_ids, edit_contact_form_ids), which Contact statuses are " +
         "switched on (beneficiary_state_ids: Waiting List, Enrolled, Alumni, Declined) with each status's form and " +
         "baseline Surveys, editorial control (which bio forms each role may edit), Events (is_creation_of_events_required, " +
-        "event_creator_ids, event_category_ids for Event Formats), Cases (is_creation_of_new_cases_enabled, " +
+        "event_creator_ids, event_category_ids for Event Formats, display_register_for_event_series), Cases (is_creation_of_new_cases_enabled, " +
         "case_creator_ids, custom_field_category_id for the Case Form), Timesheets, the default privacy of new Stories, " +
         "and the Mailchimp list. Requires a Project Manager or Organisation Admin. Use it before " +
         "makerble_update_project_settings to show the user the current values.",
@@ -327,6 +327,11 @@ export function buildTools(api) {
           contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms used to create Contacts." },
           edit_contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms that can be added to a Contact's bio." },
           is_creation_of_events_required: { type: "boolean", description: "Enable Events." },
+          display_register_for_event_series: {
+            type: "boolean",
+            description: "Display a register for each event series (a Register page per recurring Event). Switching it on also " +
+              "switches on edit_story_on_event_attendance; switching Events on switches it on.",
+          },
           event_creator_ids: { type: "array", items: { type: "number" }, description: "Users who may create Events besides Project Managers." },
           event_category_ids: { type: "array", items: { type: "number" }, description: "The Project's Event Formats." },
           is_creation_of_new_cases_enabled: { type: "boolean", description: "Enable Cases." },
@@ -1698,6 +1703,34 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/checklists/${id}/journey`),
+    },
+
+    {
+      name: "makerble_sketch_checklist",
+      description:
+        "Draft a participant journey Checklist from what an Organisation has already set up in one of its Projects " +
+        "('Sketched from your setup' on the Checklists page). Nothing is saved. Without project_id it picks the running " +
+        "Project with the most Contacts (beneficiaries) that has at least two of: an active Signup Page, a Contact Form " +
+        "(other than the Organisation's default), a Waiting List or Alumni status, and a Survey (Story Category); with " +
+        "project_id it drafts from that Project. The draft uses the five Participant Journey stages, leaving out any " +
+        "with nothing found: Sign up (one 'Complete a form' step per Signup Page), Arrange support (the Contact Forms, " +
+        "then Waiting List → Enrolled), Provide support (each Survey's first Wave, and 'Invite to an event' for the " +
+        "Project's Event Formats), Monitor progress (later Waves) and Achieve the goal (Move to Alumni). Every step " +
+        "already says what counts as done. Returns project_id, project_name, name ('<Project> journey'), summary (one " +
+        "sentence on what was found) and checklist: {name, stages, actions} in exactly the shape " +
+        "makerble_create_checklist takes. All are null when no Project has enough to draft from. Requires someone " +
+        "who can create Checklists for the Organisation." +
+        "\nWorkflow: (1) makerble_sketch_checklist. (2) Show the user the stages and steps and adjust them as asked " +
+        "(rename, remove, add). (3) makerble_create_checklist with charity_id and the checklist's name, stages and actions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "Optional: draft from this Project instead of the one Makerble would choose" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/checklists/sketch", p),
     },
 
     {
@@ -3572,6 +3605,26 @@ export function buildTools(api) {
         get("/sub_ratios", { ...p, ...(ratio_set_ids ? { ratio_set_ids } : {}) }),
     },
 
+    {
+      name: "makerble_get_dropdown_records_populated",
+      description:
+        "See which records hold answers from a Dropdown field (a Ratio Set, also called a List), before deleting " +
+        "or replacing it. Use the id from makerble_list_dropdown_fields. Returns title, deletable (true once the " +
+        "Dropdown is in no form and no record holds its answers, as Manage Dropdowns' Delete requires) and records: " +
+        "for each record type (Contacts, Stories, Projects, Events, Surveys, Ideas), organisations (id, name and " +
+        "count of those records in each organisation the user is an Organisation Admin of) and external_usage, true " +
+        "if records in other organisations hold its answers (not counted). Counts only, no records. Shown as " +
+        "'Records populated' in a Dropdown's Actions on Manage Dropdowns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Dropdown's (Ratio Set's) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/ratio_sets/${id}/records_populated`),
+    },
+
     // ── Signup Pages / Offline Collector ────────────────────────────────────────
     {
       name: "makerble_get_signup_page_offline_definition",
@@ -4249,6 +4302,87 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...p }) => get(`/events/${id}/guests`, p),
+    },
+
+    {
+      name: "makerble_list_registers",
+      description:
+        "List the Registers of the recurring event series the signed-in user staffs: each series in which they are " +
+        "an Event Worker or Event Manager of an event starting today or later, soonest next event first, as the " +
+        "Registers tab of the Events tile on My Homepage shows them. Use it to answer 'which registers do I need to " +
+        "fill in?' and to find a series' master_event_id for makerble_get_event_register. Returns { page, page_size, " +
+        "page_count, total_count, data: [{ master_event_id, name (the series name), project: {id, name}, " +
+        "next_event: {id, name, start_datetime} }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Series per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get(`/registers`, p),
+    },
+
+    {
+      name: "makerble_get_event_register",
+      description:
+        "Get the Register of a recurring event series: the attendance grid a teacher would use, with a row per " +
+        "guest (Contact / beneficiary) invited to any event in the series and, for every event in the series in " +
+        "date order, that guest's answers to the attendance Survey (Story Category) set on the Event Format. Pass " +
+        "the id of any event in the series (the master event or a subsequent event); a one-off event has no " +
+        "register (404). Use it to answer questions like 'who attended the last three Ruby Training sessions?' or " +
+        "'how late was Ann each week?'. Returns { master_event_id, name (the series name, without the event's " +
+        "number), schedule, project: {id, name}, survey: {id, name} or null when the Event Format has no " +
+        "attendance Survey, columns: [{ current_field_id, name, type (scale, binary, value, participation or " +
+        "custom_field), compulsory }], events: [{ id, name, start_datetime, full (at its guest capacity), totals: " +
+        "[{ current_field_id, name, total }] for Activity metrics, which are counted once per event rather than " +
+        "per guest }], page, page_size, page_count, total_count, data: [{ contact_id, name, events: [{ event_id, " +
+        "in_event (whether the guest is invited to that event), story_id (the guest's latest attendance Story for " +
+        "it, or null), answers: { current_field_id: value or null } }] }] }. Guests are in alphabetical order, a " +
+        "page at a time. Anyone who can open the event page can read it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of any event in the series" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Guests per page. Default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/events/${id}/register`, p),
+    },
+
+    {
+      name: "makerble_update_register_cell",
+      description:
+        "Save one answer on the Register of a recurring event series: one guest's (Contact's) answer to one " +
+        "question of the attendance Survey (Story Category) for one event, as the pencil in a Register cell does. " +
+        "Use makerble_get_event_register first to find the event ids, contact ids and question ids (columns[]." +
+        "current_field_id, and events[].totals[].current_field_id for Activity metrics) and each question's type. " +
+        "The answer goes in the guest's latest attendance Story for that event; if they have none, they are added " +
+        "to the event's latest Story, or a Story is created. Only that one answer changes, and compulsory questions " +
+        "may be left unanswered. value by type: scale = an array of answer choice (sub-ratio) ids, e.g. [12] " +
+        "(makerble_list_answer_choices lists them; the Survey may allow only one); binary or participation = true " +
+        "or false; value = a number of 0 or more; custom_field = text, a date as YYYY-MM-DD or a time as HH:MM; an " +
+        "empty value clears the answer. For an Activity metric (counted once per event) leave out contact_id and " +
+        "send the event's total as a whole number. The contact must already be a guest at the event " +
+        "(makerble_add_event_guests adds one). Event Workers and Event Managers of the event, its Project Managers " +
+        "and Organisation Admins may save answers. Returns { event_id, contact_id, current_field_id, story_id, answer }.\n" +
+        "Before saving, tell the user which guest, event and question you will change and the new answer.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          event_id: { type: "number", description: "The event the answer is for" },
+          contact_id: { type: "number", description: "The guest (Contact id); leave out for an Activity metric total" },
+          current_field_id: { type: "number", description: "The question, from makerble_get_event_register's columns" },
+          value: {
+            description: "The answer: sub-ratio ids, true/false, a number, text, YYYY-MM-DD or HH:MM. Empty clears it.",
+            anyOf: [{ type: "array", items: { type: "number" } }, { type: "boolean" }, { type: "number" }, { type: "string" }],
+          },
+        },
+        required: ["event_id", "current_field_id", "value"],
+      },
+      handler: ({ event_id, ...body }) => patch(`/events/${event_id}/register/cells`, body),
     },
 
     {
@@ -5335,6 +5469,183 @@ export function buildTools(api) {
         },
       },
       handler: (body) => put("/snapshot/pin", body),
+    },
+
+    // ─── Suggested merges and merge rules (CP-6834) ─────────────────────────
+
+    {
+      name: "makerble_list_suggested_merges",
+      description:
+        "List Suggested Merges: sets of two or more Contacts (Beneficiaries) in an Organisation that Makerble " +
+        "thinks are the same person and that are waiting for someone to review them. They come from Merge Rules " +
+        "set to Suggest mode (source 'merge_rule') and from contacts with similar names (source 'name_scan'). " +
+        "Returns only suggestions where the user can see every Contact: id, status, source, merge_rule {id, name}, " +
+        "match_strength ('high' or 'medium'), matched_fields, contacts [{id, name, created_at, created_by}], " +
+        "reviewed_by and reviewed_at, High first then newest. Pass beneficiary_id to see the suggestions for one " +
+        "Contact, e.g. after an import. status defaults to 'pending' (waiting for review); 'merged', 'rejected' " +
+        "(marked Not duplicates) and 'stale' (a Contact was deleted) show past decisions. Listing merges nothing. " +
+        "To act on one, use makerble_review_suggested_merge.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          beneficiary_id: { type: "number", description: "Only suggestions that include this Contact" },
+          status: { type: "string", enum: ["pending", "merged", "rejected", "stale"] },
+          source: { type: "string", enum: ["merge_rule", "name_scan"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/suggested_merges", p),
+    },
+
+    {
+      name: "makerble_review_suggested_merge",
+      description:
+        "Decide a Suggested Merge from makerble_list_suggested_merges. decision 'merge' merges its Contacts into " +
+        "one, keeping the Contact created first unless you give winner_contact_id (one of its Contacts); the others " +
+        "are merged into it within a few minutes, and someone can undo it with Unmerge on the Merge Contacts page. " +
+        "decision 'not_duplicates' records that they are different people, so they are not suggested together " +
+        "again from any source. ALWAYS show the user the Contacts and get their confirmation in the chat before " +
+        "merging; never merge on your own initiative. Returns the suggested merge with its new status, and for a " +
+        "merge the ids of the merge requests created.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Suggested Merge ID" },
+          decision: { type: "string", enum: ["merge", "not_duplicates"] },
+          winner_contact_id: { type: "number", description: "When merging, the Contact to keep" },
+        },
+        required: ["id", "decision"],
+      },
+      handler: ({ id, decision, winner_contact_id }) =>
+        decision === "merge"
+          ? post(`/suggested_merges/${id}/merge`, { winner_id: winner_contact_id })
+          : post(`/suggested_merges/${id}/reject`, {}),
+    },
+
+    // ─── Scan for duplicate contacts (CP-6010) ──────────────────────────────
+
+    {
+      name: "makerble_find_duplicate_contacts",
+      description:
+        "Find sets of Contacts (Beneficiaries) in an Organisation that look like the same person, as the Duplicate " +
+        "Contacts page (Scan for duplicate contacts) does. match 'similar' (the default) ignores titles (Mr, Mrs, " +
+        "Dr), capital letters, punctuation, word order and small spelling differences; match 'exact' finds only " +
+        "names spelt exactly the same. Each set has contacts [{id, name, created_at, created_by}], match_strength " +
+        "('high': same name once normalised, or a shared date of birth, email or mobile; 'medium': otherwise) and " +
+        "reasons (similar_name, same_name, same_date_of_birth, same_email, same_mobile). Only Contacts the user " +
+        "could merge are scanned, and sets someone marked as not duplicates are left out. A similar-name scan of a " +
+        "large Organisation runs in the background: if the result has status 'running', wait retry_after seconds " +
+        "and call this tool again with the same arguments. Show the sets to the user; to act on one, use " +
+        "makerble_review_duplicate_contacts, and only after the user confirms. Finding merges nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          match: { type: "string", enum: ["similar", "exact"], description: "Default 'similar'" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/duplicate_contacts", p),
+    },
+
+    {
+      name: "makerble_review_duplicate_contacts",
+      description:
+        "Decide a set of Contacts found by makerble_find_duplicate_contacts. decision 'merge' merges them into one, " +
+        "keeping the Contact created first unless you give winner_contact_id (one of contact_ids); the others are " +
+        "merged into it within a few minutes, and someone can undo it with Unmerge on the Merge Contacts page. " +
+        "decision 'not_duplicates' records that they are different people, so they are never suggested together " +
+        "again, by the scan, the background check of new Contacts or a Merge Rule. ALWAYS show the user the " +
+        "Contacts and get their confirmation in the chat before merging; never merge on your own initiative. " +
+        "Returns a message, and for a merge the Contact kept and the ids of the merge requests created.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_ids: { type: "array", items: { type: "number" }, description: "The Contacts in the set, at least two" },
+          decision: { type: "string", enum: ["merge", "not_duplicates"] },
+          winner_contact_id: { type: "number", description: "When merging, the Contact to keep" },
+          match_strength: { type: "string", enum: ["high", "medium"], description: "When marking not duplicates, the set's Match strength" },
+        },
+        required: ["contact_ids", "decision"],
+      },
+      handler: ({ contact_ids, decision, winner_contact_id, match_strength }) =>
+        decision === "merge"
+          ? post("/duplicate_contacts/merge", { contact_ids, winner_id: winner_contact_id })
+          : post("/duplicate_contacts/not_duplicates", { contact_ids, match_strength }),
+    },
+
+    {
+      name: "makerble_duplicate_suggestion_setting",
+      description:
+        "Read or change an Organisation's 'Suggest possible duplicates when contacts are created' setting on the " +
+        "Merge Contacts page. When it is on (the default), every Contact created is compared with the " +
+        "Organisation's existing Contacts each hour, and similar names appear in Suggested Merges " +
+        "(makerble_list_suggested_merges) for someone to review; nothing is merged automatically. Leave out " +
+        "suggest_on_create to read the setting; pass true or false to change it, which only Organisation Admins " +
+        "(editors) can do. Returns {charity_id, suggest_on_create}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          suggest_on_create: { type: "boolean", description: "Leave out to read the setting" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, suggest_on_create }) =>
+        suggest_on_create === undefined
+          ? get("/duplicate_contacts/settings", { charity_id })
+          : patch("/duplicate_contacts/settings", { charity_id, suggest_on_create }),
+    },
+
+    {
+      name: "makerble_list_merge_rules",
+      description:
+        "List an Organisation's Merge Rules (custom rules that find duplicate Contacts). Each has id, name, " +
+        "conditions [{id, field_name}] (the Contact fields that must be identical), match_type ('and': every " +
+        "condition must match; 'or': any one), merge_mode ('automatic': matching Contacts are merged within 2 hours, " +
+        "keeping the one created first; 'suggest': matches go to Suggested Merges for someone to review) and status " +
+        "('Active' or 'Inactive'). Organisation Admins and Creators (editors and reporters) can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/merge_rules", p),
+    },
+
+    {
+      name: "makerble_save_merge_rule",
+      description:
+        "Create a Merge Rule (give charity_id, name, conditions and merge_mode) or change one (give its id and only " +
+        "what changes). conditions are Contact field ids (Current Fields of the Organisation's Contact forms; see " +
+        "makerble_list_merge_rules for ones already in use). match_type 'and' needs every condition to be identical, " +
+        "'or' any one. merge_mode 'suggest' is the safe choice: matches appear in Suggested Merges and nothing is " +
+        "merged until someone reviews them; 'automatic' merges matching Contacts within 2 hours without asking, so " +
+        "confirm with the user before choosing it. status 'Inactive' turns a rule off. Returns the saved rule.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Merge Rule ID, to change an existing rule" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID, to create a rule" },
+          name: { type: "string" },
+          conditions: { type: "array", items: { type: "number" }, description: "Contact field (Current Field) ids" },
+          match_type: { type: "string", enum: ["and", "or"] },
+          merge_mode: { type: "string", enum: ["automatic", "suggest"] },
+          status: { type: "string", enum: ["Active", "Inactive"] },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/merge_rules/${id}`, body) : post("/merge_rules", body)),
     },
   ];
 }
