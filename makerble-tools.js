@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 210 Makerble MCP tool definitions.
+ * All 212 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -837,6 +837,96 @@ export function buildTools(api) {
         required: ["project_id", "beneficiary_ids"],
       },
       handler: (body) => post("/project_beneficiaries", body),
+    },
+
+    {
+      name: "makerble_move_contacts_through_projects",
+      description:
+        "Move many Contacts (Beneficiaries) through Projects at once: add them to a Project, change their status " +
+        "in it (Beneficiary State, e.g. Enrolled, Waiting List, Alumni, Declined), or remove them from it. This is " +
+        "'Move through projects' for the Contacts selected on the Manage Contacts page in Makerble. Each change is " +
+        "made as if the Contact were moved one at a time from their profile: it appears in their History and the " +
+        "Project's team is notified. " +
+        "\nChoose the Contacts in one of two ways: beneficiary_ids (at most 500), or everyone matching filter_data " +
+        "(the Manage Contacts filters, e.g. { project_ids: ['572'], beneficiary_state_ids: ['1'] }) minus " +
+        "excluded_ids; project_id is a shortcut for 'Contacts in this Project'. With neither, every Contact you can " +
+        "see in the organisation is chosen, so be specific. " +
+        "\nchanges lists one entry per Project: { project_id, state }, where state is a status id switched on for " +
+        "that Project (makerble_get_project → beneficiary_states) or 'remove'. " +
+        "\nWorkflow to move named Contacts: (1) makerble_list_contacts (or makerble_list_project_contacts) to find " +
+        "their ids; (2) makerble_get_project for the target Project's beneficiary_states; (3) call this tool. " +
+        "\nSkip rules: Contacts you only have Headline Only Access to are skipped (skip_counts.headline_only), and " +
+        "so are Contacts you may not move between Projects (skip_counts.not_allowed): Organisation Editors, Reporters " +
+        "and Observers may move any Contact, other users only Contacts they may edit. A Contact already in the chosen " +
+        "status, or not in a Project they'd be removed from, is left as they are. Projects must be open and in the " +
+        "organisation. " +
+        "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
+        "run in the background: the reply has status 'pending' and an id; call makerble_get_contacts_move_progress " +
+        "with that id until status is 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "Errors: 404 for an organisation you aren't in; 422 for no changes, a closed Project, a status the Project " +
+        "hasn't switched on, more than 500 beneficiary_ids, or a missing charity_id when you belong to several " +
+        "organisations.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: {
+            type: "number",
+            description: "The organisation whose Contacts to move. Optional if you belong to only one organisation.",
+          },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to move, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: {
+            type: "object",
+            description: "Manage Contacts filters choosing the Contacts, e.g. { project_ids: ['572'] }. Used when beneficiary_ids is left out.",
+          },
+          project_id: {
+            type: "number",
+            description: "Shortcut for filter_data: choose the Contacts in this Project",
+          },
+          excluded_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact IDs matching the filters to leave out",
+          },
+          changes: {
+            type: "array",
+            description: "One change per Project",
+            items: {
+              type: "object",
+              properties: {
+                project_id: { type: "number", description: "The Project" },
+                state: {
+                  type: "string",
+                  description: "A status (Beneficiary State) id switched on for the Project, e.g. '3', or 'remove'",
+                },
+              },
+              required: ["project_id", "state"],
+            },
+          },
+        },
+        required: ["changes"],
+      },
+      handler: (body) => post("/beneficiaries/bulk_project_moves", body),
+    },
+
+    {
+      name: "makerble_get_contacts_move_progress",
+      description:
+        "Check a move started with makerble_move_contacts_through_projects that is running in the background " +
+        "(more than 50 Contacts). Only the user who started it can see it. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }: " +
+        "status is 'pending', 'running', 'completed' or 'failed'; processed_count of total_count Contacts have been " +
+        "reached so far; summary is the finished message once it has finished. Wait a few seconds between calls.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The id makerble_move_contacts_through_projects returned" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/beneficiaries/bulk_project_moves/${id}`),
     },
 
     {
