@@ -148,6 +148,11 @@ export function buildTools(api) {
           unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
           success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
           description: { type: "string" },
+          points: {
+            type: "object",
+            description: "Scale only, for a scored Survey: whole-number points for every answer on its List, e.g. {\"Never\": 0, \"Often\": 2}",
+            additionalProperties: { type: "integer" },
+          },
         },
         required: ["name", "metric_type", "default_question", "outcome_id"],
       },
@@ -186,6 +191,27 @@ export function buildTools(api) {
         type: "array",
         items: { type: "string" },
         description: "Needs intervals: show this question only in these, e.g. ['Endpoint']",
+      },
+      display_if: {
+        type: "object",
+        description: "Display If: show this question only when an earlier scale question is answered with one of answers",
+        properties: {
+          question: { type: "number", description: "The earlier question's number, e.g. 2" },
+          answers: { type: "array", items: { type: "string" }, description: "Answers from its List, e.g. ['No']" },
+        },
+        required: ["question", "answers"],
+      },
+      skip_to: {
+        type: "array",
+        description: "Skip To, on a scale question: for these answers, jump forward to a later question that isn't mandatory",
+        items: {
+          type: "object",
+          properties: {
+            answers: { type: "array", items: { type: "string" }, description: "Answers from this question's List, e.g. ['No']" },
+            question: { type: "number", description: "The later question's number to jump to" },
+          },
+          required: ["answers", "question"],
+        },
       },
     },
   };
@@ -4937,7 +4963,10 @@ export function buildTools(api) {
         "Read one library item in full, to reuse it or copy it. Use the type and id from " +
         "makerble_search_library. A Survey returns its questions in order, each with the Metric, List, Field or " +
         "Activity tracker behind it, plus section titles, its Shared Intervals (intervals) and, on a question " +
-        "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}. A Metric returns metric_type, default_question, unit, " +
+        "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}, and its Display " +
+        "If (display_if: [{question, answers}]) and Skip To (skip_to: [{answers, question}]) rules by question " +
+        "number, its Question Grids (question_grids: [{outcome_id, heading, questions}]) and its scoring " +
+        "({questions, verdicts: [{name, from, to}]}, when it is scored). A Metric returns metric_type, default_question, unit, " +
         "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
         "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
         "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
@@ -5110,8 +5139,24 @@ export function buildTools(api) {
         "cover the same Interval and respondent, the one naming more wins; two naming the same amount are " +
         "refused. only_in_intervals shows a question only in those Intervals (e.g. course satisfaction only at " +
         "Endpoint). Projects the Survey is added to later use its Intervals. " +
+        "\nQuestions that only apply after a certain answer: display_if {question, answers} shows a question only " +
+        "when an earlier question (by number, counting section headings) is answered with one of answers. skip_to [{answers, question}] on a question jumps forward past the questions " +
+        "in between to a later question that isn't mandatory; each answer in one entry only. The question whose " +
+        "answer decides must be a scale Metric (one with a List): for yes/no use a scale Metric on a Yes - No List, " +
+        "not a binary Metric. A Survey can't skip to its end: end it with an optional question to skip to. " +
+        "\nQuestion Grids: several statements on one scale (e.g. Agree - Disagree) shown as one table. Give " +
+        "question_grids [{outcome_id, questions}]: the Outcome they all measure first (its title is the grid's " +
+        "heading) and their numbers. Every scale question of that Outcome in the Survey must be in the grid and use " +
+        "the same List; grid questions can't have display_if or skip_to. " +
+        "\nScoring and Verdicts (a score with bands such as Low / Medium / High): give each new scale Metric points " +
+        "for every answer on its List ({Never: 0, Sometimes: 1, Often: 2}), then scoring {questions, verdicts: " +
+        "[{name, from, to, description}]}: the questions whose points add up and the bands, lowest first. Only new " +
+        "Metrics can be given points (a reused Metric's points are shared by every Survey using it, so score a reused " +
+        "Metric only if it already has points). The bands must cover every possible total with no gaps or overlaps. " +
+        "Look for a published instrument with makerble_explore_surveys first. " +
         "\nReturns data: the Survey as makerble_get_library_item shows it (id, type 'survey', name, owner, " +
-        "intervals, questions in order with the item behind each and any by_interval wording) and approved.",
+        "intervals, question_grids with each grid's heading, scoring, questions in order with the item behind each and any " +
+        "by_interval, display_if and skip_to) and approved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5131,6 +5176,40 @@ export function buildTools(api) {
             type: "array",
             description: "The questions in order. Each has exactly one of metric_id, field_id, activity_tracker_id, new_metric or new_field",
             items: surveyQuestion,
+          },
+          scoring: {
+            type: "object",
+            description: "A scored Survey (Verdicts): the questions whose points add up, and the bands of totals",
+            properties: {
+              questions: { type: "array", items: { type: "number" }, description: "The numbers of the scale questions to add up" },
+              verdicts: {
+                type: "array",
+                description: "The bands, lowest first, covering every possible total with no gaps or overlaps",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "e.g. 'Low'" },
+                    from: { type: "number" },
+                    to: { type: "number" },
+                    description: { type: "string", description: "What this band means, shown with it" },
+                  },
+                  required: ["name", "from", "to"],
+                },
+              },
+            },
+            required: ["questions", "verdicts"],
+          },
+          question_grids: {
+            type: "array",
+            description: "Question Grids: scale questions measuring one Outcome first and sharing one List, shown as one table headed by the Outcome's title",
+            items: {
+              type: "object",
+              properties: {
+                outcome_id: { type: "number", description: "The Outcome the grid's questions all measure first; its title is the grid's heading" },
+                questions: { type: "array", items: { type: "number" }, description: "The question numbers in the grid: every scale question of that Outcome, at least two" },
+              },
+              required: ["outcome_id", "questions"],
+            },
           },
           approved: { type: "boolean", description: "Makerble staff only: show the Survey to every organisation and approve its new Metrics and Lists" },
           force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
