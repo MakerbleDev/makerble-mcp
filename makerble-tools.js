@@ -4958,8 +4958,7 @@ export function buildTools(api) {
         "refused. only_in_intervals shows a question only in those Intervals (e.g. course satisfaction only at " +
         "Endpoint). Projects the Survey is added to later use its Intervals. " +
         "\nQuestions that only apply after a certain answer: display_if {question, answers} shows a question only " +
-        "when an earlier question (by number, counting section headings) is answered with one of answers (a list " +
-        "of them: when any is met). skip_to [{answers, question}] on a question jumps forward past the questions " +
+        "when an earlier question (by number, counting section headings) is answered with one of answers. skip_to [{answers, question}] on a question jumps forward past the questions " +
         "in between to a later question that isn't mandatory; each answer in one entry only. The question whose " +
         "answer decides must be a scale Metric (one with a List): for yes/no use a scale Metric on a Yes - No List, " +
         "not a binary Metric. A Survey can't skip to its end: end it with an optional question to skip to. " +
@@ -5048,7 +5047,7 @@ export function buildTools(api) {
                 },
                 display_if: {
                   type: "object",
-                  description: "Display If: show this question only when an earlier scale question is answered with one of answers. Also accepts a list of these (shown when any is met)",
+                  description: "Display If: show this question only when an earlier scale question is answered with one of answers",
                   properties: {
                     question: { type: "number", description: "The earlier question's number, e.g. 2" },
                     answers: { type: "array", items: { type: "string" }, description: "Answers from its List, e.g. ['No']" },
