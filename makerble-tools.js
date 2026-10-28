@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 212 Makerble MCP tool definitions.
+ * All 215 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -124,6 +124,97 @@ const WEBHOOK_EVENTS = [
 export function buildTools(api) {
   const { get, post, patch, put, del, postBearer, signIn } = api;
   const query = (p) => { const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined)); return qs.toString() ? `?${qs}` : ""; };
+  // One question of a Survey, as makerble_create_survey and makerble_update_survey take it.
+  const surveyQuestion = {
+    type: "object",
+    properties: {
+      metric_id: { type: "number", description: "Reuse this Metric (Indicator)" },
+      field_id: { type: "number", description: "Reuse this Field (Custom Field)" },
+      activity_tracker_id: { type: "number", description: "Reuse this Activity tracker (Change)" },
+      new_metric: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          metric_type: { type: "string", enum: ["scale", "value", "binary"] },
+          default_question: { type: "string", description: "The question as people see it, e.g. 'How confident do you feel?'" },
+          list_id: { type: "number", description: "Scale only: an existing List (Ratio Set) of answers" },
+          list: {
+            type: "object",
+            description: "Scale only: a new List instead of list_id",
+            properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+            required: ["name", "choices"],
+          },
+          outcome_id: { type: "number", description: "The Outcome (from makerble_search_library, or makerble_create_outcome) that this Metric measures" },
+          unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
+          success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
+          description: { type: "string" },
+          points: {
+            type: "object",
+            description: "Scale only, for a scored Survey: whole-number points for every answer on its List, e.g. {\"Never\": 0, \"Often\": 2}",
+            additionalProperties: { type: "integer" },
+          },
+        },
+        required: ["name", "metric_type", "default_question", "outcome_id"],
+      },
+      new_field: {
+        type: "object",
+        properties: {
+          field_name: { type: "string" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"] },
+          section_text: { type: "string", description: "section_title only: the text under the heading" },
+          private: { type: "boolean" },
+        },
+        required: ["field_name", "field_data_type"],
+      },
+      is_mandatory: { type: "boolean" },
+      choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Scale Metrics: how many answers may be picked (default single_choice)" },
+      choice_value: { type: "number", description: "With limited_choice: how many" },
+      external_description: { type: "string", description: "Help text shown to the person answering" },
+      by_interval: {
+        type: "array",
+        description: "Needs intervals: how this question is reworded or hidden in them (Adjust When)",
+        items: {
+          type: "object",
+          properties: {
+            interval: { type: "string", description: "One of intervals; leave out for every Interval" },
+            respondent: {
+              type: "string",
+              enum: ["participant", "colleague", "observer", "public"],
+              description: "Who answers: participant (the Contact), colleague, observer (a 360° observer) or public (anyone with the universal link); leave out for everyone",
+            },
+            question: { type: "string", description: "The wording there, e.g. 'How confident do you feel now, after the course?'" },
+            hide: { type: "boolean", description: "true to hide the question there instead of rewording it" },
+          },
+        },
+      },
+      only_in_intervals: {
+        type: "array",
+        items: { type: "string" },
+        description: "Needs intervals: show this question only in these, e.g. ['Endpoint']",
+      },
+      display_if: {
+        type: "object",
+        description: "Display If: show this question only when an earlier scale question is answered with one of answers",
+        properties: {
+          question: { type: "number", description: "The earlier question's number, e.g. 2" },
+          answers: { type: "array", items: { type: "string" }, description: "Answers from its List, e.g. ['No']" },
+        },
+        required: ["question", "answers"],
+      },
+      skip_to: {
+        type: "array",
+        description: "Skip To, on a scale question: for these answers, jump forward to a later question that isn't mandatory",
+        items: {
+          type: "object",
+          properties: {
+            answers: { type: "array", items: { type: "string" }, description: "Answers from this question's List, e.g. ['No']" },
+            question: { type: "number", description: "The later question's number to jump to" },
+          },
+          required: ["answers", "question"],
+        },
+      },
+    },
+  };
   const metricDestinationPath = (metricType, metricId, destination, targetId, context) =>
     `/metrics/${metricType}/${metricId}/destinations/${destination}${targetId ? `/${targetId}` : ""}${query(context)}`;
 
@@ -5084,96 +5175,7 @@ export function buildTools(api) {
           questions: {
             type: "array",
             description: "The questions in order. Each has exactly one of metric_id, field_id, activity_tracker_id, new_metric or new_field",
-            items: {
-              type: "object",
-              properties: {
-                metric_id: { type: "number", description: "Reuse this Metric (Indicator)" },
-                field_id: { type: "number", description: "Reuse this Field (Custom Field)" },
-                activity_tracker_id: { type: "number", description: "Reuse this Activity tracker (Change)" },
-                new_metric: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    metric_type: { type: "string", enum: ["scale", "value", "binary"] },
-                    default_question: { type: "string", description: "The question as people see it, e.g. 'How confident do you feel?'" },
-                    list_id: { type: "number", description: "Scale only: an existing List (Ratio Set) of answers" },
-                    list: {
-                      type: "object",
-                      description: "Scale only: a new List instead of list_id",
-                      properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
-                      required: ["name", "choices"],
-                    },
-                    outcome_id: { type: "number", description: "The Outcome (from makerble_search_library, or makerble_create_outcome) that this Metric measures" },
-                    unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
-                    success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
-                    description: { type: "string" },
-                    points: {
-                      type: "object",
-                      description: "Scale only, for a scored Survey: whole-number points for every answer on its List, e.g. {\"Never\": 0, \"Often\": 2}",
-                      additionalProperties: { type: "integer" },
-                    },
-                  },
-                  required: ["name", "metric_type", "default_question", "outcome_id"],
-                },
-                new_field: {
-                  type: "object",
-                  properties: {
-                    field_name: { type: "string" },
-                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"] },
-                    section_text: { type: "string", description: "section_title only: the text under the heading" },
-                    private: { type: "boolean" },
-                  },
-                  required: ["field_name", "field_data_type"],
-                },
-                is_mandatory: { type: "boolean" },
-                choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Scale Metrics: how many answers may be picked (default single_choice)" },
-                choice_value: { type: "number", description: "With limited_choice: how many" },
-                external_description: { type: "string", description: "Help text shown to the person answering" },
-                by_interval: {
-                  type: "array",
-                  description: "Needs intervals: how this question is reworded or hidden in them (Adjust When)",
-                  items: {
-                    type: "object",
-                    properties: {
-                      interval: { type: "string", description: "One of intervals; leave out for every Interval" },
-                      respondent: {
-                        type: "string",
-                        enum: ["participant", "colleague", "observer", "public"],
-                        description: "Who answers: participant (the Contact), colleague, observer (a 360° observer) or public (anyone with the universal link); leave out for everyone",
-                      },
-                      question: { type: "string", description: "The wording there, e.g. 'How confident do you feel now, after the course?'" },
-                      hide: { type: "boolean", description: "true to hide the question there instead of rewording it" },
-                    },
-                  },
-                },
-                only_in_intervals: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "Needs intervals: show this question only in these, e.g. ['Endpoint']",
-                },
-                display_if: {
-                  type: "object",
-                  description: "Display If: show this question only when an earlier scale question is answered with one of answers",
-                  properties: {
-                    question: { type: "number", description: "The earlier question's number, e.g. 2" },
-                    answers: { type: "array", items: { type: "string" }, description: "Answers from its List, e.g. ['No']" },
-                  },
-                  required: ["question", "answers"],
-                },
-                skip_to: {
-                  type: "array",
-                  description: "Skip To, on a scale question: for these answers, jump forward to a later question that isn't mandatory",
-                  items: {
-                    type: "object",
-                    properties: {
-                      answers: { type: "array", items: { type: "string" }, description: "Answers from this question's List, e.g. ['No']" },
-                      question: { type: "number", description: "The later question's number to jump to" },
-                    },
-                    required: ["answers", "question"],
-                  },
-                },
-              },
-            },
+            items: surveyQuestion,
           },
           scoring: {
             type: "object",
@@ -5215,6 +5217,102 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "questions"],
       },
       handler: (p) => post("/surveys", p),
+    },
+
+    {
+      name: "makerble_update_survey",
+      description:
+        "Changes an existing Survey (a Story Category): its name, description and intro message, and its " +
+        "questions. Use it after makerble_create_survey or makerble_get_library_item, when the user wants a " +
+        "Survey their organisation owns reworded, renamed, or with questions added, removed, replaced or " +
+        "reordered. Question numbers are as makerble_get_library_item lists the questions, starting at 1, and " +
+        "each change applies to the questions as the changes before it left them. A new question takes the " +
+        "same format as in makerble_create_survey: reuse a Metric, Field or Activity tracker by id, or define " +
+        "new_metric or new_field (search the library first). Removing a question deletes it from the Survey, " +
+        "not the Metric or Field behind it. No question changes are kept unless every one can be made. The " +
+        "name, description and intro message are saved first, so they stay changed if the question changes " +
+        "are then refused. To reword a " +
+        "question that reuses a Metric, use makerble_update_metric only if the organisation owns the Metric " +
+        "and nothing else should change; otherwise replace the question with a new Metric. Errors: 404 for a " +
+        "Survey the user can't see, 403 for one they may not edit (e.g. another organisation's public Survey), " +
+        "422 with the reason (e.g. 'Change 2: there is no question 5', a name the organisation already has, or " +
+        "a new item with the same name as one they could reuse; send force: true only if none fits). Returns " +
+        "data: the Survey as makerble_get_library_item shows it, with its questions in their new order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Survey (Story Category) id" },
+          name: { type: "string", description: "A new name" },
+          description: { type: "string", description: "A new description" },
+          intro_message: { type: "string", description: "A new intro message, shown to people before they start" },
+          changes: {
+            type: "array",
+            description: "Question changes, in order",
+            items: {
+              type: "object",
+              properties: {
+                action: { type: "string", enum: ["add", "remove", "replace", "move"] },
+                number: { type: "number", description: "The question number: where to add (optional, default the end), or which to remove, replace or move" },
+                to: { type: "number", description: "move only: the number it moves to" },
+                question: { ...surveyQuestion, description: "add and replace only: the new question" },
+              },
+              required: ["action"],
+            },
+          },
+          force: { type: "boolean", description: "True to create new items in changes even though near-identical ones exist" },
+        },
+        required: ["id"],
+      },
+      handler: async ({ id, changes, force, ...details }) => {
+        let result;
+        if (Object.keys(details).length) result = await patch(`/surveys/${id}`, details);
+        if (changes?.length) result = await patch(`/surveys/${id}/questions`, { changes, force });
+        return result ?? { error: "Give name, description, intro_message or changes" };
+      },
+    },
+
+    {
+      name: "makerble_update_metric",
+      description:
+        "Renames a Metric (an Indicator) or rewords its question, the default question people see when it is " +
+        "asked in a Survey. Nothing else about the Metric changes. Only for a Metric the user's organisation " +
+        "owns: results already recorded stay against it, so only reword it when the meaning stays the same, " +
+        "and prefer a new Metric (makerble_update_survey with a replace change) when a Survey reuses a Metric " +
+        "that other Projects or Surveys use. Errors: 404 for a Metric the user can't see, 403 for one they may " +
+        "not edit, 422 when neither name nor default_question is given. Returns data: the Metric as " +
+        "makerble_get_library_item shows it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Metric (Indicator) id" },
+          name: { type: "string", description: "A new name" },
+          default_question: { type: "string", description: "New question wording, e.g. 'How confident do you feel about getting a job?'" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/indicators/${id}`, body),
+    },
+
+    {
+      name: "makerble_update_list",
+      description:
+        "Renames a List (a Ratio Set: the answer choices of a scale Metric or a dropdown) or changes its " +
+        "choices. Choices keep their place: the first choice sent renames the first choice, and so on; extra " +
+        "choices are added at the end, and saved choices past the last one sent are removed. Every Metric and " +
+        "Survey using the List sees the change, so check where it is used first (makerble_get_where_used) and " +
+        "prefer a new List (makerble_create_list) when other Surveys use it. Errors: 404 for a List the user " +
+        "can't see, 403 for one they may not edit, 422 for no choices or nothing to change. Returns data: the " +
+        "List as makerble_get_library_item shows it, with its choices.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The List (Ratio Set) id" },
+          name: { type: "string", description: "A new name" },
+          choices: { type: "array", items: { type: "string" }, description: "Every choice, in order, e.g. ['Very', 'A bit', 'Not at all']" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/lists/${id}`, body),
     },
 
     {
