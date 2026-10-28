@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 195 Makerble MCP tool definitions.
+ * All 198 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5405,6 +5405,83 @@ export function buildTools(api) {
         decision === "merge"
           ? post(`/suggested_merges/${id}/merge`, { winner_id: winner_contact_id })
           : post(`/suggested_merges/${id}/reject`, {}),
+    },
+
+    // ─── Scan for duplicate contacts (CP-6010) ──────────────────────────────
+
+    {
+      name: "makerble_find_duplicate_contacts",
+      description:
+        "Find sets of Contacts (Beneficiaries) in an Organisation that look like the same person, as the Duplicate " +
+        "Contacts page (Scan for duplicate contacts) does. match 'similar' (the default) ignores titles (Mr, Mrs, " +
+        "Dr), capital letters, punctuation, word order and small spelling differences; match 'exact' finds only " +
+        "names spelt exactly the same. Each set has contacts [{id, name, created_at, created_by}], match_strength " +
+        "('high': same name once normalised, or a shared date of birth, email or mobile; 'medium': otherwise) and " +
+        "reasons (similar_name, same_name, same_date_of_birth, same_email, same_mobile). Only Contacts the user " +
+        "could merge are scanned, and sets someone marked as not duplicates are left out. A similar-name scan of a " +
+        "large Organisation runs in the background: if the result has status 'running', wait retry_after seconds " +
+        "and call this tool again with the same arguments. Show the sets to the user; to act on one, use " +
+        "makerble_review_duplicate_contacts, and only after the user confirms. Finding merges nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          match: { type: "string", enum: ["similar", "exact"], description: "Default 'similar'" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/duplicate_contacts", p),
+    },
+
+    {
+      name: "makerble_review_duplicate_contacts",
+      description:
+        "Decide a set of Contacts found by makerble_find_duplicate_contacts. decision 'merge' merges them into one, " +
+        "keeping the Contact created first unless you give winner_contact_id (one of contact_ids); the others are " +
+        "merged into it within a few minutes, and someone can undo it with Unmerge on the Merge Contacts page. " +
+        "decision 'not_duplicates' records that they are different people, so they are never suggested together " +
+        "again, by the scan, the background check of new Contacts or a Merge Rule. ALWAYS show the user the " +
+        "Contacts and get their confirmation in the chat before merging; never merge on your own initiative. " +
+        "Returns a message, and for a merge the Contact kept and the ids of the merge requests created.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_ids: { type: "array", items: { type: "number" }, description: "The Contacts in the set, at least two" },
+          decision: { type: "string", enum: ["merge", "not_duplicates"] },
+          winner_contact_id: { type: "number", description: "When merging, the Contact to keep" },
+          match_strength: { type: "string", enum: ["high", "medium"], description: "When marking not duplicates, the set's Match strength" },
+        },
+        required: ["contact_ids", "decision"],
+      },
+      handler: ({ contact_ids, decision, winner_contact_id, match_strength }) =>
+        decision === "merge"
+          ? post("/duplicate_contacts/merge", { contact_ids, winner_id: winner_contact_id })
+          : post("/duplicate_contacts/not_duplicates", { contact_ids, match_strength }),
+    },
+
+    {
+      name: "makerble_duplicate_suggestion_setting",
+      description:
+        "Read or change an Organisation's 'Suggest possible duplicates when contacts are created' setting on the " +
+        "Merge Contacts page. When it is on (the default), every Contact created is compared with the " +
+        "Organisation's existing Contacts each hour, and similar names appear in Suggested Merges " +
+        "(makerble_list_suggested_merges) for someone to review; nothing is merged automatically. Leave out " +
+        "suggest_on_create to read the setting; pass true or false to change it, which only Organisation Admins " +
+        "(editors) can do. Returns {charity_id, suggest_on_create}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          suggest_on_create: { type: "boolean", description: "Leave out to read the setting" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, suggest_on_create }) =>
+        suggest_on_create === undefined
+          ? get("/duplicate_contacts/settings", { charity_id })
+          : patch("/duplicate_contacts/settings", { charity_id, suggest_on_create }),
     },
 
     {
