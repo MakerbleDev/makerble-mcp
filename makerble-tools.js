@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 194 Makerble MCP tool definitions.
+ * All 195 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4244,6 +4244,35 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...p }) => get(`/events/${id}/guests`, p),
+    },
+
+    {
+      name: "makerble_get_event_register",
+      description:
+        "Get the Register of a recurring event series: the attendance grid a teacher would use, with a row per " +
+        "guest (Contact / beneficiary) invited to any event in the series and, for every event in the series in " +
+        "date order, that guest's answers to the attendance Survey (Story Category) set on the Event Format. Pass " +
+        "the id of any event in the series (the master event or a subsequent event); a one-off event has no " +
+        "register (404). Use it to answer questions like 'who attended the last three Ruby Training sessions?' or " +
+        "'how late was Ann each week?'. Returns { master_event_id, name (the series name, without the event's " +
+        "number), schedule, project: {id, name}, survey: {id, name} or null when the Event Format has no " +
+        "attendance Survey, columns: [{ current_field_id, name, type (scale, binary, value, participation or " +
+        "custom_field), compulsory }], events: [{ id, name, start_datetime, full (at its guest capacity), totals: " +
+        "[{ current_field_id, name, total }] for Activity metrics, which are counted once per event rather than " +
+        "per guest }], page, page_size, page_count, total_count, data: [{ contact_id, name, events: [{ event_id, " +
+        "in_event (whether the guest is invited to that event), story_id (the guest's latest attendance Story for " +
+        "it, or null), answers: { current_field_id: value or null } }] }] }. Guests are in alphabetical order, a " +
+        "page at a time. Anyone who can open the event page can read it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of any event in the series" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Guests per page. Default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/events/${id}/register`, p),
     },
 
     {
