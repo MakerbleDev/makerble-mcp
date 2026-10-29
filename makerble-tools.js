@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 216 Makerble MCP tool definitions.
+ * All 217 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3808,6 +3808,32 @@ export function buildTools(api) {
 
     // ── Signup Pages / Offline Collector ────────────────────────────────────────
     {
+      name: "makerble_list_signup_pages",
+      description:
+        "List the Signup Pages (Referral Link Details in the API) the user can see: public forms people fill in " +
+        "to sign themselves (and their family) up, which create Contacts (Beneficiaries) in a Project. Organisation " +
+        "Editors see all their organisation's Signup Pages; Project Editors, Reporters and Observers see those that " +
+        "collect into their Projects. Returns what the Manage Sign-up Pages table shows: id, name, organisation, " +
+        "type (fixed: each person is an individual, A, B, C, in a fixed order; flexible: people are added per " +
+        "audience (Beneficiary Role), in any number and order), status and active, public_link, emails_enabled, " +
+        "created_by/at and last_updated_by/updated_at, and individuals: for each individual or audience, its label, " +
+        "audience, Contact Form (Beneficiary Category), project, project status (Beneficiary State), surveys " +
+        "(Story Categories) with any wave, and send_emails (whether a confirmation email goes to that person). " +
+        "Includes deactivated Signup Pages. Use makerble_get_signup_page_offline_definition for one Signup Page's " +
+        "fields and full Send Emails settings. Paginated; use last_synced_datetime for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this organisation's Signup Pages." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Signup Pages changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/referral_link_details", p),
+    },
+
+    {
       name: "makerble_get_signup_page_offline_definition",
       description:
         "Get the Form Definition for a Signup Page (Referral Link Detail) — its contact form " +
@@ -3815,7 +3841,13 @@ export function buildTools(api) {
         "Offline Collector app uses. Useful for inspecting or testing a Signup Page's offline " +
         "form before it goes out to field workers. Uses your own Makerble credentials, and only " +
         "works for Signup Pages belonging to an organisation you have access to. Does not include " +
-        "the offline submission bearer token — that's only issued to the offline device itself.",
+        "the offline submission bearer token — that's only issued to the offline device itself. " +
+        "When any Send Emails email is switched on, it also returns send_emails: for each individual " +
+        "(or audience) whether its confirmation email is on and, if so, the subject_line, message_body, " +
+        "merge_tags (the {{Field name}} personalisation tags, each with the Contact Form field's id and " +
+        "field_type, or null if no field matches), recipient_fields (the email fields it is sent to) and " +
+        "included_individuals (whose submitted details are added); and the same for additional_recipients " +
+        "(fixed email addresses, whose emails aren't personalised). Without send_emails, no email is on.",
       inputSchema: {
         type: "object",
         properties: {
