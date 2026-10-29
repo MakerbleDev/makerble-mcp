@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 217 Makerble MCP tool definitions.
+ * All 218 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3856,6 +3856,60 @@ export function buildTools(api) {
         required: ["signup_page_id"],
       },
       handler: ({ signup_page_id }) => get(`/referral_link_details/${signup_page_id}/definition`),
+    },
+
+    {
+      name: "makerble_set_signup_page_emails",
+      description:
+        "Set the Send Emails settings of a Signup Page (Referral Link Detail): the confirmation email each person " +
+        "who is signed up receives once the Signup Page is completed, and an email to Additional Recipients (fixed " +
+        "addresses such as the office). Saves what the Send Emails screen saves. Only Organisation Editors can do this, " +
+        "and the organisation must have email messaging switched on in Preferences (otherwise a 422 says so). " +
+        "Workflow: (1) makerble_get_signup_page_offline_definition to see the individuals' labels (\"Individual A\", " +
+        "\"Individual B\", or a flexible Signup Page's audience person names), each Contact Form's fields, and any " +
+        "current send_emails. (2) Pick each individual's email field(s) (fields of type email_address) for " +
+        "recipient_field_ids. (3) Call this tool. Personalise subject_line and message_body (HTML) with {{Field name}} " +
+        "merge tags naming the individual's Contact Form fields, e.g. {{name}}; Additional Recipients' emails aren't " +
+        "personalised. included_individuals adds those individuals' submitted answers to the email. Individuals you " +
+        "leave out keep their settings; enabled: false switches an email off. Everything is saved or nothing is. " +
+        "Returns send_emails as the definition shows it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          signup_page_id: { type: "number", description: "The Signup Page (Referral Link Detail) ID" },
+          individuals: {
+            type: "array",
+            description: "Confirmation emails to the people signed up, one per individual or audience",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string", description: "The individual's label from the definition, e.g. \"Individual A\"" },
+                enabled: { type: "boolean" },
+                subject_line: { type: "string", description: "May contain {{Field name}} merge tags" },
+                message_body: { type: "string", description: "HTML. May contain {{Field name}} merge tags" },
+                recipient_field_ids: { type: "array", items: { type: "number" }, description: "Email fields on this individual's Contact Form to send to" },
+                include_submission_details: { type: "boolean", description: "Add the submitted answers of included_individuals" },
+                included_individuals: { type: "array", items: { type: "string" }, description: "Labels of the individuals whose answers are added" },
+              },
+              required: ["label"],
+            },
+          },
+          additional_recipients: {
+            type: "object",
+            description: "The email to fixed addresses, e.g. the organisation's office",
+            properties: {
+              enabled: { type: "boolean" },
+              recipients: { type: "array", items: { type: "string" }, description: "Email addresses" },
+              subject_line: { type: "string" },
+              message_body: { type: "string", description: "HTML" },
+              include_submission_details: { type: "boolean" },
+              included_individuals: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        required: ["signup_page_id"],
+      },
+      handler: ({ signup_page_id, ...body }) => put(`/referral_link_details/${signup_page_id}/email_settings`, body),
     },
 
     {
