@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 218 Makerble MCP tool definitions.
+ * All 219 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3831,6 +3831,77 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/referral_link_details", p),
+    },
+
+    {
+      name: "makerble_create_signup_page",
+      description:
+        "Make a Signup Page (Referral Link Detail in the API): a public form people fill in to sign themselves, and " +
+        "often their family, up; each person becomes a Contact (Beneficiary) in a Project. Makes it as the New Signup " +
+        "Page screen does, active unless active is false, and returns it with its public_link. Only Organisation " +
+        "Editors can. There are two types. FIXED (type: fixed): Individual A is the person signing up (project_id, " +
+        "beneficiary_state_id = project status (Beneficiary State), contact_form_id = Contact Form (Beneficiary " +
+        "Category), surveys); each entry in individuals adds Individual B, C, ... in that order, related to Individual A " +
+        "through a Relationship Category (relationship is its parent or child title, e.g. \"Child\"). Prerequisite: the " +
+        "organisation has at least one Relationship Category. FLEXIBLE (type: flexible): each entry in audiences is an " +
+        "audience (Beneficiary Role) respondents can add any number of people as, in any order (e.g. several children). " +
+        "Prerequisite: each audience is a role with a permitted relationship (role-holder relationship) in the " +
+        "organisation. Every Project, Contact Form, Relationship Category and audience must be the organisation's, and " +
+        "each survey (Story Category) one its Project collects, with an optional wave_id of that survey; otherwise the " +
+        "422 errors name each problem. Workflow: (1) makerble_list_signup_pages to check the organisation doesn't " +
+        "already have this Signup Page. (2) makerble_list_projects, makerble_list_contact_bio_forms and " +
+        "makerble_list_surveys for the ids. (3) makerble_create_signup_page. (4) Optionally " +
+        "makerble_set_signup_page_emails for its confirmation emails.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation" },
+          name: { type: "string" },
+          type: { type: "string", enum: ["fixed", "flexible"] },
+          active: { type: "boolean", description: "Default true" },
+          project_id: { type: "number", description: "Individual A's Project (fixed); for flexible, defaults to the first audience's" },
+          beneficiary_state_id: { type: "number", description: "Project status people are added with, e.g. Enrolled or Waiting List" },
+          contact_form_id: { type: "number", description: "Individual A's Contact Form (Beneficiary Category)" },
+          surveys: {
+            type: "array",
+            description: "Surveys the Project collects, each with an optional wave",
+            items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } }, required: ["id"] },
+          },
+          description: { type: "string" },
+          thank_you_message: { type: "string" },
+          individuals: {
+            type: "array",
+            description: "Fixed only: Individual B, C, ... in order",
+            items: {
+              type: "object",
+              properties: {
+                relationship_category_id: { type: "number" },
+                relationship: { type: "string", description: "The Relationship Category's parent or child title for this individual" },
+                project_id: { type: "number" },
+                beneficiary_state_id: { type: "number" },
+                contact_form_id: { type: "number" },
+                surveys: { type: "array", items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } } } },
+              },
+            },
+          },
+          audiences: {
+            type: "array",
+            description: "Flexible only: one per audience (Beneficiary Role)",
+            items: {
+              type: "object",
+              properties: {
+                beneficiary_role_id: { type: "number" },
+                project_id: { type: "number" },
+                beneficiary_state_id: { type: "number" },
+                contact_form_id: { type: "number" },
+                surveys: { type: "array", items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } } } },
+              },
+            },
+          },
+        },
+        required: ["charity_id", "name", "type"],
+      },
+      handler: (body) => post("/referral_link_details", body),
     },
 
     {
