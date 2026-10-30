@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 217 Makerble MCP tool definitions.
+ * All 220 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1715,18 +1715,24 @@ export function buildTools(api) {
         "(Project Story Category). Use it to find a Contact's (Beneficiary's) existing link and reuse it instead " +
         "of generating a new one with makerble_create_survey_links. Check `expired`: a 'use_once' link that has " +
         "already been answered is expired and no longer works. " +
+        "Also use it to see who has started a survey response but not finished it (the 'Surveys in progress' " +
+        "column on the Response Rates tab): `responses_in_progress` lists the unfinished responses the Contact " +
+        "saved with Finish Later on that link, newest first, as [{send_survey_wave_id, last_updated_at}]; it is " +
+        "empty when there are none. Unfinished responses are kept for 30 days after they were last updated, and " +
+        "an unfinished response is not a completed survey. Pass in_progress: true to list only links with one. " +
         "Filter by beneficiary_id and/or send_survey_wave_id. Requires Project Editor or Organisation Editor access. " +
         "Returns {page, page_size, page_count, total_count, data: [{beneficiary_id, email, survey_token, survey_url, " +
-        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at}]}.",
+        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at, responses_in_progress}]}.",
       inputSchema: {
         type: "object",
         properties: {
           project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
           beneficiary_id: { type: "number", description: "Only this Contact's links" },
           send_survey_wave_id: { type: "number", description: "Only links for this Wave" },
+          in_progress: { type: "boolean", description: "true: only links where the Contact has started a response but not finished it" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200" },
-          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time" },
+          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time (saving an unfinished response doesn't change the link)" },
         },
         required: ["project_story_category_id"],
       },
@@ -3835,6 +3841,103 @@ export function buildTools(api) {
 
     // ── Signup Pages / Offline Collector ────────────────────────────────────────
     {
+      name: "makerble_list_signup_pages",
+      description:
+        "List the Signup Pages (Referral Link Details in the API) the user can see: public forms people fill in " +
+        "to sign themselves (and their family) up, which create Contacts (Beneficiaries) in a Project. Organisation " +
+        "Editors see all their organisation's Signup Pages; Project Editors, Reporters and Observers see those that " +
+        "collect into their Projects. Returns what the Manage Sign-up Pages table shows: id, name, organisation, " +
+        "type (fixed: each person is an individual, A, B, C, in a fixed order; flexible: people are added per " +
+        "audience (Beneficiary Role), in any number and order), status and active, public_link, emails_enabled, " +
+        "created_by/at and last_updated_by/updated_at, and individuals: for each individual or audience, its label, " +
+        "audience, Contact Form (Beneficiary Category), project, project status (Beneficiary State), surveys " +
+        "(Story Categories) with any wave, and send_emails (whether a confirmation email goes to that person). " +
+        "Includes deactivated Signup Pages. Use makerble_get_signup_page_offline_definition for one Signup Page's " +
+        "fields and full Send Emails settings. Paginated; use last_synced_datetime for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this organisation's Signup Pages." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Signup Pages changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/referral_link_details", p),
+    },
+
+    {
+      name: "makerble_create_signup_page",
+      description:
+        "Make a Signup Page (Referral Link Detail in the API): a public form people fill in to sign themselves, and " +
+        "often their family, up; each person becomes a Contact (Beneficiary) in a Project. Makes it as the New Signup " +
+        "Page screen does, active unless active is false, and returns it with its public_link. Only Organisation " +
+        "Editors can. There are two types. FIXED (type: fixed): Individual A is the person signing up (project_id, " +
+        "beneficiary_state_id = project status (Beneficiary State), contact_form_id = Contact Form (Beneficiary " +
+        "Category), surveys); each entry in individuals adds Individual B, C, ... in that order, related to Individual A " +
+        "through a Relationship Category (relationship is its parent or child title, e.g. \"Child\"). Prerequisite: the " +
+        "organisation has at least one Relationship Category. FLEXIBLE (type: flexible): each entry in audiences is an " +
+        "audience (Beneficiary Role) respondents can add any number of people as, in any order (e.g. several children). " +
+        "Prerequisite: each audience is a role with a permitted relationship (role-holder relationship) in the " +
+        "organisation. Every Project, Contact Form, Relationship Category and audience must be the organisation's, and " +
+        "each survey (Story Category) one its Project collects, with an optional wave_id of that survey; otherwise the " +
+        "422 errors name each problem. Workflow: (1) makerble_list_signup_pages to check the organisation doesn't " +
+        "already have this Signup Page. (2) makerble_list_projects, makerble_list_contact_bio_forms and " +
+        "makerble_list_surveys for the ids. (3) makerble_create_signup_page. (4) Optionally " +
+        "makerble_set_signup_page_emails for its confirmation emails.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation" },
+          name: { type: "string" },
+          type: { type: "string", enum: ["fixed", "flexible"] },
+          active: { type: "boolean", description: "Default true" },
+          project_id: { type: "number", description: "Individual A's Project (fixed); for flexible, defaults to the first audience's" },
+          beneficiary_state_id: { type: "number", description: "Project status people are added with, e.g. Enrolled or Waiting List" },
+          contact_form_id: { type: "number", description: "Individual A's Contact Form (Beneficiary Category)" },
+          surveys: {
+            type: "array",
+            description: "Surveys the Project collects, each with an optional wave",
+            items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } }, required: ["id"] },
+          },
+          description: { type: "string" },
+          thank_you_message: { type: "string" },
+          individuals: {
+            type: "array",
+            description: "Fixed only: Individual B, C, ... in order",
+            items: {
+              type: "object",
+              properties: {
+                relationship_category_id: { type: "number" },
+                relationship: { type: "string", description: "The Relationship Category's parent or child title for this individual" },
+                project_id: { type: "number" },
+                beneficiary_state_id: { type: "number" },
+                contact_form_id: { type: "number" },
+                surveys: { type: "array", items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } } } },
+              },
+            },
+          },
+          audiences: {
+            type: "array",
+            description: "Flexible only: one per audience (Beneficiary Role)",
+            items: {
+              type: "object",
+              properties: {
+                beneficiary_role_id: { type: "number" },
+                project_id: { type: "number" },
+                beneficiary_state_id: { type: "number" },
+                contact_form_id: { type: "number" },
+                surveys: { type: "array", items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } } } },
+              },
+            },
+          },
+        },
+        required: ["charity_id", "name", "type"],
+      },
+      handler: (body) => post("/referral_link_details", body),
+    },
+
+    {
       name: "makerble_get_signup_page_offline_definition",
       description:
         "Get the Form Definition for a Signup Page (Referral Link Detail) — its contact form " +
@@ -3842,7 +3945,13 @@ export function buildTools(api) {
         "Offline Collector app uses. Useful for inspecting or testing a Signup Page's offline " +
         "form before it goes out to field workers. Uses your own Makerble credentials, and only " +
         "works for Signup Pages belonging to an organisation you have access to. Does not include " +
-        "the offline submission bearer token — that's only issued to the offline device itself.",
+        "the offline submission bearer token — that's only issued to the offline device itself. " +
+        "When any Send Emails email is switched on, it also returns send_emails: for each individual " +
+        "(or audience) whether its confirmation email is on and, if so, the subject_line, message_body, " +
+        "merge_tags (the {{Field name}} personalisation tags, each with the Contact Form field's id and " +
+        "field_type, or null if no field matches), recipient_fields (the email fields it is sent to) and " +
+        "included_individuals (whose submitted details are added); and the same for additional_recipients " +
+        "(fixed email addresses, whose emails aren't personalised). Without send_emails, no email is on.",
       inputSchema: {
         type: "object",
         properties: {
@@ -3851,6 +3960,60 @@ export function buildTools(api) {
         required: ["signup_page_id"],
       },
       handler: ({ signup_page_id }) => get(`/referral_link_details/${signup_page_id}/definition`),
+    },
+
+    {
+      name: "makerble_set_signup_page_emails",
+      description:
+        "Set the Send Emails settings of a Signup Page (Referral Link Detail): the confirmation email each person " +
+        "who is signed up receives once the Signup Page is completed, and an email to Additional Recipients (fixed " +
+        "addresses such as the office). Saves what the Send Emails screen saves. Only Organisation Editors can do this, " +
+        "and the organisation must have email messaging switched on in Preferences (otherwise a 422 says so). " +
+        "Workflow: (1) makerble_get_signup_page_offline_definition to see the individuals' labels (\"Individual A\", " +
+        "\"Individual B\", or a flexible Signup Page's audience person names), each Contact Form's fields, and any " +
+        "current send_emails. (2) Pick each individual's email field(s) (fields of type email_address) for " +
+        "recipient_field_ids. (3) Call this tool. Personalise subject_line and message_body (HTML) with {{Field name}} " +
+        "merge tags naming the individual's Contact Form fields, e.g. {{name}}; Additional Recipients' emails aren't " +
+        "personalised. included_individuals adds those individuals' submitted answers to the email. Individuals you " +
+        "leave out keep their settings; enabled: false switches an email off. Everything is saved or nothing is. " +
+        "Returns send_emails as the definition shows it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          signup_page_id: { type: "number", description: "The Signup Page (Referral Link Detail) ID" },
+          individuals: {
+            type: "array",
+            description: "Confirmation emails to the people signed up, one per individual or audience",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string", description: "The individual's label from the definition, e.g. \"Individual A\"" },
+                enabled: { type: "boolean" },
+                subject_line: { type: "string", description: "May contain {{Field name}} merge tags" },
+                message_body: { type: "string", description: "HTML. May contain {{Field name}} merge tags" },
+                recipient_field_ids: { type: "array", items: { type: "number" }, description: "Email fields on this individual's Contact Form to send to" },
+                include_submission_details: { type: "boolean", description: "Add the submitted answers of included_individuals" },
+                included_individuals: { type: "array", items: { type: "string" }, description: "Labels of the individuals whose answers are added" },
+              },
+              required: ["label"],
+            },
+          },
+          additional_recipients: {
+            type: "object",
+            description: "The email to fixed addresses, e.g. the organisation's office",
+            properties: {
+              enabled: { type: "boolean" },
+              recipients: { type: "array", items: { type: "string" }, description: "Email addresses" },
+              subject_line: { type: "string" },
+              message_body: { type: "string", description: "HTML" },
+              include_submission_details: { type: "boolean" },
+              included_individuals: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        required: ["signup_page_id"],
+      },
+      handler: ({ signup_page_id, ...body }) => put(`/referral_link_details/${signup_page_id}/email_settings`, body),
     },
 
     {
