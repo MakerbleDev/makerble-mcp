@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 221 Makerble MCP tool definitions.
+ * All 223 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2409,6 +2409,67 @@ export function buildTools(api) {
         required: ["checklist_id", "project_id"],
       },
       handler: (p) => post("/beneficiaries/bulk_checklists", p),
+    },
+
+    {
+      name: "makerble_list_relationship_categories",
+      description:
+        "List an organisation's Relationship Categories: the kinds of relationship Contacts (Beneficiaries) can have " +
+        "with each other, each with two sides, e.g. School & Pupil or Mother & Son (parent_title and child_title). " +
+        "Use an id with makerble_add_relationship_to_contacts. Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, parent_title, child_title, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_add_relationship_to_contacts",
+      description:
+        "Give many Contacts (Beneficiaries) the same relationship with one Contact, e.g. make Oakfield School the " +
+        "School of every selected pupil. This is 'Add to > A relationship' for the Contacts selected on the Manage " +
+        "Contacts page; each relationship is added as Add a Relationship on a Contact's profile does, and appears on " +
+        "both Contacts' History. " +
+        "\nrelationship_category_id is a Relationship Category (makerble_list_relationship_categories) with two " +
+        "sides, parent_title and child_title. related_contact_id is the one Contact everyone is linked to, and " +
+        "related_contact_is says which side that Contact takes: 'parent' (parent_title, e.g. School) or 'child' " +
+        "(child_title, e.g. Pupil). Each selected Contact takes the other side. " +
+        "\nChoose the Contacts with beneficiary_ids (at most 500), or everyone matching filter_data (the Manage " +
+        "Contacts filters) minus excluded_ids. " +
+        "\nSkipped Contacts are counted in skip_counts: headline_only (you only have Headline Only Access), " +
+        "already_linked (they already have that relationship with that Contact), same_contact (the chosen Contact " +
+        "itself), not_allowed. Another organisation's category or Contact is refused with 422. " +
+        "\nUp to 50 Contacts are linked straight away (status 'completed'); more run in the background (status " +
+        "'pending'): call makerble_get_contacts_bulk_action_progress with the id until 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "\nWorkflow: (1) makerble_list_relationship_categories; (2) makerble_list_contacts to find the Contact to " +
+        "link to and the Contacts to link; (3) tell the user, in the category's own words, what each Contact will " +
+        "become (e.g. 'each will be a Pupil of Oakfield School'); (4) call this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "The Relationship Category" },
+          related_contact_id: { type: "number", description: "The Contact everyone is linked to" },
+          related_contact_is: { type: "string", enum: ["parent", "child"], description: "Which side the related Contact takes" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to link, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: { type: "object", description: "Manage Contacts filters choosing the Contacts. Used when beneficiary_ids is left out." },
+          excluded_ids: { type: "array", items: { type: "number" }, description: "Contact IDs matching the filters to leave out" },
+        },
+        required: ["relationship_category_id", "related_contact_id", "related_contact_is"],
+      },
+      handler: (p) => post("/beneficiaries/bulk_relationships", p),
     },
 
     {
