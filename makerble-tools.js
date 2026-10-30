@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 219 Makerble MCP tool definitions.
+ * All 220 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1018,6 +1018,23 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/beneficiaries/bulk_project_moves/${id}`),
+    },
+
+    {
+      name: "makerble_get_contacts_bulk_action_progress",
+      description:
+        "Check a change to many Contacts (Beneficiaries) at once that is running in the background (more than 50 " +
+        "Contacts), e.g. makerble_add_event_guests with filter_data. Only the user who started it can see it. " +
+        "Returns { id, action_name, status, total_count, processed_count, changed_count, skip_counts, background, " +
+        "summary }: action_name says which change it is (e.g. 'add_to_event', 'move_through_projects'); status is " +
+        "'pending', 'running', 'completed', 'failed' or 'undone'; processed_count of total_count Contacts have been " +
+        "reached so far; summary is the finished message once it has finished. Wait a few seconds between calls.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The id the bulk change returned" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/beneficiaries/bulk_actions/${id}`),
     },
 
     {
@@ -4730,20 +4747,45 @@ export function buildTools(api) {
         "in the event's Project can be added (find them with makerble_list_project_contacts). Contacts already " +
         "on the event are left as they are. guest_status_id is a Guest Status (event state) from " +
         "makerble_get_event_form's guest_statuses (default: the first); each Contact must meet that Guest " +
-        "Status's requirements, or the request is refused with 422 naming the requirement. event_role_id is " +
-        "one of the form's event_roles.guests. A fixed guest limit is respected. For an event in a recurring " +
-        "series, apply_to 'this_and_upcoming_events' also adds them to the later events. Returns { event_id, " +
-        "guests_count }; every problem comes back together as 422 { errors }.",
+        "Status's requirements. event_role_id is one of the form's event_roles.guests. A fixed guest limit is " +
+        "respected. Anyone who can open the event page can add guests. " +
+        "\nChoose the Contacts in one of two ways: " +
+        "\n(1) contact_ids: all of them are added or none are. Every problem comes back together as 422 { errors }. " +
+        "For an event in a recurring series, apply_to 'this_and_upcoming_events' also adds them to the later events. " +
+        "Returns { event_id, guests_count }. " +
+        "\n(2) filter_data: everyone matching the Manage Contacts filters (e.g. { beneficiary_state_ids: ['1'] }, " +
+        "or {} for every Contact you can see) minus excluded_ids; project_id is a shortcut for 'Contacts in this " +
+        "Project'. This is 'Add to > An event' for the Contacts selected on the Manage Contacts page. Each Contact is " +
+        "added in turn, and those that can't be are skipped and counted in skip_counts instead of refusing the " +
+        "request: headline_only (you only have Headline Only Access), not_in_project, event_full, " +
+        "requirements_not_met. Not with contact_ids, event_role_id or apply_to 'this_and_upcoming_events'. Up to 50 " +
+        "Contacts are added straight away (status 'completed'); more run in the background (status 'pending'): " +
+        "call makerble_get_contacts_bulk_action_progress with the returned id until status is 'completed' or " +
+        "'failed'. Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, " +
+        "summary, event_id, guests_count }. " +
+        "\nWorkflow to invite everyone matching some filters: (1) makerble_list_events to find the event; " +
+        "(2) makerble_get_event_form for its guest_statuses; (3) tell the user which event, Guest Status and filters " +
+        "you will use; (4) call this tool with filter_data.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The event id" },
-          contact_ids: { type: "array", items: { type: "number" }, description: "Contact (beneficiary) ids" },
+          contact_ids: { type: "array", items: { type: "number" }, description: "Contact (beneficiary) ids. Leave out to use filter_data instead." },
+          filter_data: {
+            type: "object",
+            description: "Manage Contacts filters choosing the Contacts to add, e.g. { project_ids: ['572'] }. Used instead of contact_ids.",
+          },
+          excluded_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "With filter_data: Contact ids matching the filters to leave out",
+          },
+          project_id: { type: "number", description: "With filter_data: choose the Contacts in this Project" },
           guest_status_id: { type: "number", description: "Guest Status (event state) id" },
-          event_role_id: { type: "number", description: "Event Role id for guests" },
+          event_role_id: { type: "number", description: "Event Role id for guests (contact_ids only)" },
           apply_to: { type: "string", enum: ["this_event", "this_and_upcoming_events"] },
         },
-        required: ["id", "contact_ids"],
+        required: ["id"],
       },
       handler: ({ id, ...p }) => post(`/events/${id}/guests`, p),
     },
