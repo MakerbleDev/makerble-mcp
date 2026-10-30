@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 220 Makerble MCP tool definitions.
+ * All 221 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2368,6 +2368,47 @@ export function buildTools(api) {
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
           : post(`/beneficiaries/${beneficiary_id}/checklists`, project_id ? { checklist_id, project_id } : { checklist_id }),
+    },
+
+    {
+      name: "makerble_start_checklist_for_contacts",
+      description:
+        "Start the same Checklist for many Contacts (Beneficiaries) at once. This is 'Add to > A Checklist' for the " +
+        "Contacts selected on the Manage Contacts page; each Contact is started as Add a Checklist on their profile " +
+        "would (makerble_add_checklist_to_contact does one), and steps their records already prove done are ticked " +
+        "off straight away. " +
+        "\nA Checklist is started through one Project: give checklist_id and project_id, a Project that lets " +
+        "colleagues add it by hand (makerble_get_checklist shows its projects). Organisation Editors and Reporters " +
+        "may use any open Project; others only Projects they are an Editor or Reporter of. Anything else is refused " +
+        "with 422 and nothing changes. " +
+        "\nChoose the Contacts with beneficiary_ids (at most 500), or everyone matching filter_data (the Manage " +
+        "Contacts filters) minus excluded_ids; with filter_data, project_id also narrows to Contacts in that Project. " +
+        "\nSkipped Contacts are counted in skip_counts: headline_only (you only have Headline Only Access), " +
+        "not_in_project (they aren't in the Project), not_allowed. A Contact who already has the Checklist keeps " +
+        "their progress. " +
+        "\nUp to 50 Contacts start straight away (status 'completed'); more run in the background (status " +
+        "'pending'): call makerble_get_contacts_bulk_action_progress with the id until 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "\nWorkflow: (1) makerble_list_checklists and makerble_get_checklist to find the Checklist and its Projects; " +
+        "(2) makerble_list_project_contacts or makerble_list_contacts for the Contacts; (3) tell the user which " +
+        "Checklist, Project and Contacts; (4) call this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          checklist_id: { type: "number", description: "The Checklist to start" },
+          project_id: { type: "number", description: "The Project it is started through" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: { type: "object", description: "Manage Contacts filters choosing the Contacts. Used when beneficiary_ids is left out." },
+          excluded_ids: { type: "array", items: { type: "number" }, description: "Contact IDs matching the filters to leave out" },
+        },
+        required: ["checklist_id", "project_id"],
+      },
+      handler: (p) => post("/beneficiaries/bulk_checklists", p),
     },
 
     {
