@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 219 Makerble MCP tool definitions.
+ * All 222 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4908,6 +4908,69 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
+    },
+
+    // ── Audio Notes (CaseNotes) ───────────────────────────────────────────────
+    {
+      name: "makerble_list_audio_notes",
+      description:
+        "List AI AudioNotes (API term: CaseNotes). An Audio Note is an audio recording a colleague made " +
+        "of a conversation with one Contact (beneficiary; note_type 'case_note') or of an Event session " +
+        "(note_type 'session_note'). Makerble transcribes and summarises it, then writes a draft survey " +
+        "response (draft Story) from the summary for a colleague to check and save. Returns the same notes " +
+        "the user sees on the Audio Notes page, newest first: all of them in Organisations they are an " +
+        "admin (Charity Editor) of, all of them in Projects they are a Project Editor of, and the ones they " +
+        "recorded themselves. Each has status (queued, recording, stitching, transcribing, summarizing, " +
+        "completed, failed), source ('product' when recorded in Makerble, 'manual' when an audio file was " +
+        "attached), platform (desktop_web, mobile_web or api), has_recording (false once the recording has " +
+        "been deleted), and draft_story_id / story_id once a draft or saved Story exists. Use " +
+        "makerble_get_audio_note to read one note's transcript and summary.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only notes in this Organisation (Charity)" },
+          project_id: { type: "number", description: "Only notes in this Project" },
+          beneficiary_id: { type: "number", description: "Only CaseNotes about this Contact (beneficiary)" },
+          event_id: { type: "number", description: "Only SessionNotes about this Event" },
+          note_type: { type: "string", enum: ["case_note", "session_note"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only notes changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/case_notes", p),
+    },
+
+    {
+      name: "makerble_get_audio_note",
+      description:
+        "Get one AI AudioNote (CaseNote) with its transcript (one paragraph per speaker turn, e.g. " +
+        "'Speaker A: ...') and its AI summary, plus everything makerble_list_audio_notes returns. The " +
+        "transcript and summary can contain sensitive personal information about a Contact: quote only " +
+        "what the user needs. Answers 'not-found' for a note the user may not see.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Audio Note (CaseNote) ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/case_notes/${id}`),
+    },
+
+    {
+      name: "makerble_delete_audio_note_recording",
+      description:
+        "Delete the audio recording of an AI AudioNote (CaseNote), e.g. to meet a privacy request, as " +
+        "'Delete Recording' does on the Audio Note page. The note itself is kept, with its transcript, " +
+        "summary and any draft or saved survey response (Story); has_recording becomes false. This cannot " +
+        "be undone, so confirm with the user first. Only the Organisation's admins (Charity Editors) and " +
+        "Makerble System Access admins may do this, and only once the note's status is 'completed' or " +
+        "'failed' (while it is still being transcribed the API answers 422). Returns the note.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Audio Note (CaseNote) ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/case_notes/${id}/recording`),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
