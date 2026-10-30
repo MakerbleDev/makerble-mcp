@@ -1715,18 +1715,24 @@ export function buildTools(api) {
         "(Project Story Category). Use it to find a Contact's (Beneficiary's) existing link and reuse it instead " +
         "of generating a new one with makerble_create_survey_links. Check `expired`: a 'use_once' link that has " +
         "already been answered is expired and no longer works. " +
+        "Also use it to see who has started a survey response but not finished it (the 'Surveys in progress' " +
+        "column on the Response Rates tab): `responses_in_progress` lists the unfinished responses the Contact " +
+        "saved with Finish Later on that link, newest first, as [{send_survey_wave_id, last_updated_at}]; it is " +
+        "empty when there are none. Unfinished responses are kept for 30 days after they were last updated, and " +
+        "an unfinished response is not a completed survey. Pass in_progress: true to list only links with one. " +
         "Filter by beneficiary_id and/or send_survey_wave_id. Requires Project Editor or Organisation Editor access. " +
         "Returns {page, page_size, page_count, total_count, data: [{beneficiary_id, email, survey_token, survey_url, " +
-        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at}]}.",
+        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at, responses_in_progress}]}.",
       inputSchema: {
         type: "object",
         properties: {
           project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
           beneficiary_id: { type: "number", description: "Only this Contact's links" },
           send_survey_wave_id: { type: "number", description: "Only links for this Wave" },
+          in_progress: { type: "boolean", description: "true: only links where the Contact has started a response but not finished it" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200" },
-          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time" },
+          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time (saving an unfinished response doesn't change the link)" },
         },
         required: ["project_story_category_id"],
       },
