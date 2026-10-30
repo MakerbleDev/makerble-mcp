@@ -3497,6 +3497,33 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_create_engagement_tracker",
+      description:
+        "Call makerble_list_changes or makerble_search_library first and reuse a tracker that fits; only create " +
+        "what's missing. Creates an Engagement Tracker (a participation Change; also called an Attendance " +
+        "tracker): a yes/no record of whether a Contact took part, e.g. 'Attended the weekly session'. It is " +
+        "made the same way as on the Create Metric page: hidden from other organisations and editable only by " +
+        "the owning organisation's Organisation Editors. organisation_id must be an organisation (Charity) the " +
+        "user belongs to; leave it out to make the user the owner. If the user's organisation or library " +
+        "already has a tracker with the same or a near-identical name, nothing is created and you get a 409 " +
+        "error listing the duplicates (id, type, name, owner): reuse one, or call again with force: true only " +
+        "if none fits. Returns the new tracker: id, name, icon, stage_id, activity (false), participation " +
+        "(true), owner_type, owner_id. To put it in a Survey, pass its id as activity_tracker_id in a question " +
+        "of makerble_create_survey or makerble_update_survey.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The Engagement Tracker's name, e.g. 'Attended the weekly session'" },
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user belongs to. Leave out to make the user the owner" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["name"],
+      },
+      handler: ({ name, organisation_id, force }) =>
+        post("/engagement_trackers", { name, owner_id: organisation_id, force }),
+    },
+
+    {
       name: "makerble_list_indicators",
       description:
         "List the Indicators (scale/binary/value) the signed-in user can see: their own, and those of every organisation where they are an editor, reporter or observer. Linked to Outcomes. Progress Panel cols 3–5. " +
