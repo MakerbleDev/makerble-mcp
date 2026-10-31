@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 223 Makerble MCP tool definitions.
+ * All 224 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2428,6 +2428,33 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_create_relationship_category",
+      description:
+        "Create a Relationship Category: a kind of relationship Contacts (Beneficiaries) can have with each other, " +
+        "with two sides, e.g. Parent & Child or Client & Emergency Contact (parent_title and child_title). This is " +
+        "'New Relationship Type' on the organisation's Relationship Types page. " +
+        "\nWhen it's needed: a fixed Signup Page (makerble_create_signup_page, type fixed) that signs up several " +
+        "people at once (e.g. a child and their parent) connects them with a Relationship Category, so the " +
+        "organisation must have one first. Flexible Signup Pages also need audiences (Contact Roles) and permitted " +
+        "relationships. makerble_add_relationship_to_contacts uses one too. " +
+        "\nAlways call makerble_list_relationship_categories first and reuse a category that already fits. The same " +
+        "pair of titles can't exist twice in an organisation, whatever their case: the API then answers 422 with " +
+        "errors ['Already exists'] and existing_id, the id of the one already there; use that id instead. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the category: { id, parent_title, child_title, created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          parent_title: { type: "string", description: "The first side, e.g. Parent" },
+          child_title: { type: "string", description: "The second side, e.g. Child" },
+        },
+        required: ["parent_title", "child_title"],
+      },
+      handler: (p) => post("/relationship_categories", p),
     },
 
     {
