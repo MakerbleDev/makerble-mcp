@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 220 Makerble MCP tool definitions.
+ * All 223 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -4941,6 +4941,70 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
+    },
+
+    // ── API keys ──────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_api_keys",
+      description:
+        "List an Organisation's (Charity's) API keys, including revoked ones. An API key lets a custom " +
+        "integration the Organisation builds (a reporting tool, a data warehouse sync, a CRM link) call the " +
+        "Makerble API for that Organisation only, acting as one colleague (user) chosen when the key was " +
+        "created, with exactly that colleague's access. Calls made with an Organisation's API keys count " +
+        "towards its monthly API usage. Returns each key's name, secret_hint (the start of the key, " +
+        "e.g. mk_live_Ab12, to recognise it by), user_id (the colleague it acts as), created_by_id, " +
+        "last_used_at, revoked_at and active (false once revoked). The key itself is never returned here. " +
+        "Only the Organisation's admins (Organisation Admins) can use the API key tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only keys changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/api_keys", p),
+    },
+
+    {
+      name: "makerble_create_api_key",
+      description:
+        "Create an API key for a custom integration an Organisation builds. Use it when someone wants another " +
+        "system to call the Makerble API for their Organisation, instead of sharing a person's own login. " +
+        "The key acts as user_id, who must be a colleague in the Organisation (find one with " +
+        "makerble_list_users), and can see and do only what they can, in this Organisation only. Ask the " +
+        "user which colleague it should act as and what it is for (the name). The response includes " +
+        "`secret` (mk_live_…): it is shown only this once, so give it to the user straight away and tell " +
+        "them to store it safely, e.g. in a password manager, because anyone who has it can use Makerble as " +
+        "that colleague. The integration sends it as the header Authorization: Bearer mk_live_…. If the " +
+        "colleague later leaves the Organisation, the key stops working until they are added back.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "What the key is for, e.g. 'Finance dashboard'" },
+          user_id: { type: "number", description: "The colleague (user) the key acts as" },
+        },
+        required: ["charity_id", "name", "user_id"],
+      },
+      handler: ({ charity_id, ...api_key }) => post("/api_keys", { charity_id, api_key }),
+    },
+
+    {
+      name: "makerble_revoke_api_key",
+      description:
+        "Revoke an Organisation's API key, e.g. when an integration is retired or the key may have leaked. " +
+        "Anything using the key stops working at once, and this cannot be undone, so confirm with the user " +
+        "first. The key stays listed by makerble_list_api_keys with active: false. To replace a key, create " +
+        "a new one with makerble_create_api_key, update the integration, then revoke the old one.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The API key ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/api_keys/${id}`),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
