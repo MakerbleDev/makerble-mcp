@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 224 Makerble MCP tool definitions.
+ * All 226 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -61,10 +61,13 @@ export function makeApiClient(baseUrl, email, token) {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!res.ok) {
-      // A 409 from a create endpoint lists the items to reuse instead (CP-8888).
+      // A 409 from a create endpoint lists the items to reuse instead (CP-8888);
+      // a 422 for a duplicate names the one to reuse in existing_id (CP-9004).
       const msg = data?.duplicates
         ? { error: data.error, duplicates: data.duplicates }
-        : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
+        : data?.existing_id
+          ? { errors: data.errors, existing_id: data.existing_id }
+          : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
       throw new McpError(ErrorCode.InternalError, `Makerble API error: ${JSON.stringify(msg)}`);
     }
     return data;
@@ -3864,6 +3867,53 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/referral_link_details", p),
+    },
+
+    {
+      name: "makerble_list_relationship_categories",
+      description:
+        "List an organisation's Relationship Categories: the kinds of relationship Contacts (Beneficiaries) can have " +
+        "with each other, each with two sides, e.g. School & Pupil or Mother & Son (parent_title and child_title). " +
+        "Use an id with makerble_create_signup_page (fixed) or makerble_create_permitted_relationship. Any member of the " +
+        "organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, parent_title, child_title, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_create_relationship_category",
+      description:
+        "Create a Relationship Category: a kind of relationship Contacts (Beneficiaries) can have with each other, " +
+        "with two sides, e.g. Parent & Child or Client & Emergency Contact (parent_title and child_title). This is " +
+        "'New Relationship Type' on the organisation's Relationship Types page. " +
+        "\nWhen it's needed: a fixed Signup Page (makerble_create_signup_page, type fixed) that signs up several " +
+        "people at once (e.g. a child and their parent) connects them with a Relationship Category, so the " +
+        "organisation must have one first. Flexible Signup Pages also need audiences (Contact Roles) and permitted " +
+        "relationships. " +
+        "\nAlways call makerble_list_relationship_categories first and reuse a category that already fits. The same " +
+        "pair of titles can't exist twice in an organisation, whatever their case: the API then answers 422 with " +
+        "errors ['Already exists'] and existing_id, the id of the one already there; use that id instead. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the category: { id, parent_title, child_title, created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          parent_title: { type: "string", description: "The first side, e.g. Parent" },
+          child_title: { type: "string", description: "The second side, e.g. Child" },
+        },
+        required: ["parent_title", "child_title"],
+      },
+      handler: (p) => post("/relationship_categories", p),
     },
 
     {
