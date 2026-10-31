@@ -61,10 +61,13 @@ export function makeApiClient(baseUrl, email, token) {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!res.ok) {
-      // A 409 from a create endpoint lists the items to reuse instead (CP-8888).
+      // A 409 from a create endpoint lists the items to reuse instead (CP-8888);
+      // a 422 for a duplicate names the one to reuse in existing_id (CP-9004).
       const msg = data?.duplicates
         ? { error: data.error, duplicates: data.duplicates }
-        : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
+        : data?.existing_id
+          ? { errors: data.errors, existing_id: data.existing_id }
+          : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
       throw new McpError(ErrorCode.InternalError, `Makerble API error: ${JSON.stringify(msg)}`);
     }
     return data;
