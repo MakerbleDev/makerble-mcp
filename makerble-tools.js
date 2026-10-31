@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 230 Makerble MCP tool definitions.
+ * All 233 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5165,6 +5165,94 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/api_keys/${id}`),
+    },
+
+    // ── Announcements (CP-9007) ───────────────────────────────────────────────
+    {
+      name: "makerble_list_announcements",
+      description:
+        "List Makerble's Announcements, newest first. An Announcement is the \"What's new in Makerble\" popup " +
+        "that each signed-in user in its audience sees once after logging in, between its start and end dates " +
+        "(e.g. \"Projects are now Workspaces\"). Makerble staff write them in Site Overview › Announcements. Only " +
+        "users with System Access (Makerble staff) can use the announcement tools; anyone else gets 403. Returns " +
+        "each one's title (headline), body (message), visual_type (name_change, vimeo or none), name_changes, " +
+        "audience, starts_on, ends_on, status (draft or scheduled), current_status (draft, scheduled, live or " +
+        "ended), seen_count (people who have closed it) and learn_more_click_count.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/announcements", p),
+    },
+
+    {
+      name: "makerble_get_announcement",
+      description:
+        "Get one Announcement (a \"What's new in Makerble\" popup) by id, with how many people have seen it " +
+        "(seen_count) and clicked its \"Learn more\" link (learn_more_click_count). System Access users only.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Announcement ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/announcements/${id}`),
+    },
+
+    {
+      name: "makerble_save_announcement",
+      description:
+        "Create or update an Announcement: the \"What's new in Makerble\" popup each signed-in user in its " +
+        "audience sees once after logging in. Without id it creates one; with id it changes only the fields " +
+        "you send. System Access users only.\n\n" +
+        "Writing rules: title (the headline, up to 90 characters) is in sentence case and says plainly what " +
+        "changed, e.g. \"Surveys now have a Duplicate button\". body (the message, up to 280 characters) says what " +
+        "the person needs to do, which is often nothing, e.g. \"Nothing has moved. Only the names have changed.\" " +
+        "Use Makerble's on-screen words (Contacts, Surveys, Workspaces), never database names.\n\n" +
+        "Visual: for a rename, set visual_type to name_change and give 1 to 3 name_changes " +
+        "[{old_name, new_name}], played as an animation in that order. For a video, set visual_type to vimeo " +
+        "and vimeo_url (https://vimeo.com/<id>, or https://vimeo.com/<id>/<hash> for an unlisted video). " +
+        "Otherwise use none. learn_more_url is optional and must be a page in the Makerble User Guide " +
+        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
+        "Workflow: save it as a draft first (status draft, the default for a new one), which nobody sees, and " +
+        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree, " +
+        "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
+        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Announcement to update. Leave out to create a new one." },
+          title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
+          body: { type: "string", description: "Message, up to 280 characters" },
+          visual_type: { type: "string", enum: ["name_change", "vimeo", "none"] },
+          name_changes: {
+            type: "array",
+            description: "For name_change: 1 to 3 renames, in the order they play",
+            items: {
+              type: "object",
+              properties: { old_name: { type: "string" }, new_name: { type: "string" } },
+              required: ["old_name", "new_name"],
+            },
+          },
+          vimeo_url: { type: "string", description: "For vimeo: the Vimeo link" },
+          learn_more_url: { type: "string", description: "Optional link to a Makerble User Guide page" },
+          button_label: { type: "string", description: "Up to 24 characters; defaults to \"Got it\"" },
+          audience: {
+            type: "string",
+            enum: ["everyone", "colleagues", "administrators"],
+            description:
+              "everyone: every signed-in user. colleagues: everyone except Contacts with a login. " +
+              "administrators: Organisation Admins.",
+          },
+          starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
+          ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
+          status: { type: "string", enum: ["draft", "scheduled"], description: "draft (nobody sees it) or scheduled" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
