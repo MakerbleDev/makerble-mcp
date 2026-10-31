@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 223 Makerble MCP tool definitions.
+ * All 224 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5324,7 +5324,7 @@ export function buildTools(api) {
         properties: {
           organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
           field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
-          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"], description: "The kind of answer" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer" },
           section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
           private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
           force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
@@ -5628,7 +5628,7 @@ export function buildTools(api) {
                   type: "object",
                   properties: {
                     field_name: { type: "string" },
-                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"] },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"] },
                     section_text: { type: "string", description: "section_title only: the text under the heading" },
                     private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
                   },
@@ -5653,6 +5653,33 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "department", "contact_role", "questions"],
       },
       handler: (p) => post("/contact_forms", p),
+    },
+
+    {
+      name: "makerble_add_contact_form_to_projects",
+      description:
+        "Add a Contact Form (Beneficiary Category) to projects, as the 'Add form to project' popup on a Contact " +
+        "Form's page does, so staff in those projects use it when they add or edit Contacts. Use it to put a form " +
+        "to work: one the organisation already has (from makerble_search_library or makerble_get_library_item) " +
+        "or one you have just made with makerble_create_contact_form. use says how each project uses it: 'full' " +
+        "(the default) to create new Contacts and edit existing ones, 'create' to create new Contacts only (e.g. " +
+        "a Referral form), or 'edit' to edit existing Contacts only (e.g. an intake assessment staff fill in " +
+        "later). Organisation Admins and Project Managers may then edit what it holds. Only the project's " +
+        "Contact Form settings change. Each project must belong to the form's organisation, and the user must " +
+        "be able to change its Project Preferences (an Organisation Admin, or the project's manager). Every " +
+        "project is checked first, so if one is refused (404 or 422, naming it) none is changed. A project that " +
+        "already uses the form that way is left as it is. Returns data: contact_form_id, use, added_project_ids " +
+        "and existing_project_ids (those that already used it).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_form_id: { type: "number", description: "The Contact Form's (Beneficiary Category's) id" },
+          project_ids: { type: "array", items: { type: "number" }, description: "The projects to add it to" },
+          use: { type: "string", enum: ["full", "create", "edit"], description: "How the projects use it (default full)" },
+        },
+        required: ["contact_form_id", "project_ids"],
+      },
+      handler: ({ contact_form_id, ...body }) => post(`/contact_forms/${contact_form_id}/projects`, body),
     },
 
     {
