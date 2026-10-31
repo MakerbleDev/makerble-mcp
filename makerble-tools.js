@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 228 Makerble MCP tool definitions.
+ * All 230 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3967,6 +3967,63 @@ export function buildTools(api) {
         required: ["name"],
       },
       handler: (p) => post("/audiences", p),
+    },
+
+    {
+      name: "makerble_list_permitted_relationships",
+      description:
+        "List an organisation's permitted relationships (Role-holder Relationships), as on its Role-holder " +
+        "Relationships page: for a Relationship Category (e.g. Parent & Child), which audience (Contact Role; " +
+        "Beneficiary Role) may be on its parent side and which on its child side, and which of the category's titles " +
+        "each may hold. A flexible Signup Page can only sign people up as audiences that have one. " +
+        "relationship_category_id narrows it to one category. Only organisation editors (Organisation Admins) can list " +
+        "them; anyone else gets 403. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, relationship_category: { id, parent_title, " +
+        "child_title }, parent_audience: { id, name }, child_audience: { id, name }, parent_audience_titles, " +
+        "child_audience_titles, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "Only those for this Relationship Category" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/permitted_relationships", p),
+    },
+
+    {
+      name: "makerble_create_permitted_relationship",
+      description:
+        "Create a permitted relationship (Role-holder Relationship): say which audience (Contact Role; Beneficiary " +
+        "Role) may be on each side of a Relationship Category, e.g. Parent on the parent side of Parent & Child and " +
+        "Participant on the child side. This is 'New Role-holder Relationship' on the Role-holder Relationships page. " +
+        "\nWhen it's needed: a flexible Signup Page (makerble_create_signup_page, type flexible) can only sign people " +
+        "up as audiences with a permitted relationship between them. Order: (1) a Relationship Category " +
+        "(makerble_list_relationship_categories / makerble_create_relationship_category); (2) the two audiences " +
+        "(makerble_list_audiences / makerble_create_audience); (3) this tool; (4) makerble_create_signup_page. " +
+        "\nAlways call makerble_list_permitted_relationships first (with relationship_category_id) and reuse one " +
+        "that fits. By default the parent audience holds the category's parent_title and the child audience its " +
+        "child_title; parent_audience_titles / child_audience_titles choose others, from the category's two titles " +
+        "only (e.g. ['Brother', 'Sister'] for an audience that may be either side). " +
+        "\nThe category and both audiences must be the organisation's own (404 otherwise). Only organisation " +
+        "editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the permitted relationship, in the same shape as makerble_list_permitted_relationships.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "The Relationship Category" },
+          parent_audience_id: { type: "number", description: "The audience on the category's parent side (Audience A)" },
+          child_audience_id: { type: "number", description: "The audience on the category's child side (Audience B)" },
+          parent_audience_titles: { type: "array", items: { type: "string" }, description: "Optional: which of the category's titles the parent audience may hold" },
+          child_audience_titles: { type: "array", items: { type: "string" }, description: "Optional: which of the category's titles the child audience may hold" },
+        },
+        required: ["relationship_category_id", "parent_audience_id", "child_audience_id"],
+      },
+      handler: (p) => post("/permitted_relationships", p),
     },
 
     {
