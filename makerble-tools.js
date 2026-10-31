@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 233 Makerble MCP tool definitions.
+ * All 236 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5253,6 +5253,99 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    // ── Guidance Panels ───────────────────────────────────────────────────────
+    {
+      name: "makerble_list_guidance_panels",
+      description:
+        "List the Guidance Panels. A Guidance Panel is the Show/Hide Guidance introduction at the top of a " +
+        "Manage page in Makerble (for example Manage Events or Manage Contact Groups): an eyebrow (e.g. " +
+        "\"Makerble® Events\"), a one-line headline, 2 to 5 points that each start with a short bold lead, the " +
+        "sentence shown instead of the page's main button to people who can't use it (staff_text), a " +
+        "\"Learn more\" link to the page's article in the Makerble User Guide, and an optional Vimeo video. " +
+        "Panels are the same for every Organisation. Returns each panel's key (use it with " +
+        "makerble_get_guidance_panel and makerble_update_guidance_panel), page_name, module (the sidebar " +
+        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, visual " +
+        "(what shows beside the text now: vimeo, animation, image or none), updated_at and updated_by. Only " +
+        "Makerble staff with System Access can use the Guidance Panel tools; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200; there are about 45 panels" },
+          last_synced_datetime: { type: "string", description: "Only panels changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/guidance_panels", p),
+    },
+
+    {
+      name: "makerble_get_guidance_panel",
+      description:
+        "Get one Guidance Panel (the Show/Hide Guidance introduction at the top of a Manage page) by its key, " +
+        "e.g. events or contact_groups, with its last 10 versions, newest first: who changed it, when, which " +
+        "parts changed (changed) and each changed field's value before and after (changes). Read a panel " +
+        "with this before changing it with makerble_update_guidance_panel, and use the versions to see or " +
+        "explain earlier wording.",
+      inputSchema: {
+        type: "object",
+        properties: { key: { type: "string", description: "The panel's key, from makerble_list_guidance_panels" } },
+        required: ["key"],
+      },
+      handler: ({ key }) => get(`/guidance_panels/${encodeURIComponent(key)}`),
+    },
+
+    {
+      name: "makerble_update_guidance_panel",
+      description:
+        "Change a Guidance Panel's wording or video: the Show/Hide Guidance introduction at the top of a " +
+        "Manage page. The page shows the change from its next load, and the change is kept as a version " +
+        "attributed to the user. Send only the fields to change; points replaces the whole list in the order " +
+        "given.\n\n" +
+        "Before rewriting a panel: (1) read it with makerble_get_guidance_panel; (2) read its user_guide_url " +
+        "article, so the wording matches what the feature actually does; (3) keep the panel's purpose.\n\n" +
+        "Writing rules: use Makerble's on-screen terms (Contacts, not beneficiaries; organisation, not " +
+        "charity; Surveys; Signup Pages; Bio Forms), plain UK English and the second person. The headline " +
+        "states the benefit to the reader in one line of at most 80 characters, with no full stop. Give 2 to 5 " +
+        "points, each with a lead of 2 to 5 words (shown in bold, up to 40 characters) and text that finishes " +
+        "the sentence (up to 200 characters). staff_text (up to 300 characters) tells someone who can't use the " +
+        "page's main action who can, e.g. \"Ask an Administrator in your organisation to create Events.\" " +
+        "user_guide_url must be a page in the Makerble User Guide " +
+        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
+        "vimeo_url must be empty (to go back to the page's own image or animation) or one of " +
+        "https://vimeo.com/<id>, https://vimeo.com/<id>/<hash> for an unlisted video, or " +
+        "https://player.vimeo.com/video/<id>?h=<hash>. A broken rule returns 422 with every message in errors: " +
+        "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
+        "ahead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "The panel's key, e.g. events" },
+          eyebrow: { type: "string", description: "e.g. \"Makerble® Events\"" },
+          headline: { type: "string", description: "One line, at most 80 characters" },
+          points: {
+            type: "array",
+            minItems: 2,
+            maxItems: 5,
+            description: "2 to 5 points, in order",
+            items: {
+              type: "object",
+              properties: {
+                lead: { type: "string", description: "Shown in bold, 2 to 5 words, up to 40 characters" },
+                text: { type: "string", description: "Finishes the sentence, up to 200 characters" },
+              },
+              required: ["lead", "text"],
+            },
+          },
+          staff_text: { type: "string", description: "Shown instead of the main action to people who can't use it" },
+          user_guide_url: { type: "string", description: "A page in the Makerble User Guide (MCPD space)" },
+          vimeo_url: { type: "string", description: "A Vimeo link, or an empty string to remove the video" },
+        },
+        required: ["key"],
+      },
+      handler: ({ key, ...guidance_panel }) =>
+        patch(`/guidance_panels/${encodeURIComponent(key)}`, { guidance_panel }),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
