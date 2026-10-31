@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 224 Makerble MCP tool definitions.
+ * All 226 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2455,6 +2455,59 @@ export function buildTools(api) {
         required: ["parent_title", "child_title"],
       },
       handler: (p) => post("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_list_audiences",
+      description:
+        "List an organisation's audiences (Contact Roles; Beneficiary Roles), e.g. Participant, Parent or Volunteer, " +
+        "as on its Audiences page, by name. Each lists the Contact Types (Beneficiary Types: Person, Organisation, ...) " +
+        "it is for. A flexible Signup Page (makerble_create_signup_page, type flexible) signs people up as audiences, " +
+        "and a permitted relationship (makerble_list_permitted_relationships) says which audiences may be on each side " +
+        "of a Relationship Category. Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, color, contact_types: [{ id, name }], " +
+        "created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/audiences", p),
+    },
+
+    {
+      name: "makerble_create_audience",
+      description:
+        "Create an audience (Contact Role; Beneficiary Role), e.g. Participant or Parent: the role a Contact " +
+        "(Beneficiary) has in the organisation. This is 'New Audience' on the Audiences page. " +
+        "\nWhen it's needed: a flexible Signup Page signs each person up as an audience, and needs a permitted " +
+        "relationship between them. Order for a flexible Signup Page: (1) a Relationship Category " +
+        "(makerble_list_relationship_categories / makerble_create_relationship_category); (2) the audiences on each " +
+        "side (this tool); (3) a permitted relationship between them (makerble_create_permitted_relationship); " +
+        "(4) makerble_create_signup_page. " +
+        "\nAlways call makerble_list_audiences first and reuse one that fits: names aren't unique, so creating " +
+        "'Parent' twice makes two audiences. color is one of the approved colours (the first, #f96d67, if left out): " +
+        "#f96d67 #f31208 #bc1204 #f92915 #f26f21 #ff6800 #e59200 #ffa300 #62a837 #71c240 #2b800e #36ac9a #2e9283 " +
+        "#226c61 #225f85 #2e85bc #3596d6 #063262 #ac3898 #6c235f #620a4d #8c1b6d #d07db7 #a81e6a #e82a92 #8e0132. " +
+        "contact_type_id links it to a Contact Type (Beneficiary Type, e.g. Person or Organisation; " +
+        "makerble_list_contact_types); Person if left out. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the audience: { id, name, color, contact_types: [{ id, name }], created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          name: { type: "string", description: "e.g. Participant" },
+          color: { type: "string", description: "One of the approved colours, e.g. #ac3898. Optional." },
+          contact_type_id: { type: "number", description: "The Contact Type (Beneficiary Type) it is for. Optional; Person if left out." },
+        },
+        required: ["name"],
+      },
+      handler: (p) => post("/audiences", p),
     },
 
     {
