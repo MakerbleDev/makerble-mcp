@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 227 Makerble MCP tool definitions.
+ * All 236 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -61,10 +61,13 @@ export function makeApiClient(baseUrl, email, token) {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!res.ok) {
-      // A 409 from a create endpoint lists the items to reuse instead (CP-8888).
+      // A 409 from a create endpoint lists the items to reuse instead (CP-8888);
+      // a 422 for a duplicate names the one to reuse in existing_id (CP-9004).
       const msg = data?.duplicates
         ? { error: data.error, duplicates: data.duplicates }
-        : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
+        : data?.existing_id
+          ? { errors: data.errors, existing_id: data.existing_id }
+          : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
       throw new McpError(ErrorCode.InternalError, `Makerble API error: ${JSON.stringify(msg)}`);
     }
     return data;
@@ -3867,6 +3870,163 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_list_relationship_categories",
+      description:
+        "List an organisation's Relationship Categories: the kinds of relationship Contacts (Beneficiaries) can have " +
+        "with each other, each with two sides, e.g. School & Pupil or Mother & Son (parent_title and child_title). " +
+        "Use an id with makerble_create_signup_page (fixed) or makerble_create_permitted_relationship. Any member of the " +
+        "organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, parent_title, child_title, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_create_relationship_category",
+      description:
+        "Create a Relationship Category: a kind of relationship Contacts (Beneficiaries) can have with each other, " +
+        "with two sides, e.g. Parent & Child or Client & Emergency Contact (parent_title and child_title). This is " +
+        "'New Relationship Type' on the organisation's Relationship Types page. " +
+        "\nWhen it's needed: a fixed Signup Page (makerble_create_signup_page, type fixed) that signs up several " +
+        "people at once (e.g. a child and their parent) connects them with a Relationship Category, so the " +
+        "organisation must have one first. Flexible Signup Pages also need audiences (Contact Roles) and permitted " +
+        "relationships. " +
+        "\nAlways call makerble_list_relationship_categories first and reuse a category that already fits. The same " +
+        "pair of titles can't exist twice in an organisation, whatever their case: the API then answers 422 with " +
+        "errors ['Already exists'] and existing_id, the id of the one already there; use that id instead. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the category: { id, parent_title, child_title, created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          parent_title: { type: "string", description: "The first side, e.g. Parent" },
+          child_title: { type: "string", description: "The second side, e.g. Child" },
+        },
+        required: ["parent_title", "child_title"],
+      },
+      handler: (p) => post("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_list_audiences",
+      description:
+        "List an organisation's audiences (Contact Roles; Beneficiary Roles), e.g. Participant, Parent or Volunteer, " +
+        "as on its Audiences page, by name. Each lists the Contact Types (Beneficiary Types: Person, Organisation, ...) " +
+        "it is for. A flexible Signup Page (makerble_create_signup_page, type flexible) signs people up as audiences, " +
+        "and a permitted relationship (makerble_list_permitted_relationships) says which audiences may be on each side " +
+        "of a Relationship Category. Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, color, contact_types: [{ id, name }], " +
+        "created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/audiences", p),
+    },
+
+    {
+      name: "makerble_create_audience",
+      description:
+        "Create an audience (Contact Role; Beneficiary Role), e.g. Participant or Parent: the role a Contact " +
+        "(Beneficiary) has in the organisation. This is 'New Audience' on the Audiences page. " +
+        "\nWhen it's needed: a flexible Signup Page signs each person up as an audience, and needs a permitted " +
+        "relationship between them. Order for a flexible Signup Page: (1) a Relationship Category " +
+        "(makerble_list_relationship_categories / makerble_create_relationship_category); (2) the audiences on each " +
+        "side (this tool); (3) a permitted relationship between them (makerble_create_permitted_relationship); " +
+        "(4) makerble_create_signup_page. " +
+        "\nAlways call makerble_list_audiences first and reuse one that fits: names aren't unique, so creating " +
+        "'Parent' twice makes two audiences. color is one of the approved colours (the first, #f96d67, if left out): " +
+        "#f96d67 #f31208 #bc1204 #f92915 #f26f21 #ff6800 #e59200 #ffa300 #62a837 #71c240 #2b800e #36ac9a #2e9283 " +
+        "#226c61 #225f85 #2e85bc #3596d6 #063262 #ac3898 #6c235f #620a4d #8c1b6d #d07db7 #a81e6a #e82a92 #8e0132. " +
+        "contact_type_id links it to a Contact Type (Beneficiary Type, e.g. Person or Organisation; " +
+        "makerble_list_contact_types); Person if left out. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the audience: { id, name, color, contact_types: [{ id, name }], created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          name: { type: "string", description: "e.g. Participant" },
+          color: { type: "string", description: "One of the approved colours, e.g. #ac3898. Optional." },
+          contact_type_id: { type: "number", description: "The Contact Type (Beneficiary Type) it is for. Optional; Person if left out." },
+        },
+        required: ["name"],
+      },
+      handler: (p) => post("/audiences", p),
+    },
+
+    {
+      name: "makerble_list_permitted_relationships",
+      description:
+        "List an organisation's permitted relationships (Role-holder Relationships), as on its Role-holder " +
+        "Relationships page: for a Relationship Category (e.g. Parent & Child), which audience (Contact Role; " +
+        "Beneficiary Role) may be on its parent side and which on its child side, and which of the category's titles " +
+        "each may hold. A flexible Signup Page can only sign people up as audiences that have one. " +
+        "relationship_category_id narrows it to one category. Only organisation editors (Organisation Admins) can list " +
+        "them; anyone else gets 403. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, relationship_category: { id, parent_title, " +
+        "child_title }, parent_audience: { id, name }, child_audience: { id, name }, parent_audience_titles, " +
+        "child_audience_titles, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "Only those for this Relationship Category" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/permitted_relationships", p),
+    },
+
+    {
+      name: "makerble_create_permitted_relationship",
+      description:
+        "Create a permitted relationship (Role-holder Relationship): say which audience (Contact Role; Beneficiary " +
+        "Role) may be on each side of a Relationship Category, e.g. Parent on the parent side of Parent & Child and " +
+        "Participant on the child side. This is 'New Role-holder Relationship' on the Role-holder Relationships page. " +
+        "\nWhen it's needed: a flexible Signup Page (makerble_create_signup_page, type flexible) can only sign people " +
+        "up as audiences with a permitted relationship between them. Order: (1) a Relationship Category " +
+        "(makerble_list_relationship_categories / makerble_create_relationship_category); (2) the two audiences " +
+        "(makerble_list_audiences / makerble_create_audience); (3) this tool; (4) makerble_create_signup_page. " +
+        "\nAlways call makerble_list_permitted_relationships first (with relationship_category_id) and reuse one " +
+        "that fits. By default the parent audience holds the category's parent_title and the child audience its " +
+        "child_title; parent_audience_titles / child_audience_titles choose others, from the category's two titles " +
+        "only (e.g. ['Brother', 'Sister'] for an audience that may be either side). " +
+        "\nThe category and both audiences must be the organisation's own (404 otherwise). Only organisation " +
+        "editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the permitted relationship, in the same shape as makerble_list_permitted_relationships.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "The Relationship Category" },
+          parent_audience_id: { type: "number", description: "The audience on the category's parent side (Audience A)" },
+          child_audience_id: { type: "number", description: "The audience on the category's child side (Audience B)" },
+          parent_audience_titles: { type: "array", items: { type: "string" }, description: "Optional: which of the category's titles the parent audience may hold" },
+          child_audience_titles: { type: "array", items: { type: "string" }, description: "Optional: which of the category's titles the child audience may hold" },
+        },
+        required: ["relationship_category_id", "parent_audience_id", "child_audience_id"],
+      },
+      handler: (p) => post("/permitted_relationships", p),
+    },
+
+    {
       name: "makerble_create_signup_page",
       description:
         "Make a Signup Page (Referral Link Detail in the API): a public form people fill in to sign themselves, and " +
@@ -5005,6 +5165,94 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/api_keys/${id}`),
+    },
+
+    // ── Announcements (CP-9007) ───────────────────────────────────────────────
+    {
+      name: "makerble_list_announcements",
+      description:
+        "List Makerble's Announcements, newest first. An Announcement is the \"What's new in Makerble\" popup " +
+        "that each signed-in user in its audience sees once after logging in, between its start and end dates " +
+        "(e.g. \"Projects are now Workspaces\"). Makerble staff write them in Site Overview › Announcements. Only " +
+        "users with System Access (Makerble staff) can use the announcement tools; anyone else gets 403. Returns " +
+        "each one's title (headline), body (message), visual_type (name_change, vimeo or none), name_changes, " +
+        "audience, starts_on, ends_on, status (draft or scheduled), current_status (draft, scheduled, live or " +
+        "ended), seen_count (people who have closed it) and learn_more_click_count.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/announcements", p),
+    },
+
+    {
+      name: "makerble_get_announcement",
+      description:
+        "Get one Announcement (a \"What's new in Makerble\" popup) by id, with how many people have seen it " +
+        "(seen_count) and clicked its \"Learn more\" link (learn_more_click_count). System Access users only.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Announcement ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/announcements/${id}`),
+    },
+
+    {
+      name: "makerble_save_announcement",
+      description:
+        "Create or update an Announcement: the \"What's new in Makerble\" popup each signed-in user in its " +
+        "audience sees once after logging in. Without id it creates one; with id it changes only the fields " +
+        "you send. System Access users only.\n\n" +
+        "Writing rules: title (the headline, up to 90 characters) is in sentence case and says plainly what " +
+        "changed, e.g. \"Surveys now have a Duplicate button\". body (the message, up to 280 characters) says what " +
+        "the person needs to do, which is often nothing, e.g. \"Nothing has moved. Only the names have changed.\" " +
+        "Use Makerble's on-screen words (Contacts, Surveys, Workspaces), never database names.\n\n" +
+        "Visual: for a rename, set visual_type to name_change and give 1 to 3 name_changes " +
+        "[{old_name, new_name}], played as an animation in that order. For a video, set visual_type to vimeo " +
+        "and vimeo_url (https://vimeo.com/<id>, or https://vimeo.com/<id>/<hash> for an unlisted video). " +
+        "Otherwise use none. learn_more_url is optional and must be a page in the Makerble User Guide " +
+        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
+        "Workflow: save it as a draft first (status draft, the default for a new one), which nobody sees, and " +
+        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree, " +
+        "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
+        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Announcement to update. Leave out to create a new one." },
+          title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
+          body: { type: "string", description: "Message, up to 280 characters" },
+          visual_type: { type: "string", enum: ["name_change", "vimeo", "none"] },
+          name_changes: {
+            type: "array",
+            description: "For name_change: 1 to 3 renames, in the order they play",
+            items: {
+              type: "object",
+              properties: { old_name: { type: "string" }, new_name: { type: "string" } },
+              required: ["old_name", "new_name"],
+            },
+          },
+          vimeo_url: { type: "string", description: "For vimeo: the Vimeo link" },
+          learn_more_url: { type: "string", description: "Optional link to a Makerble User Guide page" },
+          button_label: { type: "string", description: "Up to 24 characters; defaults to \"Got it\"" },
+          audience: {
+            type: "string",
+            enum: ["everyone", "colleagues", "administrators"],
+            description:
+              "everyone: every signed-in user. colleagues: everyone except Contacts with a login. " +
+              "administrators: Organisation Admins.",
+          },
+          starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
+          ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
+          status: { type: "string", enum: ["draft", "scheduled"], description: "draft (nobody sees it) or scheduled" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
     },
 
     // ── Guidance Panels ───────────────────────────────────────────────────────
