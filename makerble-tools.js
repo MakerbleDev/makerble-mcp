@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 236 Makerble MCP tool definitions.
+ * All 237 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -243,13 +243,41 @@ export function buildTools(api) {
     {
       name: "makerble_get_organisation",
       description:
-        "Get a single Organisation (Charity) by ID. Organisations own Projects.",
+        "Get a single Organisation (Charity) by ID. Organisations own Projects. Returns {id, name, " +
+        "default_project_story_privacy (the Story Privacy Level each new project starts with), created_at, updated_at}.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
         required: ["id"],
       },
       handler: ({ id }) => get(`/charities/${id}`),
+    },
+
+    {
+      name: "makerble_update_organisation",
+      description:
+        "Change an Organisation's (Charity's) settings from Charity Preferences. For now that is the " +
+        "\"Default story level privacy setting on each project\": the Story Privacy Level each NEW project " +
+        "in the Organisation starts with (who can see the Survey Responses / Stories posted in it). " +
+        "Existing projects keep their own level; to change one project's level use makerble_update_project_settings. " +
+        "Levels: only_project_colleagues (Project colleagues only), only_charity_colleagues (Organisation colleagues only), " +
+        "charity_plus_network (Network & organisation colleagues only), everyone (Everyone). " +
+        "Use makerble_get_organisation to see the current level (default_project_story_privacy). " +
+        "Only an Organisation Admin (Charity Editor) can do this; anyone else gets forbidden. " +
+        "Returns the Organisation {id, name, default_project_story_privacy, created_at, updated_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Organisation (Charity) ID." },
+          default_project_story_privacy: {
+            type: "string",
+            enum: ["only_project_colleagues", "only_charity_colleagues", "charity_plus_network", "everyone"],
+            description: "The Story Privacy Level each new project starts with.",
+          },
+        },
+        required: ["id", "default_project_story_privacy"],
+      },
+      handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
     },
 
     // ── Projects ──────────────────────────────────────────────────────────────
