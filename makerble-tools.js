@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 239 Makerble MCP tool definitions.
+ * All 246 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5408,6 +5408,159 @@ export function buildTools(api) {
         await del("/eventbrite_connection", { charity_id });
         return { disconnected: true, charity_id };
       },
+    },
+
+    {
+      name: "makerble_sync_eventbrite_now",
+      description:
+        "Bring the latest from an Organisation's Eventbrite account into Makerble now, instead of waiting for the " +
+        "catch-up every 3 hours (changes normally arrive within seconds by webhook). It runs in the background; " +
+        "makerble_get_eventbrite_connection shows syncing: true until it finishes and then last_synced_at. Check " +
+        "makerble_list_eventbrite_sync_log afterwards for what came in.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => post("/eventbrite_connection/sync", { charity_id }),
+    },
+
+    {
+      name: "makerble_list_eventbrite_sync_log",
+      description:
+        "The Eventbrite sync log, newest first, kept 90 days: what Makerble brought in from Eventbrite, updated, " +
+        "skipped or removed, and why. Each entry has outcome (imported, updated, skipped, removed, needs_review, " +
+        "error), object_type (event, attendee = ticket holder, check_in, connection), message, the Eventbrite " +
+        "eventbrite_id and eventbrite_url, and record: the Makerble record it concerns ({type: Contact, Event or " +
+        "Story, id}). needs_review means a ticket holder's email matched existing Contacts unclearly; the Contacts " +
+        "are on the Suggested Merges list (makerble_list_suggested_merges, source eventbrite).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only entries after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/eventbrite_connection/sync_log", p),
+    },
+
+    {
+      name: "makerble_update_eventbrite_settings",
+      description:
+        "Choose what an Organisation brings in from Eventbrite. project_id is the Workspace (Project) new Events " +
+        "are created in, and event_category_id one of its Event formats (Event Categories; list them with the " +
+        "Event format tools). import_mode is all_upcoming (every upcoming Eventbrite event, new ones included) " +
+        "or selected (only events picked with makerble_choose_eventbrite_events). contact_project_id is the " +
+        "Workspace new Contacts (beneficiaries) from ticket holders go into (leave out to use each Event's " +
+        "Workspace); beneficiary_category_id their Contact type (Contact form). change_id is the engagement " +
+        "tracker and story_category_id the Survey (Story Category) used to record Eventbrite check-ins as " +
+        "attendance Stories. Only send the settings to change. Saving starts a sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number" },
+          event_category_id: { type: "number" },
+          import_mode: { type: "string", enum: ["all_upcoming", "selected"] },
+          contact_project_id: { type: "number" },
+          beneficiary_category_id: { type: "number" },
+          change_id: { type: "number", description: "An engagement tracker (participation Change) ID" },
+          story_category_id: { type: "number", description: "A Survey (Story Category) ID" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, ...eventbrite_connection }) =>
+        patch("/eventbrite_connection/settings", { charity_id, eventbrite_connection }),
+    },
+
+    {
+      name: "makerble_list_eventbrite_events",
+      description:
+        "List the upcoming events in an Organisation's Eventbrite organisation, to choose which to bring into " +
+        "Makerble. Each has the Eventbrite id, name, start (local time), status (live, started, ended, canceled, " +
+        "draft), url, selected (whether it is or would be brought in) and makerble_event_id (the Makerble Event " +
+        "it came in as, or null).",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/eventbrite_connection/events", { charity_id }),
+    },
+
+    {
+      name: "makerble_choose_eventbrite_events",
+      description:
+        "Pick the Eventbrite events to bring into Makerble, by their Eventbrite ids from " +
+        "makerble_list_eventbrite_events. This switches import_mode to selected, so only these come in (new " +
+        "Eventbrite events no longer come in automatically). Events already brought in stay.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          eventbrite_event_ids: { type: "array", items: { type: "string" } },
+        },
+        required: ["charity_id", "eventbrite_event_ids"],
+      },
+      handler: (p) => put("/eventbrite_connection/events", p),
+    },
+
+    {
+      name: "makerble_get_eventbrite_field_mapping",
+      description:
+        "Read which Makerble field each Eventbrite field is copied into. object_type event maps Eventbrite event " +
+        "fields onto the Makerble Event (and the Event format's custom fields); object_type attendee maps ticket " +
+        "holder fields and order form question answers (keys answer:<question>) onto the Contact (and the " +
+        "Contact type's custom fields and Dropdowns). Returns mappings, eventbrite_fields (each with " +
+        "compatible_makerble_fields) and makerble_fields. Set refresh: true (attendee only) to re-read the " +
+        "order form questions from Eventbrite first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          object_type: { type: "string", enum: ["event", "attendee"] },
+          refresh: { type: "boolean" },
+        },
+        required: ["charity_id", "object_type"],
+      },
+      handler: ({ charity_id, object_type, refresh }) =>
+        refresh && object_type === "attendee"
+          ? post("/eventbrite_connection/refresh_questions", { charity_id })
+          : get(`/eventbrite_connection/mappings/${object_type}`, { charity_id }),
+    },
+
+    {
+      name: "makerble_set_eventbrite_field_mapping",
+      description:
+        "Replace an Eventbrite field mapping (read it first with makerble_get_eventbrite_field_mapping). Each " +
+        "pair copies one eventbrite_field into one makerble_field; only compatible types pair up, a field can be " +
+        "in only one pair, and paused: true stops copying it for now. Eventbrite fields left out are not copied. " +
+        "For events Eventbrite's value replaces the Makerble one; for Contacts only blank fields are filled in.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          object_type: { type: "string", enum: ["event", "attendee"] },
+          mappings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                eventbrite_field: { type: "string" },
+                makerble_field: { type: "string" },
+                paused: { type: "boolean" },
+              },
+              required: ["eventbrite_field", "makerble_field"],
+            },
+          },
+        },
+        required: ["charity_id", "object_type", "mappings"],
+      },
+      handler: ({ charity_id, object_type, mappings }) =>
+        put(`/eventbrite_connection/mappings/${object_type}`, { charity_id, mappings }),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
