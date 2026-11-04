@@ -5597,11 +5597,14 @@ export function buildTools(api) {
         "Choose what an Organisation brings in from Eventbrite. project_id is the Workspace (Project) new Events " +
         "are created in, and event_category_id one of its Event formats (Event Categories; list them with the " +
         "Event format tools). import_mode is all_upcoming (every upcoming Eventbrite event, new ones included) " +
-        "or selected (only events picked with makerble_choose_eventbrite_events). contact_project_id is the " +
+        "or selected (only events picked with makerble_choose_eventbrite_events, drafts included). contact_project_id is the " +
         "Workspace new Contacts (beneficiaries) from ticket holders go into (leave out to use each Event's " +
-        "Workspace); beneficiary_category_id their Contact type (Contact form). change_id is the engagement " +
-        "tracker and story_category_id the Survey (Story Category) used to record Eventbrite check-ins as " +
-        "attendance Stories. Only send the settings to change. Saving starts a sync.",
+        "Workspace); beneficiary_category_id their Contact Bio Form (Beneficiary Category), which must be one the " +
+        "Workspace for new Contacts uses for creating Contacts (set in the Workspace's Preferences). change_id is " +
+        "the engagement tracker and story_category_id the Event attendance survey (Story Category), which must be a " +
+        "survey running on the Workspace for new Events; together they record Eventbrite check-ins as attendance " +
+        "Stories. Only send the settings to change. Saving starts a sync. Nothing comes in from Eventbrite until " +
+        "project_id and event_category_id are set.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5610,9 +5613,9 @@ export function buildTools(api) {
           event_category_id: { type: "number" },
           import_mode: { type: "string", enum: ["all_upcoming", "selected"] },
           contact_project_id: { type: "number" },
-          beneficiary_category_id: { type: "number" },
+          beneficiary_category_id: { type: "number", description: "A Contact Bio Form (Beneficiary Category) ID" },
           change_id: { type: "number", description: "An engagement tracker (participation Change) ID" },
-          story_category_id: { type: "number", description: "A Survey (Story Category) ID" },
+          story_category_id: { type: "number", description: "The Event attendance survey (Story Category) ID" },
         },
         required: ["charity_id"],
       },
