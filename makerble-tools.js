@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 239 Makerble MCP tool definitions.
+ * All 241 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -243,13 +243,41 @@ export function buildTools(api) {
     {
       name: "makerble_get_organisation",
       description:
-        "Get a single Organisation (Charity) by ID. Organisations own Projects.",
+        "Get a single Organisation (Charity) by ID. Organisations own Projects. Returns {id, name, " +
+        "default_project_story_privacy (the Story Privacy Level each new project starts with), created_at, updated_at}.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
         required: ["id"],
       },
       handler: ({ id }) => get(`/charities/${id}`),
+    },
+
+    {
+      name: "makerble_update_organisation",
+      description:
+        "Change an Organisation's (Charity's) settings from Charity Preferences. For now that is the " +
+        "\"Default story level privacy setting on each project\": the Story Privacy Level each NEW project " +
+        "in the Organisation starts with (who can see the Survey Responses / Stories posted in it). " +
+        "Existing projects keep their own level; to change one project's level use makerble_update_project_settings. " +
+        "Levels: only_project_colleagues (Project colleagues only), only_charity_colleagues (Organisation colleagues only), " +
+        "charity_plus_network (Network & organisation colleagues only), everyone (Everyone). " +
+        "Use makerble_get_organisation to see the current level (default_project_story_privacy). " +
+        "Only an Organisation Admin (Charity Editor) can do this; anyone else gets forbidden. " +
+        "Returns the Organisation {id, name, default_project_story_privacy, created_at, updated_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Organisation (Charity) ID." },
+          default_project_story_privacy: {
+            type: "string",
+            enum: ["only_project_colleagues", "only_charity_colleagues", "charity_plus_network", "everyone"],
+            description: "The Story Privacy Level each new project starts with.",
+          },
+        },
+        required: ["id", "default_project_story_privacy"],
+      },
+      handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
     },
 
     // ── Projects ──────────────────────────────────────────────────────────────
@@ -1907,7 +1935,8 @@ export function buildTools(api) {
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
         "which say what counts as done, due_within_days: the deadline, in days after the Checklist is added " +
         "to a Contact, null for none, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
-        "owner_relationship_side and a readable owner_description, and stage_id), its stages (Participant Journey stages: " +
+        "owner_relationship_side and a readable owner_description, stage_id and video_url, the step's video or null), " +
+        "its stages (Participant Journey stages: " +
         "id, name, icon, position and colour, in order), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
@@ -1948,6 +1977,35 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...params }) => get(`/checklists/${id}/progress`, params),
+    },
+
+    {
+      name: "makerble_list_checklist_progress_contacts",
+      description:
+        "List EVERY Contact behind one of a Checklist's progress counts, a page at a time. " +
+        "makerble_get_checklist_progress gives the counts but only the first list_limit (30) Contacts of each list; " +
+        "use this for the rest, e.g. to name everyone waiting on a step. Choose the list with list: " +
+        "'completed', 'furthest' or 'waiting' (the Table's lists for the action action_id: who has done it, for whom it " +
+        "is the furthest action done, who is waiting on it), 'board' (the Board column for action_id: those waiting on " +
+        "it, longest waiting first) or 'complete' (everyone with every action done; no action_id). Get action ids from " +
+        "makerble_get_checklist_progress's actions. Returns {page, page_size, page_count, total_count, data}, each " +
+        "Contact {beneficiary_id, name, actions_done}; in the waiting and board lists each also has days_waiting, " +
+        "overdue, skipped_a_step and responsible. Takes the same project_id and responsible filters as " +
+        "makerble_get_checklist_progress. Only Contacts the user can see are counted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          list: { type: "string", enum: ["completed", "furthest", "waiting", "board", "complete"], description: "Which list" },
+          action_id: { type: "number", description: "The action whose list it is. Required for every list but 'complete'" },
+          project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          responsible: { type: "string", description: "Optional: 'me', 'user:<user id>' or 'team:<team id>'" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Contacts per page (default 10, max 200)" },
+        },
+        required: ["id", "list"],
+      },
+      handler: ({ id, ...params }) => get(`/checklists/${id}/progress/contacts`, params),
     },
 
     {
@@ -2084,6 +2142,12 @@ export function buildTools(api) {
                   description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
                     "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
                 },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, e.g. for self-paced training. " +
+                    "On the Checklist's page, Watch the journey shows each step as a card with its video: YouTube, Vimeo, Loom and " +
+                    "Google Drive links play in the card; other links (SharePoint, Slack) open in a new tab",
+                },
                 if_earlier_steps_not_done: {
                   type: "string",
                   enum: ["remind", "ask_reason"],
@@ -2165,6 +2229,11 @@ export function buildTools(api) {
                 allow_manual_completion: {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, shown in Watch the journey. " +
+                    "An empty string removes it. Left as it is when not sent",
                 },
                 if_earlier_steps_not_done: {
                   type: "string",
