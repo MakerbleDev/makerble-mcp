@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 236 Makerble MCP tool definitions.
+ * All 239 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5346,6 +5346,68 @@ export function buildTools(api) {
       },
       handler: ({ key, ...guidance_panel }) =>
         patch(`/guidance_panels/${encodeURIComponent(key)}`, { guidance_panel }),
+    },
+
+    // ── Eventbrite ────────────────────────────────────────────────────────────
+    {
+      name: "makerble_get_eventbrite_connection",
+      description:
+        "See whether an Organisation (Charity) is connected to Eventbrite, the ticketing site, and whether " +
+        "the connection still works. Makerble's Eventbrite integration brings Eventbrite events, ticket " +
+        "holders and check-ins into Makerble as Events, Contacts (beneficiaries) and attendance Stories. " +
+        "Returns status: not_connected, choosing_organisation (signed in, but the Eventbrite sign-in belongs " +
+        "to several Eventbrite organisations and one must be chosen; see available_organizations and " +
+        "makerble_choose_eventbrite_organization), active, or reconnect_required (Eventbrite no longer " +
+        "accepts the sign-in). Also returns the chosen eventbrite_organization, who connected it, " +
+        "last_checked_at, last_error, and page_url. Set test: true to check the connection with Eventbrite " +
+        "now (test_succeeded says whether it worked). Signing in to Eventbrite needs a browser, so to connect " +
+        "or reconnect, give the user page_url: the Connect > Eventbrite page in Makerble, where they press " +
+        "'Connect Eventbrite'. Only the Organisation's admins can use the Eventbrite tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          test: { type: "boolean", description: "Check the connection with Eventbrite now" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, test }) =>
+        test ? post("/eventbrite_connection/test", { charity_id }) : get("/eventbrite_connection", { charity_id }),
+    },
+
+    {
+      name: "makerble_choose_eventbrite_organization",
+      description:
+        "Choose which Eventbrite organisation an Organisation's Eventbrite connection uses, when " +
+        "makerble_get_eventbrite_connection reports status choosing_organisation. The ID must be one of its " +
+        "available_organizations. Returns the connection, now active.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          eventbrite_organization_id: { type: "string", description: "An id from available_organizations" },
+        },
+        required: ["charity_id", "eventbrite_organization_id"],
+      },
+      handler: ({ charity_id, eventbrite_organization_id }) =>
+        patch("/eventbrite_connection", { charity_id, eventbrite_connection: { eventbrite_organization_id } }),
+    },
+
+    {
+      name: "makerble_disconnect_eventbrite",
+      description:
+        "Disconnect an Organisation from Eventbrite. Makerble stops bringing in changes from Eventbrite; " +
+        "Events, Contacts and Stories already brought in stay, with their links to Eventbrite. Reconnecting " +
+        "needs the user to sign in to Eventbrite again on the page_url page, so confirm with the user first.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: async ({ charity_id }) => {
+        await del("/eventbrite_connection", { charity_id });
+        return { disconnected: true, charity_id };
+      },
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
