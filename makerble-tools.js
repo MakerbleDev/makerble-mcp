@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 238 Makerble MCP tool definitions.
+ * All 253 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -243,13 +243,41 @@ export function buildTools(api) {
     {
       name: "makerble_get_organisation",
       description:
-        "Get a single Organisation (Charity) by ID. Organisations own Projects.",
+        "Get a single Organisation (Charity) by ID. Organisations own Projects. Returns {id, name, " +
+        "default_project_story_privacy (the Story Privacy Level each new project starts with), created_at, updated_at}.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
         required: ["id"],
       },
       handler: ({ id }) => get(`/charities/${id}`),
+    },
+
+    {
+      name: "makerble_update_organisation",
+      description:
+        "Change an Organisation's (Charity's) settings from Charity Preferences. For now that is the " +
+        "\"Default story level privacy setting on each project\": the Story Privacy Level each NEW project " +
+        "in the Organisation starts with (who can see the Survey Responses / Stories posted in it). " +
+        "Existing projects keep their own level; to change one project's level use makerble_update_project_settings. " +
+        "Levels: only_project_colleagues (Project colleagues only), only_charity_colleagues (Organisation colleagues only), " +
+        "charity_plus_network (Network & organisation colleagues only), everyone (Everyone). " +
+        "Use makerble_get_organisation to see the current level (default_project_story_privacy). " +
+        "Only an Organisation Admin (Charity Editor) can do this; anyone else gets forbidden. " +
+        "Returns the Organisation {id, name, default_project_story_privacy, created_at, updated_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Organisation (Charity) ID." },
+          default_project_story_privacy: {
+            type: "string",
+            enum: ["only_project_colleagues", "only_charity_colleagues", "charity_plus_network", "everyone"],
+            description: "The Story Privacy Level each new project starts with.",
+          },
+        },
+        required: ["id", "default_project_story_privacy"],
+      },
+      handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
     },
 
     // ── Projects ──────────────────────────────────────────────────────────────
@@ -1809,6 +1837,81 @@ export function buildTools(api) {
       handler: (p) => get("/custom_field_categories", p),
     },
 
+    // ── Teams ─────────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_teams",
+      description:
+        "List an Organisation's Teams. A Team groups colleagues (users) across Projects; on screen its people " +
+        "are 'Managers' (team leaders) and 'Members'. Returns each Team's id, name, colour, manager_ids and " +
+        "member_ids (user IDs), and its project auto-add settings: auto_add_to_projects (true when someone " +
+        "who joins the Team is added to projects), auto_add_project_ids, auto_add_filter_ids (saved Projects " +
+        "page filters whose matching open projects they're added to) and the project role a new manager " +
+        "(auto_add_manager_role) and a new member (auto_add_member_role) gets: 'editor' = Project Manager, " +
+        "'reporter' = Changemaker, 'observer' = Analyst. Anyone in the Organisation can see its Teams.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Teams changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/teams", p),
+    },
+
+    {
+      name: "makerble_set_team_projects",
+      description:
+        "Choose which projects a Team automatically adds the people who join it to, and with which project " +
+        "role (the 'Automatically add managers and members to projects' toggle on the Create/Edit Team popup). " +
+        "Only an Organisation Admin of the Team's Organisation can do this. Send only the fields to change. " +
+        "People are added only at the moment they join the Team: this doesn't add the Team's current people " +
+        "to anything, and someone later removed from one of the projects isn't added back. People who " +
+        "already have a role on a project keep it. Workflow: (1) makerble_list_teams to find the Team; " +
+        "(2) makerble_list_projects for project IDs (open projects of the same Organisation only), and/or " +
+        "makerble_get_automation_options with kind 'project' for saved_filters (saved Projects page filters " +
+        "the user can use); (3) call this with auto_add_to_projects true and the IDs. Roles: 'editor' = " +
+        "Project Manager, 'reporter' = Changemaker, 'observer' = Analyst (defaults: managers editor, " +
+        "members reporter). Returns the updated Team; an invalid ID or role returns errors by field.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          auto_add_to_projects: { type: "boolean", description: "Turn adding people to projects on or off" },
+          auto_add_project_ids: { type: "array", items: { type: "number" }, description: "Projects to add people to (replaces the list)" },
+          auto_add_filter_ids: { type: "array", items: { type: "number" }, description: "Saved project filters whose matching projects people are added to (replaces the list)" },
+          auto_add_manager_role: { type: "string", enum: ["editor", "reporter", "observer"], description: "Project role for a new Team manager" },
+          auto_add_member_role: { type: "string", enum: ["editor", "reporter", "observer"], description: "Project role for a new Team member" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/teams/${id}`, body),
+    },
+
+    {
+      name: "makerble_add_team_members",
+      description:
+        "Add colleagues (users) to a Team as Members or Managers, as the Create/Edit Team popup and the Teams " +
+        "tab of 'Invite a colleague' do. The Team's other people are left as they are, and someone already in " +
+        "the Team in that role is skipped. Only an Organisation Admin of the Team's Organisation can do this, and " +
+        "everyone added must already be a colleague in the Organisation: find their user IDs with " +
+        "makerble_list_users first. When the Team has auto_add_to_projects on (see makerble_list_teams and " +
+        "makerble_set_team_projects), the people who join are added in the background to its projects, with " +
+        "the Team's project role for a Manager or a Member. Returns the updated Team.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          user_ids: { type: "array", items: { type: "number" }, description: "Colleagues to add" },
+          role: { type: "string", enum: ["member", "manager"], description: "Add them as Members or as Managers" },
+        },
+        required: ["id", "user_ids", "role"],
+      },
+      handler: ({ id, ...body }) => post(`/teams/${id}/members`, body),
+    },
+
     // ── Checklists ────────────────────────────────────────────────────────────
     {
       name: "makerble_list_checklists",
@@ -1836,7 +1939,8 @@ export function buildTools(api) {
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
         "which say what counts as done, due_within_days: the deadline, in days after the Checklist is added " +
         "to a Contact, null for none, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
-        "owner_relationship_side and a readable owner_description, and stage_id), its stages (Participant Journey stages: " +
+        "owner_relationship_side and a readable owner_description, stage_id and video_url, the step's video or null), " +
+        "its stages (Participant Journey stages: " +
         "id, name, icon, position and colour, in order), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
@@ -1877,6 +1981,35 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...params }) => get(`/checklists/${id}/progress`, params),
+    },
+
+    {
+      name: "makerble_list_checklist_progress_contacts",
+      description:
+        "List EVERY Contact behind one of a Checklist's progress counts, a page at a time. " +
+        "makerble_get_checklist_progress gives the counts but only the first list_limit (30) Contacts of each list; " +
+        "use this for the rest, e.g. to name everyone waiting on a step. Choose the list with list: " +
+        "'completed', 'furthest' or 'waiting' (the Table's lists for the action action_id: who has done it, for whom it " +
+        "is the furthest action done, who is waiting on it), 'board' (the Board column for action_id: those waiting on " +
+        "it, longest waiting first) or 'complete' (everyone with every action done; no action_id). Get action ids from " +
+        "makerble_get_checklist_progress's actions. Returns {page, page_size, page_count, total_count, data}, each " +
+        "Contact {beneficiary_id, name, actions_done}; in the waiting and board lists each also has days_waiting, " +
+        "overdue, skipped_a_step and responsible. Takes the same project_id and responsible filters as " +
+        "makerble_get_checklist_progress. Only Contacts the user can see are counted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          list: { type: "string", enum: ["completed", "furthest", "waiting", "board", "complete"], description: "Which list" },
+          action_id: { type: "number", description: "The action whose list it is. Required for every list but 'complete'" },
+          project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          responsible: { type: "string", description: "Optional: 'me', 'user:<user id>' or 'team:<team id>'" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Contacts per page (default 10, max 200)" },
+        },
+        required: ["id", "list"],
+      },
+      handler: ({ id, ...params }) => get(`/checklists/${id}/progress/contacts`, params),
     },
 
     {
@@ -2013,6 +2146,12 @@ export function buildTools(api) {
                   description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
                     "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
                 },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, e.g. for self-paced training. " +
+                    "On the Checklist's page, Watch the journey shows each step as a card with its video: YouTube, Vimeo, Loom and " +
+                    "Google Drive links play in the card; other links (SharePoint, Slack) open in a new tab",
+                },
                 if_earlier_steps_not_done: {
                   type: "string",
                   enum: ["remind", "ask_reason"],
@@ -2094,6 +2233,11 @@ export function buildTools(api) {
                 allow_manual_completion: {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, shown in Watch the journey. " +
+                    "An empty string removes it. Left as it is when not sent",
                 },
                 if_earlier_steps_not_done: {
                   type: "string",
@@ -5350,6 +5494,224 @@ export function buildTools(api) {
       },
       handler: ({ key, ...guidance_panel }) =>
         patch(`/guidance_panels/${encodeURIComponent(key)}`, { guidance_panel }),
+    },
+
+    // ── Eventbrite ────────────────────────────────────────────────────────────
+    {
+      name: "makerble_get_eventbrite_connection",
+      description:
+        "See whether an Organisation (Charity) is connected to Eventbrite, the ticketing site, and whether " +
+        "the connection still works. Makerble's Eventbrite integration brings Eventbrite events, ticket " +
+        "holders and check-ins into Makerble as Events, Contacts (beneficiaries) and attendance Stories. " +
+        "Returns status: not_connected, choosing_organisation (signed in, but the Eventbrite sign-in belongs " +
+        "to several Eventbrite organisations and one must be chosen; see available_organizations and " +
+        "makerble_choose_eventbrite_organization), active, or reconnect_required (Eventbrite no longer " +
+        "accepts the sign-in). Also returns the chosen eventbrite_organization, who connected it, " +
+        "last_checked_at, last_error, and page_url. Set test: true to check the connection with Eventbrite " +
+        "now (test_succeeded says whether it worked). Signing in to Eventbrite needs a browser, so to connect " +
+        "or reconnect, give the user page_url: the Connect > Eventbrite page in Makerble, where they press " +
+        "'Connect Eventbrite'. Only the Organisation's admins can use the Eventbrite tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          test: { type: "boolean", description: "Check the connection with Eventbrite now" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, test }) =>
+        test ? post("/eventbrite_connection/test", { charity_id }) : get("/eventbrite_connection", { charity_id }),
+    },
+
+    {
+      name: "makerble_choose_eventbrite_organization",
+      description:
+        "Choose which Eventbrite organisation an Organisation's Eventbrite connection uses, when " +
+        "makerble_get_eventbrite_connection reports status choosing_organisation. The ID must be one of its " +
+        "available_organizations. Returns the connection, now active.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          eventbrite_organization_id: { type: "string", description: "An id from available_organizations" },
+        },
+        required: ["charity_id", "eventbrite_organization_id"],
+      },
+      handler: ({ charity_id, eventbrite_organization_id }) =>
+        patch("/eventbrite_connection", { charity_id, eventbrite_connection: { eventbrite_organization_id } }),
+    },
+
+    {
+      name: "makerble_disconnect_eventbrite",
+      description:
+        "Disconnect an Organisation from Eventbrite. Makerble stops bringing in changes from Eventbrite; " +
+        "Events, Contacts and Stories already brought in stay, with their links to Eventbrite. Reconnecting " +
+        "needs the user to sign in to Eventbrite again on the page_url page, so confirm with the user first.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: async ({ charity_id }) => {
+        await del("/eventbrite_connection", { charity_id });
+        return { disconnected: true, charity_id };
+      },
+    },
+
+    {
+      name: "makerble_sync_eventbrite_now",
+      description:
+        "Bring the latest from an Organisation's Eventbrite account into Makerble now, instead of waiting for the " +
+        "catch-up every 3 hours (changes normally arrive within seconds by webhook). It runs in the background; " +
+        "makerble_get_eventbrite_connection shows syncing: true until it finishes and then last_synced_at. Check " +
+        "makerble_list_eventbrite_sync_log afterwards for what came in.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => post("/eventbrite_connection/sync", { charity_id }),
+    },
+
+    {
+      name: "makerble_list_eventbrite_sync_log",
+      description:
+        "The Eventbrite sync log, newest first, kept 90 days: what Makerble brought in from Eventbrite, updated, " +
+        "skipped or removed, and why. Each entry has outcome (imported, updated, skipped, removed, needs_review, " +
+        "error), object_type (event, attendee = ticket holder, check_in, connection), message, the Eventbrite " +
+        "eventbrite_id and eventbrite_url, and record: the Makerble record it concerns ({type: Contact, Event or " +
+        "Story, id}). needs_review means a ticket holder's email matched existing Contacts unclearly; the Contacts " +
+        "are on the Suggested Merges list (makerble_list_suggested_merges, source eventbrite).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only entries after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/eventbrite_connection/sync_log", p),
+    },
+
+    {
+      name: "makerble_update_eventbrite_settings",
+      description:
+        "Choose what an Organisation brings in from Eventbrite. project_id is the Workspace (Project) new Events " +
+        "are created in, and event_category_id one of its Event formats (Event Categories; list them with the " +
+        "Event format tools). import_mode is all_upcoming (every upcoming Eventbrite event, new ones included) " +
+        "or selected (only events picked with makerble_choose_eventbrite_events, drafts included). contact_project_id is the " +
+        "Workspace new Contacts (beneficiaries) from ticket holders go into (leave out to use each Event's " +
+        "Workspace); beneficiary_category_id their Contact Bio Form (Beneficiary Category), which must be one the " +
+        "Workspace for new Contacts uses for creating Contacts (set in the Workspace's Preferences). change_id is " +
+        "the engagement tracker and story_category_id the Event attendance survey (Story Category), which must be a " +
+        "survey running on the Workspace for new Events; together they record Eventbrite check-ins as attendance " +
+        "Stories. Only send the settings to change. Saving starts a sync. Nothing comes in from Eventbrite until " +
+        "project_id and event_category_id are set.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number" },
+          event_category_id: { type: "number" },
+          import_mode: { type: "string", enum: ["all_upcoming", "selected"] },
+          contact_project_id: { type: "number" },
+          beneficiary_category_id: { type: "number", description: "A Contact Bio Form (Beneficiary Category) ID" },
+          change_id: { type: "number", description: "An engagement tracker (participation Change) ID" },
+          story_category_id: { type: "number", description: "The Event attendance survey (Story Category) ID" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, ...eventbrite_connection }) =>
+        patch("/eventbrite_connection/settings", { charity_id, eventbrite_connection }),
+    },
+
+    {
+      name: "makerble_list_eventbrite_events",
+      description:
+        "List the upcoming events in an Organisation's Eventbrite organisation, to choose which to bring into " +
+        "Makerble. Each has the Eventbrite id, name, start (local time), status (live, started, ended, canceled, " +
+        "draft), url, selected (whether it is or would be brought in) and makerble_event_id (the Makerble Event " +
+        "it came in as, or null).",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/eventbrite_connection/events", { charity_id }),
+    },
+
+    {
+      name: "makerble_choose_eventbrite_events",
+      description:
+        "Pick the Eventbrite events to bring into Makerble, by their Eventbrite ids from " +
+        "makerble_list_eventbrite_events. This switches import_mode to selected, so only these come in (new " +
+        "Eventbrite events no longer come in automatically). Events already brought in stay.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          eventbrite_event_ids: { type: "array", items: { type: "string" } },
+        },
+        required: ["charity_id", "eventbrite_event_ids"],
+      },
+      handler: (p) => put("/eventbrite_connection/events", p),
+    },
+
+    {
+      name: "makerble_get_eventbrite_field_mapping",
+      description:
+        "Read which Makerble field each Eventbrite field is copied into. object_type event maps Eventbrite event " +
+        "fields onto the Makerble Event (and the Event format's custom fields); object_type attendee maps ticket " +
+        "holder fields and order form question answers (keys answer:<question>) onto the Contact (and the " +
+        "Contact type's custom fields and Dropdowns). Returns mappings, eventbrite_fields (each with " +
+        "compatible_makerble_fields) and makerble_fields. Set refresh: true (attendee only) to re-read the " +
+        "order form questions from Eventbrite first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          object_type: { type: "string", enum: ["event", "attendee"] },
+          refresh: { type: "boolean" },
+        },
+        required: ["charity_id", "object_type"],
+      },
+      handler: ({ charity_id, object_type, refresh }) =>
+        refresh && object_type === "attendee"
+          ? post("/eventbrite_connection/refresh_questions", { charity_id })
+          : get(`/eventbrite_connection/mappings/${object_type}`, { charity_id }),
+    },
+
+    {
+      name: "makerble_set_eventbrite_field_mapping",
+      description:
+        "Replace an Eventbrite field mapping (read it first with makerble_get_eventbrite_field_mapping). Each " +
+        "pair copies one eventbrite_field into one makerble_field; only compatible types pair up, a field can be " +
+        "in only one pair, and paused: true stops copying it for now. Eventbrite fields left out are not copied. " +
+        "For events Eventbrite's value replaces the Makerble one; for Contacts only blank fields are filled in.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          object_type: { type: "string", enum: ["event", "attendee"] },
+          mappings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                eventbrite_field: { type: "string" },
+                makerble_field: { type: "string" },
+                paused: { type: "boolean" },
+              },
+              required: ["eventbrite_field", "makerble_field"],
+            },
+          },
+        },
+        required: ["charity_id", "object_type", "mappings"],
+      },
+      handler: ({ charity_id, object_type, mappings }) =>
+        put(`/eventbrite_connection/mappings/${object_type}`, { charity_id, mappings }),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
