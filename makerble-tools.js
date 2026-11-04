@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 238 Makerble MCP tool definitions.
+ * All 239 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1856,6 +1856,28 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/teams/${id}`, body),
+    },
+
+    {
+      name: "makerble_add_team_members",
+      description:
+        "Add colleagues (users) to a Team as Members or Managers, as the Create/Edit Team popup and the Teams " +
+        "tab of 'Invite a colleague' do. The Team's other people are left as they are, and someone already in " +
+        "the Team in that role is skipped. Only an Organisation Admin of the Team's Organisation can do this, and " +
+        "everyone added must already be a colleague in the Organisation: find their user IDs with " +
+        "makerble_list_users first. When the Team has auto_add_to_projects on (see makerble_list_teams and " +
+        "makerble_set_team_projects), the people who join are added in the background to its projects, with " +
+        "the Team's project role for a Manager or a Member. Returns the updated Team.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          user_ids: { type: "array", items: { type: "number" }, description: "Colleagues to add" },
+          role: { type: "string", enum: ["member", "manager"], description: "Add them as Members or as Managers" },
+        },
+        required: ["id", "user_ids", "role"],
+      },
+      handler: ({ id, ...body }) => post(`/teams/${id}/members`, body),
     },
 
     // ── Checklists ────────────────────────────────────────────────────────────
