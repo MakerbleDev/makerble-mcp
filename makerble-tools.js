@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 236 Makerble MCP tool definitions.
+ * All 238 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6596,6 +6596,73 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/merge_rules/${id}`, body) : post("/merge_rules", body)),
+    },
+
+    // ─── Field Visibility (CP-8788) ───────────────────────────────────────────
+
+    {
+      name: "makerble_list_field_visibility",
+      description:
+        "List who can see each Contact field in an Organisation (the Field Visibility settings page). Each Contact " +
+        "(Beneficiary) bio field comes back once, whichever Contact forms it is on: field_class_name and field_key " +
+        "identify it ('CustomField' or 'RatioSet' with its id for a form field or dropdown, 'BeneficiaryColumn' with " +
+        "the column name for a built-in field such as date_of_birth, 'CustomFieldDefinition' with its id for a Custom " +
+        "Forms field), name, forms (the Contact forms it is on), visibility ('default' = everyone who can view the " +
+        "Contact; 'restricted' = only users in one of its teams OR a colleague, in any role, on one of its projects; " +
+        "Organisation Admins get no exception), teams and projects [{id, name}], and visible_to_guests (whether " +
+        "external guest users added through a Contact's Override see it). Restrictions never give anyone access to " +
+        "a Contact they can't already view. Filter with search (field name), form (a form name) or visibility. Only " +
+        "Organisation Admins can see these settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          search: { type: "string", description: "Part of the field name, e.g. 'NHS'" },
+          form: { type: "string", description: "Only fields on this Contact form (its name)" },
+          visibility: { type: "string", enum: ["default", "restricted"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/field_visibility_rules", p),
+    },
+
+    {
+      name: "makerble_set_field_visibility",
+      description:
+        "Change who can see one or more Contact fields (Field Visibility). First call makerble_list_field_visibility " +
+        "to get each field's field_class_name and field_key, and the Organisation's teams and projects. For each field " +
+        "give visibility 'restricted' with team_ids and/or project_ids (at least one is required; a user in ANY of " +
+        "the teams OR on ANY of the projects can then see the field's value, everyone else sees it as Restricted), or " +
+        "'default' to let everyone who can view the Contact see it again. visible_to_guests true/false shows or hides " +
+        "the field from external guest users. Leave a key out to leave that setting unchanged. All the changes are " +
+        "saved together or not at all; errors name the field. Restricting a field hides it from people, including " +
+        "Organisation Admins not in those teams or projects, so confirm the teams and projects with the user first. " +
+        "Only Organisation Admins can change these settings. Returns the changed fields.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          rules: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                field_class_name: { type: "string", enum: ["CustomField", "RatioSet", "BeneficiaryColumn", "CustomFieldDefinition"] },
+                field_key: { type: "string", description: "The field id, or the column name for a BeneficiaryColumn" },
+                visibility: { type: "string", enum: ["default", "restricted"] },
+                team_ids: { type: "array", items: { type: "number" }, description: "Teams whose members can see the field" },
+                project_ids: { type: "array", items: { type: "number" }, description: "Projects whose colleagues can see the field" },
+                visible_to_guests: { type: "boolean" },
+              },
+              required: ["field_class_name", "field_key"],
+            },
+          },
+        },
+        required: ["charity_id", "rules"],
+      },
+      handler: (body) => patch("/field_visibility_rules", body),
     },
 
     // ─── Automations (CP-8842) ────────────────────────────────────────────────
