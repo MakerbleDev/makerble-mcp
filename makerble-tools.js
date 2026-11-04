@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 238 Makerble MCP tool definitions.
+ * All 241 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1831,6 +1831,81 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/custom_field_categories", p),
+    },
+
+    // ── Teams ─────────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_teams",
+      description:
+        "List an Organisation's Teams. A Team groups colleagues (users) across Projects; on screen its people " +
+        "are 'Managers' (team leaders) and 'Members'. Returns each Team's id, name, colour, manager_ids and " +
+        "member_ids (user IDs), and its project auto-add settings: auto_add_to_projects (true when someone " +
+        "who joins the Team is added to projects), auto_add_project_ids, auto_add_filter_ids (saved Projects " +
+        "page filters whose matching open projects they're added to) and the project role a new manager " +
+        "(auto_add_manager_role) and a new member (auto_add_member_role) gets: 'editor' = Project Manager, " +
+        "'reporter' = Changemaker, 'observer' = Analyst. Anyone in the Organisation can see its Teams.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Teams changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/teams", p),
+    },
+
+    {
+      name: "makerble_set_team_projects",
+      description:
+        "Choose which projects a Team automatically adds the people who join it to, and with which project " +
+        "role (the 'Automatically add managers and members to projects' toggle on the Create/Edit Team popup). " +
+        "Only an Organisation Admin of the Team's Organisation can do this. Send only the fields to change. " +
+        "People are added only at the moment they join the Team: this doesn't add the Team's current people " +
+        "to anything, and someone later removed from one of the projects isn't added back. People who " +
+        "already have a role on a project keep it. Workflow: (1) makerble_list_teams to find the Team; " +
+        "(2) makerble_list_projects for project IDs (open projects of the same Organisation only), and/or " +
+        "makerble_get_automation_options with kind 'project' for saved_filters (saved Projects page filters " +
+        "the user can use); (3) call this with auto_add_to_projects true and the IDs. Roles: 'editor' = " +
+        "Project Manager, 'reporter' = Changemaker, 'observer' = Analyst (defaults: managers editor, " +
+        "members reporter). Returns the updated Team; an invalid ID or role returns errors by field.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          auto_add_to_projects: { type: "boolean", description: "Turn adding people to projects on or off" },
+          auto_add_project_ids: { type: "array", items: { type: "number" }, description: "Projects to add people to (replaces the list)" },
+          auto_add_filter_ids: { type: "array", items: { type: "number" }, description: "Saved project filters whose matching projects people are added to (replaces the list)" },
+          auto_add_manager_role: { type: "string", enum: ["editor", "reporter", "observer"], description: "Project role for a new Team manager" },
+          auto_add_member_role: { type: "string", enum: ["editor", "reporter", "observer"], description: "Project role for a new Team member" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/teams/${id}`, body),
+    },
+
+    {
+      name: "makerble_add_team_members",
+      description:
+        "Add colleagues (users) to a Team as Members or Managers, as the Create/Edit Team popup and the Teams " +
+        "tab of 'Invite a colleague' do. The Team's other people are left as they are, and someone already in " +
+        "the Team in that role is skipped. Only an Organisation Admin of the Team's Organisation can do this, and " +
+        "everyone added must already be a colleague in the Organisation: find their user IDs with " +
+        "makerble_list_users first. When the Team has auto_add_to_projects on (see makerble_list_teams and " +
+        "makerble_set_team_projects), the people who join are added in the background to its projects, with " +
+        "the Team's project role for a Manager or a Member. Returns the updated Team.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          user_ids: { type: "array", items: { type: "number" }, description: "Colleagues to add" },
+          role: { type: "string", enum: ["member", "manager"], description: "Add them as Members or as Managers" },
+        },
+        required: ["id", "user_ids", "role"],
+      },
+      handler: ({ id, ...body }) => post(`/teams/${id}/members`, body),
     },
 
     // ── Checklists ────────────────────────────────────────────────────────────
