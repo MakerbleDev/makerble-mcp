@@ -1860,7 +1860,8 @@ export function buildTools(api) {
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
         "which say what counts as done, due_within_days: the deadline, in days after the Checklist is added " +
         "to a Contact, null for none, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
-        "owner_relationship_side and a readable owner_description, and stage_id), its stages (Participant Journey stages: " +
+        "owner_relationship_side and a readable owner_description, stage_id and video_url, the step's video or null), " +
+        "its stages (Participant Journey stages: " +
         "id, name, icon, position and colour, in order), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
@@ -2066,6 +2067,12 @@ export function buildTools(api) {
                   description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
                     "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
                 },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, e.g. for self-paced training. " +
+                    "On the Checklist's page, Watch the journey shows each step as a card with its video: YouTube, Vimeo, Loom and " +
+                    "Google Drive links play in the card; other links (SharePoint, Slack) open in a new tab",
+                },
                 if_earlier_steps_not_done: {
                   type: "string",
                   enum: ["remind", "ask_reason"],
@@ -2147,6 +2154,11 @@ export function buildTools(api) {
                 allow_manual_completion: {
                   type: "boolean",
                   description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, shown in Watch the journey. " +
+                    "An empty string removes it. Left as it is when not sent",
                 },
                 if_earlier_steps_not_done: {
                   type: "string",
