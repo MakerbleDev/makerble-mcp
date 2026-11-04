@@ -854,7 +854,8 @@ export function buildTools(api) {
       name: "makerble_list_contacts",
       description:
         "List all Contacts (Beneficiaries). Filter by charity_id or project_id. " +
-        "Response includes custom fields from the Contact Bio Form.",
+        "Response includes custom fields from the Contact Bio Form. " +
+        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1028,7 +1029,8 @@ export function buildTools(api) {
       description:
         "Get a single Contact (Beneficiary) by ID, including all custom fields. " +
         "Opening a Contact this way is recorded in its Access Log (the audit trail of who viewed it), " +
-        "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts.",
+        "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts. " +
+        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -1158,6 +1160,7 @@ export function buildTools(api) {
         "outcome_ids, label_ids, media, answers: [{kind, field_id, label, contact_id, sub_ratio_id, sub_ratio_label, value}]}, " +
         "so a survey question keeps the label it had then. " +
         "Compare two Versions' full_object to see exactly what changed between them. " +
+        "For a Contact, fields Field Visibility hides from you are null in full_object and named in restricted_fields. " +
         "Get Version IDs from makerble_list_versions. Same permissions as makerble_list_versions.",
       inputSchema: {
         type: "object",
@@ -1172,7 +1175,8 @@ export function buildTools(api) {
       description:
         "Create a new Contact (Beneficiary). Required: name, owner_id. " +
         "Call makerble_list_contact_bio_form_fields first to get custom field IDs. " +
-        "Call makerble_list_contact_types to get beneficiary_type_id (1=Person, 2=Object, 3=Organisation, 4=Animal).",
+        "Call makerble_list_contact_types to get beneficiary_type_id (1=Person, 2=Object, 3=Organisation, 4=Animal). " +
+        "Setting a field Field Visibility hides from you is refused with 422 and errors naming the field: leave it out and tell the user someone who can see it must fill it in.",
       inputSchema: {
         type: "object",
         properties: {
