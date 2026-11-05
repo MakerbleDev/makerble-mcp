@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 255 Makerble MCP tool definitions.
+ * All 256 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -448,6 +448,36 @@ export function buildTools(api) {
         required: ["status_action", "project_ids"],
       },
       handler: (body) => post("/projects/bulk_status_change", body),
+    },
+
+    {
+      name: "makerble_delete_projects",
+      description:
+        "Permanently delete several closed Projects at once, as Delete projects does for the projects ticked in the Rows " +
+        "view of the My Projects page. Deletion is permanent and cannot be undone. Each Project is deleted as with the " +
+        "Delete project button on the organisation's Closed Projects page: its team is emailed, it is listed under Deleted " +
+        "Projects there, and its automations are turned off.\n" +
+        "Only closed Projects are deleted: open Projects in the list are kept and returned in kept_project_ids. To delete " +
+        "an open Project, close it first with makerble_set_projects_status. A list with no closed Project is refused.\n" +
+        "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
+        "If any listed Project is one the user may not delete, nothing is deleted and the reply names those Projects.\n" +
+        "Workflow: find the Projects with makerble_list_projects (is_closed shows which are closed), show the user the " +
+        "exact Projects that will be deleted, warn that it cannot be undone, and only go ahead when they confirm. The " +
+        "deletion runs in the background: this returns straight away with project_ids (to be deleted) and kept_project_ids.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 200,
+            description: "The Projects to delete, at most 200. Only the closed ones are deleted.",
+          },
+        },
+        required: ["project_ids"],
+      },
+      handler: (body) => post("/projects/bulk_deletion", body),
     },
 
     {
