@@ -2503,7 +2503,8 @@ export function buildTools(api) {
       name: "makerble_add_checklist_to_contact",
       description:
         "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
-        "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
+        "one of the Contact's Projects lets you add are allowed, plus, for an Organisation Admin, one that was " +
+        "removed from the Contact while one of their Projects adds it automatically; call with list_available: true to get them " +
         "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
         "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
         "count records in this project' then count only that Project's records). Adding one that was removed " +
