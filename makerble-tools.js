@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 254 Makerble MCP tool definitions.
+ * All 255 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -409,6 +409,45 @@ export function buildTools(api) {
       },
       handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
         patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_set_projects_status",
+      description:
+        "Close or reopen several Projects at once, as Close projects / Reopen projects do for the projects ticked in the " +
+        "Rows view of the My Projects page. A closed Project can't get new updates (Stories) or Contacts and its updates " +
+        "can't be edited until it is reopened; closed Projects are listed on the organisation's Closed Projects page. Each " +
+        "Project is closed or reopened as from its own settings menu, so its team is told.\n" +
+        "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
+        "If any listed Project is one the user may not change, nothing changes and the reply names those Projects.\n" +
+        "close only changes listed Projects that are open, and reopen only those that are closed.\n" +
+        "Closing a Project that an active Signup Page uses would break that Signup Page, so close needs signup_pages: " +
+        "\"deactivate\" deactivates those Signup Pages and then closes the Project; \"skip\" leaves those Projects open and " +
+        "closes the rest. Ask the user which they want.\n" +
+        "Workflow: find the Projects with makerble_list_projects (is_closed shows each one's status), show the user which " +
+        "Projects you will close or reopen, and only go ahead when they agree. The change runs in the background: this " +
+        "returns straight away and the user is emailed when it has finished. Check the result afterwards with " +
+        "makerble_get_project (is_closed).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status_action: { type: "string", enum: ["close", "reopen"], description: "Whether to close or reopen the Projects." },
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 200,
+            description: "The Projects to change, at most 200.",
+          },
+          signup_pages: {
+            type: "string",
+            enum: ["deactivate", "skip"],
+            description: "Required with close. What to do with Projects that an active Signup Page uses.",
+          },
+        },
+        required: ["status_action", "project_ids"],
+      },
+      handler: (body) => post("/projects/bulk_status_change", body),
     },
 
     {
