@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 253 Makerble MCP tool definitions.
+ * All 254 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2270,18 +2270,31 @@ export function buildTools(api) {
         "Set how a Project offers a Checklist (the Add to Projects popup). mode 'manual': colleagues may " +
         "add it to the Project's Contacts by hand. 'automatic': every Contact now in the Project gets it " +
         "(in the background) and so does every Contact who later joins or is created in it. 'none': stop " +
-        "offering it; Contacts who already have it keep it. Requires an Organisation editor or the " +
-        "Project's Project Manager.",
+        "offering it; Contacts who already have it keep it. For an automatic one, on_leave says what happens " +
+        "when a Contact leaves the Project, moves to a closed status in it (Alumni or Declined) or is archived: " +
+        "'keep' (the default) or 'remove_if_incomplete', which takes it off them unless every action is done. " +
+        "A Checklist removed that way keeps the Contact's progress and comes back when they rejoin. You can " +
+        "send on_leave on its own to change only that. Requires an Organisation editor or the Project's " +
+        "Project Manager. Returns {project_id, assignment_mode, on_leave}.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The Checklist ID" },
           project_id: { type: "number" },
           mode: { type: "string", enum: ["none", "manual", "automatic"] },
+          on_leave: {
+            type: "string",
+            enum: ["keep", "remove_if_incomplete"],
+            description: "Only for mode 'automatic': what happens when a Contact leaves the Project",
+          },
         },
-        required: ["id", "project_id", "mode"],
+        required: ["id", "project_id"],
       },
-      handler: ({ id, project_id, mode }) => patch(`/checklists/${id}/projects/${project_id}`, { mode }),
+      handler: ({ id, project_id, mode, on_leave }) =>
+        patch(`/checklists/${id}/projects/${project_id}`, {
+          ...(mode !== undefined && { mode }),
+          ...(on_leave !== undefined && { on_leave }),
+        }),
     },
 
     {
@@ -2493,7 +2506,8 @@ export function buildTools(api) {
         "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
         "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
         "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
-        "count records in this project' then count only that Project's records).",
+        "count records in this project' then count only that Project's records). Adding one that was removed " +
+        "from the Contact earlier (makerble_remove_checklist_from_contact) restores the actions they had done.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2508,6 +2522,30 @@ export function buildTools(api) {
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
           : post(`/beneficiaries/${beneficiary_id}/checklists`, project_id ? { checklist_id, project_id } : { checklist_id }),
+    },
+
+    {
+      name: "makerble_remove_checklist_from_contact",
+      description:
+        "Remove a Checklist from one Contact (beneficiary), as 'Remove from this contact' in the ⋯ menu of a " +
+        "Checklist on their profile's Checklists box does: for one added by mistake or no longer relevant. It " +
+        "disappears from the Contact's Checklists, the Checklist's progress and their Focus items, and the " +
+        "removal is recorded on the Contact's History. Their progress is kept: adding the Checklist again " +
+        "(makerble_add_checklist_to_contact) restores the actions they had done. A Project that adds the " +
+        "Checklist automatically won't add it back. Allowed for Organisation Admins, and for colleagues who " +
+        "could add that Checklist to the Contact by hand; anyone else gets 403. Returns {checklist_id, " +
+        "beneficiary_id, removed_at, removed_by_user_id}." +
+        "\nWorkflow: (1) makerble_get_contact_checklists to find the checklist_id and show the user how many " +
+        "actions are done (done_count of actions_count). (2) Confirm with the user. (3) this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number", description: "The Checklist ID, from makerble_get_contact_checklists" },
+        },
+        required: ["beneficiary_id", "checklist_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id }) => del(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}`),
     },
 
     {
