@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 263 Makerble MCP tool definitions.
+ * All 265 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5582,11 +5582,15 @@ export function buildTools(api) {
       name: "makerble_save_tour",
       description:
         "Create or update a Welcome Tour, or change an Organisation's welcome journey settings.\n\n" +
-        "Organisation Admins can change only how strict their own Organisation's tours are: mode (required = " +
-        "Mandatory, optional = people can skip or end it), start_skippable (\"People can skip the tour when it is " +
-        "first offered\"), later_limit (how many times someone can choose \"I'll do this later\", 1 to 10) and, " +
-        "in stops, [{id, skippable}] for stops that ask for a click. They can also set photo_skippable " +
-        "(\"People can skip adding a profile picture\") for the whole Organisation, with organisation_id and no id.\n\n" +
+        "Organisation Admins can change what their Welcome journey settings page changes on their own " +
+        "Organisation's tours: mode (required = Mandatory, optional = people can skip or end it), start_skippable " +
+        "(\"People can skip the tour when it is first offered\"), later_limit (how many times someone can choose " +
+        "\"I'll do this later\", 1 to 10), and in stops, each named by id or stop_key: included (whether the tour " +
+        "shows the stop; an unticked stop keeps its wording), body (its wording, up to 280 characters of plain " +
+        "text; empty uses Makerble's default_body) and skippable (stops that ask for a click). A stop_key the tour " +
+        "doesn't have yet adds that stop. The Essentials stops (navbar_spaces, navbar_user) are always included. " +
+        "Only the fields sent change. They can also set photo_skippable (\"People can skip adding a profile " +
+        "picture\") for the whole Organisation, with organisation_id and no id.\n\n" +
         "Makerble staff (System Access) can change everything: without id it creates a tour (name and " +
         "organisation_id needed; it starts as a draft nobody sees), with id it changes only the fields sent. " +
         "Stops use these stop_key values: navbar_spaces (Spaces in the top navbar, click), navbar_user (your name " +
@@ -5615,9 +5619,10 @@ export function buildTools(api) {
                 id: { type: "number" },
                 position: { type: "number" },
                 group_name: { type: "string" },
-                stop_key: { type: "string" },
+                stop_key: { type: "string", description: "Names the stop instead of id; adds it if the tour doesn't have it" },
                 title: { type: "string" },
-                body: { type: "string" },
+                body: { type: "string", description: "The stop's wording; empty uses Makerble's default_body" },
+                included: { type: "boolean", description: "Whether the tour shows this stop" },
                 action_text: { type: "string" },
                 after_text: { type: "string" },
                 skippable: { type: "boolean" },
@@ -5633,6 +5638,50 @@ export function buildTools(api) {
         }
         return id ? patch(`/tours/${id}`, body) : post("/tours", body);
       },
+    },
+
+    {
+      name: "makerble_list_tour_progress",
+      description:
+        "See who has finished a Welcome Tour (CP-9053), as the Who has finished page does: the colleagues in the " +
+        "tour's Team (everyone in the Organisation for its default tour), by name, each with their team, status " +
+        "(not_started, in_progress, deferred = chose \"I'll do this later\", completed or skipped), tour (as the " +
+        "page shows it, e.g. \"Paused at stop 3 of 7\"), later_used (e.g. \"1 of 3\"), last_active_at and " +
+        "reminded_at. summary gives the page's tiles: finished, part_way, not_started and average_minutes (which " +
+        "counts only tours finished without \"I'll do this later\"). Only colleagues are listed, never Contacts " +
+        "(Beneficiaries) or active participants. Paginated. Use it to answer \"who hasn't finished the tour?\", " +
+        "then makerble_send_tour_reminder to nudge them. An Organisation Admin of the tour's Organisation, or " +
+        "Makerble staff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour ID, from makerble_list_tours" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/tours/${id}/progress`, p),
+    },
+
+    {
+      name: "makerble_send_tour_reminder",
+      description:
+        "Remind a colleague to finish their Welcome Tour: emails them a link that opens the tour at the stop " +
+        "they reached, as Send a reminder on the Who has finished page does. Each person can be reminded once " +
+        "every 7 days; a second reminder sooner is refused with a message saying when the next one can be sent, " +
+        "as is someone who has finished or isn't a colleague in the Organisation. Returns reminded_at and " +
+        "next_reminder_from. Find who hasn't finished with makerble_list_tour_progress first, and check with the " +
+        "user before emailing people. An Organisation Admin of the tour's Organisation, or Makerble staff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour ID" },
+          user_id: { type: "number", description: "The colleague to remind, from makerble_list_tour_progress" },
+        },
+        required: ["id", "user_id"],
+      },
+      handler: ({ id, user_id }) => post(`/tours/${id}/reminders`, { user_id }),
     },
 
     // ── Guidance Panels ───────────────────────────────────────────────────────
