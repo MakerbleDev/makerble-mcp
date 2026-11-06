@@ -946,6 +946,34 @@ export function buildTools(api) {
         }),
     },
 
+    {
+      name: "makerble_resend_invitation",
+      description:
+        "Send a new invitation email to a colleague (user) who was invited to an Organisation but hasn't yet " +
+        "set their password. Manage Colleagues shows them as 'Invited, not yet accepted'. Makerble never emails " +
+        "a password: the invitation has a link where they set their own, and the new link stops the earlier one " +
+        "working. Use it when someone says they lost or never got their invitation, or that its link has " +
+        "expired (links last 14 days). Only an Organisation Admin of an Organisation the person is a colleague " +
+        "in can do this. Find their user ID with makerble_list_users. Pass organisation_id to choose which " +
+        "Organisation the invitation is for; without it, the first one they share with you is used. An address " +
+        "can be sent at most 3 new links an hour. Returns {id, email, organisation_id, invitation_status: " +
+        "'sent', message}; it never returns the link or its token. Errors: 404 for someone outside your " +
+        "Organisations, 403 if you aren't an Organisation Admin there, 422 if they've already set their " +
+        "password, 429 after 3 sends in an hour.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The user ID of the person who was invited" },
+          organisation_id: {
+            type: "number",
+            description: "Optional. The Organisation (Charity) to invite them into",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => post(`/users/${id}/resend_invitation`, body),
+    },
+
     // ── Contacts (Beneficiaries) ───────────────────────────────────────────────
     {
       name: "makerble_list_contacts",
@@ -7145,6 +7173,44 @@ export function buildTools(api) {
         },
       },
       handler: (body) => put("/snapshot/pin", body),
+    },
+
+    {
+      name: "makerble_share_snapshot",
+      description:
+        "Share an Album's (Portfolio / Bundle) or Project's Snapshot: get a read-only link to its headline numbers " +
+        "that the user can send to someone without a Makerble account (a funder or trustee, say), as the Share " +
+        "button on Today › Snapshot does. Returns the user's existing working link if they already have one, " +
+        "otherwise makes one. The link shows the Snapshot as the user sees it (only Contacts they can view are " +
+        "counted; groups below the Minimum Results Threshold stay hidden) and stops working if they turn it off " +
+        "with makerble_stop_sharing_snapshot or can no longer see the Album or Project. Give album_id or " +
+        "project_id. Returns share_link {url, created_at, showing {type, id, name}}. Only share a Snapshot when " +
+        "the user asks to: anyone with the link can open it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (body) => post("/snapshot/share_link", body),
+    },
+
+    {
+      name: "makerble_stop_sharing_snapshot",
+      description:
+        "Turn off the user's read-only share link to an Album's (Portfolio / Bundle) or Project's Snapshot, as Turn " +
+        "off link on Today › Snapshot does, so anyone who opens it is told it isn't working. Only turns off the " +
+        "user's own link. Give album_id or project_id. Returns {disabled: true}; 404 when they have no working link " +
+        "to it. A new link made later with makerble_share_snapshot has a different address.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: ({ album_id, project_id }) => del(`/snapshot/share_link${query({ album_id, project_id })}`),
     },
 
     // ─── Suggested merges and merge rules (CP-6834) ─────────────────────────
