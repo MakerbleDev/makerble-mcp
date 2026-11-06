@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 258 Makerble MCP tool definitions.
+ * All 260 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -409,6 +409,75 @@ export function buildTools(api) {
       },
       handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
         patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_set_projects_status",
+      description:
+        "Close or reopen several Projects at once, as Close projects / Reopen projects do for the projects ticked in the " +
+        "Rows view of the My Projects page. A closed Project can't get new updates (Stories) or Contacts and its updates " +
+        "can't be edited until it is reopened; closed Projects are listed on the organisation's Closed Projects page. Each " +
+        "Project is closed or reopened as from its own settings menu, so its team is told.\n" +
+        "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
+        "If any listed Project is one the user may not change, nothing changes and the reply names those Projects.\n" +
+        "close only changes listed Projects that are open, and reopen only those that are closed.\n" +
+        "Closing a Project that an active Signup Page uses would break that Signup Page, so close needs signup_pages: " +
+        "\"deactivate\" deactivates those Signup Pages and then closes the Project; \"skip\" leaves those Projects open and " +
+        "closes the rest. Ask the user which they want.\n" +
+        "Workflow: find the Projects with makerble_list_projects (is_closed shows each one's status), show the user which " +
+        "Projects you will close or reopen, and only go ahead when they agree. The change runs in the background: this " +
+        "returns straight away and the user is emailed when it has finished. Check the result afterwards with " +
+        "makerble_get_project (is_closed).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status_action: { type: "string", enum: ["close", "reopen"], description: "Whether to close or reopen the Projects." },
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 200,
+            description: "The Projects to change, at most 200.",
+          },
+          signup_pages: {
+            type: "string",
+            enum: ["deactivate", "skip"],
+            description: "Required with close. What to do with Projects that an active Signup Page uses.",
+          },
+        },
+        required: ["status_action", "project_ids"],
+      },
+      handler: (body) => post("/projects/bulk_status_change", body),
+    },
+
+    {
+      name: "makerble_delete_projects",
+      description:
+        "Permanently delete several closed Projects at once, as Delete projects does for the projects ticked in the Rows " +
+        "view of the My Projects page. Deletion is permanent and cannot be undone. Each Project is deleted as with the " +
+        "Delete project button on the organisation's Closed Projects page: its team is emailed, it is listed under Deleted " +
+        "Projects there, and its automations are turned off.\n" +
+        "Only closed Projects are deleted: open Projects in the list are kept and returned in kept_project_ids. To delete " +
+        "an open Project, close it first with makerble_set_projects_status. A list with no closed Project is refused.\n" +
+        "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
+        "If any listed Project is one the user may not delete, nothing is deleted and the reply names those Projects.\n" +
+        "Workflow: find the Projects with makerble_list_projects (is_closed shows which are closed), show the user the " +
+        "exact Projects that will be deleted, warn that it cannot be undone, and only go ahead when they confirm. The " +
+        "deletion runs in the background: this returns straight away with project_ids (to be deleted) and kept_project_ids.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 200,
+            description: "The Projects to delete, at most 200. Only the closed ones are deleted.",
+          },
+        },
+        required: ["project_ids"],
+      },
+      handler: (body) => post("/projects/bulk_deletion", body),
     },
 
     {
@@ -2503,7 +2572,8 @@ export function buildTools(api) {
       name: "makerble_add_checklist_to_contact",
       description:
         "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
-        "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
+        "one of the Contact's Projects lets you add are allowed, plus, for an Organisation Admin, one that was " +
+        "removed from the Contact while one of their Projects adds it automatically; call with list_available: true to get them " +
         "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
         "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
         "count records in this project' then count only that Project's records). Adding one that was removed " +
@@ -6154,18 +6224,23 @@ export function buildTools(api) {
         "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Field " +
         "(a Custom Field): a question with a free answer rather than a Metric, e.g. 'Date of birth' (date), " +
         "'Postcode' (text) or 'Number of children' (number), for use on a Survey or Contact Form. A " +
-        "section_title Field is a heading, with section_text shown under it. If the organisation or the " +
+        "section_title Field is a heading, with section_text shown under it. A video, audio or picture Field " +
+        "is a Video, Audio or Picture question on a Survey (Story Category): an Attachment (file) Field that " +
+        "asks for that kind of media, which the person answering can record or take there and then with their " +
+        "camera or microphone, or attach from their device. It is returned with field_type 'file' and " +
+        "capture_type 'video', 'audio' or 'picture'. If the organisation or the " +
         "public library already has one with the same or a near-identical name (ignoring case, spacing and " +
         "punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
         "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
-        "Field (id, type 'field', name, owner, field_type; a section_title Field has only id, type and name) " +
+        "Field (id, type 'field', name, owner, field_type, and capture_type for a video, audio or picture Field; " +
+        "a section_title Field has only id, type and name) " +
         "and approved (always false: Fields are not shared in the public library).",
       inputSchema: {
         type: "object",
         properties: {
           organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
           field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
-          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey" },
           section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
           private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
           force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
