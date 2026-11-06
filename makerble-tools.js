@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 254 Makerble MCP tool definitions.
+ * All 257 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5439,6 +5439,102 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    // ── Welcome Tours (CP-9049) ──────────────────────────────────────────────
+    {
+      name: "makerble_list_tours",
+      description:
+        "List Welcome Tours. A Welcome Tour is the guided tour of Makerble's own pages that a new colleague is " +
+        "offered after adding their name and photo on their welcome journey: each stop dims the page except one " +
+        "area (e.g. the Spaces menu, or the Contacts table) and shows a card, and either waits for Next or asks " +
+        "them to click something (action: click). A tour belongs to an Organisation and, optionally, one of its " +
+        "Teams; team_id null means the Organisation's default tour, for people whose teams have none. Only a live " +
+        "tour is shown to people. mode required is shown as Mandatory: people can put it off with \"I'll do this " +
+        "later\" up to later_limit times, then must finish it. Makerble staff (System Access) see every tour; an " +
+        "Organisation Admin sees their own Organisation's tours; anyone else gets 403. Returns each tour with its " +
+        "stops in order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "Only this Organisation's tours" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only tours changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/tours", p),
+    },
+
+    {
+      name: "makerble_get_tour",
+      description:
+        "Get one Welcome Tour by id, with its settings and its stops in order (group, title, text, what to click, " +
+        "the text shown after the click, and whether a click stop can be skipped). Makerble staff, or an " +
+        "Organisation Admin of its Organisation.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Welcome Tour ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/tours/${id}`),
+    },
+
+    {
+      name: "makerble_save_tour",
+      description:
+        "Create or update a Welcome Tour, or change an Organisation's welcome journey settings.\n\n" +
+        "Organisation Admins can change only how strict their own Organisation's tours are: mode (required = " +
+        "Mandatory, optional = people can skip or end it), start_skippable (\"People can skip the tour when it is " +
+        "first offered\"), later_limit (how many times someone can choose \"I'll do this later\", 1 to 10) and, " +
+        "in stops, [{id, skippable}] for stops that ask for a click. They can also set photo_skippable " +
+        "(\"People can skip adding a profile picture\") for the whole Organisation, with organisation_id and no id.\n\n" +
+        "Makerble staff (System Access) can change everything: without id it creates a tour (name and " +
+        "organisation_id needed; it starts as a draft nobody sees), with id it changes only the fields sent. " +
+        "Stops use these stop_key values: navbar_spaces (Spaces in the top navbar, click), navbar_user (your name " +
+        "in the top navbar), focus_table (Focus), contacts_table, contacts_search, contacts_filters (click), " +
+        "events_table (Manage Events, click an event), event_guests (the event page's guests, click the ⋯ menu). " +
+        "A stop with _destroy: true is removed. Each Team, and the default, can have one live tour.\n\n" +
+        "Workflow: get the tour first, change what the user asked for, and save. Make a tour live only once the " +
+        "user agrees, because live tours are offered to people straight away.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour to update. Leave out to create one (staff only)." },
+          organisation_id: { type: "number", description: "The Organisation, when creating a tour or setting photo_skippable" },
+          photo_skippable: { type: "boolean", description: "Whether people joining the Organisation can skip adding a profile picture" },
+          name: { type: "string" },
+          team_id: { type: ["number", "null"], description: "The Team it is for; null for the Organisation's default" },
+          mode: { type: "string", enum: ["required", "optional"] },
+          status: { type: "string", enum: ["draft", "live"] },
+          start_skippable: { type: "boolean" },
+          later_limit: { type: "number", description: "1 to 10" },
+          stops: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number" },
+                position: { type: "number" },
+                group_name: { type: "string" },
+                stop_key: { type: "string" },
+                title: { type: "string" },
+                body: { type: "string" },
+                action_text: { type: "string" },
+                after_text: { type: "string" },
+                skippable: { type: "boolean" },
+                _destroy: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+      handler: async ({ id, photo_skippable, ...body }) => {
+        if (photo_skippable !== undefined && !id) {
+          return patch(`/organisations/${body.organisation_id}/welcome_journey_settings`, { photo_skippable });
+        }
+        return id ? patch(`/tours/${id}`, body) : post("/tours", body);
+      },
     },
 
     // ── Guidance Panels ───────────────────────────────────────────────────────
