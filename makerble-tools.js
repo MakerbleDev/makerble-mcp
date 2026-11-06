@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 262 Makerble MCP tool definitions.
+ * All 263 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -944,6 +944,34 @@ export function buildTools(api) {
           charity_controlled: String(charity_controlled),
           disable_email_notification: String(disable_email_notification),
         }),
+    },
+
+    {
+      name: "makerble_resend_invitation",
+      description:
+        "Send a new invitation email to a colleague (user) who was invited to an Organisation but hasn't yet " +
+        "set their password. Manage Colleagues shows them as 'Invited, not yet accepted'. Makerble never emails " +
+        "a password: the invitation has a link where they set their own, and the new link stops the earlier one " +
+        "working. Use it when someone says they lost or never got their invitation, or that its link has " +
+        "expired (links last 14 days). Only an Organisation Admin of an Organisation the person is a colleague " +
+        "in can do this. Find their user ID with makerble_list_users. Pass organisation_id to choose which " +
+        "Organisation the invitation is for; without it, the first one they share with you is used. An address " +
+        "can be sent at most 3 new links an hour. Returns {id, email, organisation_id, invitation_status: " +
+        "'sent', message}; it never returns the link or its token. Errors: 404 for someone outside your " +
+        "Organisations, 403 if you aren't an Organisation Admin there, 422 if they've already set their " +
+        "password, 429 after 3 sends in an hour.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The user ID of the person who was invited" },
+          organisation_id: {
+            type: "number",
+            description: "Optional. The Organisation (Charity) to invite them into",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => post(`/users/${id}/resend_invitation`, body),
     },
 
     // ── Contacts (Beneficiaries) ───────────────────────────────────────────────
