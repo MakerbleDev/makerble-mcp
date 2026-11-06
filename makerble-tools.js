@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 263 Makerble MCP tool definitions.
+ * All 267 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5537,6 +5537,99 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_wishes",
+      description:
+        "List the signed-in user's own Wishlist: the feature requests and feedback they have sent Makerble " +
+        "from the gift icon (Wishlist › Your wishlist), newest first. Use it when someone asks what they've " +
+        "asked Makerble for, or what happened to a request. Only the user's own are ever returned, never a " +
+        "colleague's. Each has kind (feature_request or feedback), body (what they wrote), status (where it is, " +
+        "in the words they see: \"Received\", \"We are looking at this\", \"Estimate sent to your bill payer\", " +
+        "\"Being built\", \"Shipped\"; feedback reads \"Read by the Makerble team\"), helpdesk_key (the Helpdesk " +
+        "ticket a feature request became, e.g. MC-2501, once it exists) and announcement_id (the Announcement " +
+        "that answered it, if any).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only items changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/wishes", p),
+    },
+
+    {
+      name: "makerble_create_wish",
+      description:
+        "Send Makerble a feature request or feedback for the signed-in user, as Wishlist › Your wishlist " +
+        "(the gift icon) does. kind feature_request goes to Makerble's Helpdesk and shows as \"Received\" " +
+        "straight away; if it needs custom work, Makerble sends an estimate to the organisation's bill payer, " +
+        "not to the user. kind feedback stays in Makerble and is read by the Makerble team.\n\n" +
+        "Workflow: write body in the user's own words, describing what they'd like Makerble to do and why. " +
+        "Never include names or details of the people the organisation supports (its Contacts). Show the user " +
+        "the text and get their agreement before sending, because it goes to Makerble's team. If the user " +
+        "belongs to more than one organisation, ask which one it's about and pass its charity_id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["feature_request", "feedback"] },
+          body: { type: "string", description: "What they'd like, up to 2,000 characters. No details of people they support." },
+          charity_id: {
+            type: "number",
+            description: "Which of the user's organisations it's about. Needed only if they belong to more than one.",
+          },
+        },
+        required: ["kind", "body"],
+      },
+      handler: (body) => post("/wishes", body),
+    },
+
+    {
+      name: "makerble_list_coming_soon",
+      description:
+        "List what Makerble has committed to building next, as Wishlist › Coming soon shows it (the API calls " +
+        "these Roadmap items): building_now items first, then up_next, each in order, with no dates. Use it " +
+        "when someone asks whether a feature is planned. Anyone can read the published items. Makerble staff " +
+        "(System Access) also see unpublished ones, and stale is true for any unchanged for 60 days. Returns " +
+        "each item's title, body (description), stage, stage_label, position and published.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only items changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/roadmap_items", p),
+    },
+
+    {
+      name: "makerble_save_coming_soon_item",
+      description:
+        "Create or update an item in Wishlist › Coming soon (a Roadmap item): something Makerble has " +
+        "committed to building. Without id it creates one at the end of its stage; with id it changes only " +
+        "the fields you send, and moving it to another stage puts it at the end of that stage. Only users " +
+        "with System Access (Makerble staff) can use this; anyone else gets 403.\n\n" +
+        "Writing rules: title (up to 90 characters) names the feature in customer language, e.g. " +
+        "\"Formula Trackers\". body (up to 280 characters) says what it will let people do, e.g. \"Add metrics " +
+        "together to show a combined result.\" Never give dates. Use Makerble's on-screen words (Contacts, " +
+        "Surveys, Workspaces), never database names.\n\n" +
+        "Workflow: create it with published false first, which only Makerble staff see, and show the user. Set " +
+        "published to true once they agree, because a published item shows to every Makerble user.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The item to update. Leave out to create a new one." },
+          title: { type: "string", description: "Up to 90 characters, customer language" },
+          body: { type: "string", description: "What it will let people do, up to 280 characters, no dates" },
+          stage: { type: "string", enum: ["building_now", "up_next"], description: "Building now or Up next" },
+          published: { type: "boolean", description: "Whether every Makerble user sees it in Coming soon" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/roadmap_items/${id}`, body) : post("/roadmap_items", body)),
     },
 
     // ── Welcome Tours (CP-9049) ──────────────────────────────────────────────
