@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 260 Makerble MCP tool definitions.
+ * All 262 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -7030,6 +7030,44 @@ export function buildTools(api) {
         },
       },
       handler: (body) => put("/snapshot/pin", body),
+    },
+
+    {
+      name: "makerble_share_snapshot",
+      description:
+        "Share an Album's (Portfolio / Bundle) or Project's Snapshot: get a read-only link to its headline numbers " +
+        "that the user can send to someone without a Makerble account (a funder or trustee, say), as the Share " +
+        "button on Today › Snapshot does. Returns the user's existing working link if they already have one, " +
+        "otherwise makes one. The link shows the Snapshot as the user sees it (only Contacts they can view are " +
+        "counted; groups below the Minimum Results Threshold stay hidden) and stops working if they turn it off " +
+        "with makerble_stop_sharing_snapshot or can no longer see the Album or Project. Give album_id or " +
+        "project_id. Returns share_link {url, created_at, showing {type, id, name}}. Only share a Snapshot when " +
+        "the user asks to: anyone with the link can open it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (body) => post("/snapshot/share_link", body),
+    },
+
+    {
+      name: "makerble_stop_sharing_snapshot",
+      description:
+        "Turn off the user's read-only share link to an Album's (Portfolio / Bundle) or Project's Snapshot, as Turn " +
+        "off link on Today › Snapshot does, so anyone who opens it is told it isn't working. Only turns off the " +
+        "user's own link. Give album_id or project_id. Returns {disabled: true}; 404 when they have no working link " +
+        "to it. A new link made later with makerble_share_snapshot has a different address.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: ({ album_id, project_id }) => del(`/snapshot/share_link${query({ album_id, project_id })}`),
     },
 
     // ─── Suggested merges and merge rules (CP-6834) ─────────────────────────
