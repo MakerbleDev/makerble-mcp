@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 263 Makerble MCP tool definitions.
+ * All 267 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1154,13 +1154,14 @@ export function buildTools(api) {
       description:
         "Add or remove a label on many Contacts (Beneficiaries) at once, as Add or remove on the Manage Contacts " +
         "page does for the Contacts ticked there. label_kind says which kind of label: 'group' for Groups " +
-        "(Contact Groups, e.g. \"Girls' football\"). More kinds (Flags, Audiences, Skills Required, Type) are " +
-        "being added. Each change is made as if it were made on one Contact's Edit Contact page, so it appears on " +
-        "the Contact's History. " +
+        "(Contact Groups, e.g. \"Girls' football\") or 'flag' for Flags (Contact Flags, e.g. \"Safeguarding " +
+        "concern\"). More kinds (Audiences, Skills Required, Type) are being added. Each change is made as if it " +
+        "were made on one Contact's own screen, so a Group change appears on the Contact's History and a Flag is " +
+        "raised by you. " +
         "\nadd_ids are the labels to give every chosen Contact and remove_ids the labels to take off every one of " +
         "them; give at least one, and never the same id in both. For label_kind 'group' they are Group ids from " +
-        "makerble_list_groups. A Contact who already has a label being added, or lacks one being removed, is left " +
-        "as they are. " +
+        "makerble_list_groups; for 'flag', Flag ids from makerble_list_flags. A Contact who already has a label " +
+        "being added, or lacks one being removed, is left as they are. " +
         "\nChoose the Contacts in one of two ways: beneficiary_ids (at most 500), or everyone matching filter_data " +
         "(the Manage Contacts filters, e.g. { project_ids: ['572'] }) minus excluded_ids; project_id is a shortcut " +
         "for 'Contacts in this Project'. With neither, every Contact you can see in the organisation is chosen, so " +
@@ -1168,7 +1169,8 @@ export function buildTools(api) {
         "\nWorkflow to put named Contacts in a Group: (1) makerble_list_groups to find the Group's id; " +
         "(2) makerble_list_contacts to find the Contacts' ids; (3) call this tool with label_kind 'group'. " +
         "\nSkip rules: Contacts you only have Headline Only Access to are skipped (skip_counts.headline_only), and " +
-        "so are Contacts you may not edit (skip_counts.not_allowed). " +
+        "so are Contacts you may not edit (Groups: skip_counts.not_allowed). Only the person who raised a Flag may " +
+        "remove it: a Contact with a Flag someone else raised is skipped (skip_counts.raised_by_someone_else). " +
         "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
         "run in the background: the reply has status 'pending' and an id; call makerble_get_bulk_action_progress " +
         "with that id until status is 'completed' or 'failed'. " +
@@ -1181,8 +1183,8 @@ export function buildTools(api) {
         properties: {
           label_kind: {
             type: "string",
-            enum: ["group"],
-            description: "Which kind of label: 'group' for Groups (Contact Groups)",
+            enum: ["group", "flag"],
+            description: "Which kind of label: 'group' for Groups (Contact Groups), 'flag' for Flags (Contact Flags)",
           },
           charity_id: {
             type: "number",
@@ -1220,7 +1222,7 @@ export function buildTools(api) {
         required: ["label_kind"],
       },
       handler: ({ label_kind, ...body }) => {
-        const paths = { group: "/beneficiaries/bulk_groups" };
+        const paths = { group: "/beneficiaries/bulk_groups", flag: "/beneficiaries/bulk_flags" };
         if (!paths[label_kind]) {
           throw new McpError(ErrorCode.InvalidParams, `Unknown label_kind '${label_kind}'. Use one of: ${Object.keys(paths).join(", ")}.`);
         }
@@ -1245,6 +1247,25 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/groups", p),
+    },
+
+    {
+      name: "makerble_list_flags",
+      description:
+        "List the Flags (Contact Flags) you may raise on Contacts (Beneficiaries) in an organisation, e.g. " +
+        "\"Safeguarding concern\". A Flag restricted to Teams is listed only if you are in one of them. Use an id " +
+        "with makerble_label_contacts (label_kind 'flag'). " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, color, created_at, updated_at }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/flags", p),
     },
 
     {
