@@ -15,7 +15,7 @@
  *   GET  /          — health check
  *   GET  /connect   — self-service web UI for non-technical users to get their personal MCP URL
  *   POST /auth      — JSON endpoint called by the /connect page (email+password → token+URL)
- *   POST /mcp       — Streamable HTTP transport (MCP spec 2025-03-26)
+ *   POST /mcp       — Streamable HTTP transport (MCP spec 2025-03-26), stateless
  *   GET  /sse       — Legacy SSE stream (MCP spec 2024-11-05)
  *   POST /messages  — Legacy SSE message endpoint
  *
@@ -25,12 +25,10 @@
  *   MAKERBLE_TOKEN    — optional org-wide fallback token
  */
 
-import { randomUUID } from "node:crypto";
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { makeApiClient, buildTools, registerTools } from "./makerble-tools.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -131,7 +129,8 @@ app.set("trust proxy", 1);
 
 app.use(express.json());
 
-// Session store: sessionId → { transport, email, token }
+// Session store for the legacy SSE transport only: sessionId → { transport, email, token }.
+// (Streamable HTTP on /mcp is stateless — see the /mcp handler.)
 const sessions = {};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -890,43 +889,37 @@ app.all("/mcp", async (req, res) => {
     });
   }
 
-  try {
-    const sessionId = req.headers["mcp-session-id"];
-
-    // Existing session — reuse transport (environment was fixed at session start)
-    if (sessionId && sessions[sessionId]) {
-      const session = sessions[sessionId];
-      if (!(session.transport instanceof StreamableHTTPServerTransport)) {
-        return res.status(400).json({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Session uses a different transport protocol" },
-          id: null,
-        });
-      }
-      return await session.transport.handleRequest(req, res, req.body);
-    }
-
-    // New session — must be an initialise request
-    if (!sessionId && req.method === "POST" && isInitializeRequest(req.body)) {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (sid) => {
-          sessions[sid] = { transport, email: creds.email, token: creds.token, env: env.key };
-        },
-      });
-      transport.onclose = () => {
-        const sid = transport.sessionId;
-        if (sid && sessions[sid]) delete sessions[sid];
-      };
-      await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
-      return await transport.handleRequest(req, res, req.body);
-    }
-
-    return res.status(400).json({
+  // Stateless mode. This runs on Vercel, where consecutive requests are served
+  // by different short-lived instances, so an in-memory session map (the old
+  // `sessions[sessionId]` lookup) misses on almost every call after
+  // `initialize` and the client gets "Bad request: no valid session ID".
+  // Credentials and environment arrive on every request (headers or the
+  // personal-link query string), so nothing needs to persist between calls:
+  // each POST gets a fresh Server + transport, and no Mcp-Session-Id is
+  // issued. A stale Mcp-Session-Id cached by a client is ignored rather than
+  // rejected, so old connections recover without a disconnect/reconnect.
+  if (req.method !== "POST") {
+    // No server-initiated SSE stream and no session to DELETE in stateless mode.
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({
       jsonrpc: "2.0",
-      error: { code: -32000, message: "Bad request: no valid session ID" },
+      error: { code: -32000, message: "Method not allowed. Use POST for MCP requests." },
       id: null,
     });
+  }
+
+  try {
+    const server    = createMcpServer(creds.email, creds.token, env.baseUrl);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    res.on("close", () => {
+      transport.close().catch(() => {});
+      server.close().catch(() => {});
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
 
   } catch (err) {
     console.error("Error on /mcp:", err);
