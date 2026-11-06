@@ -15,9 +15,9 @@
  *   GET  /          — health check
  *   GET  /connect   — self-service web UI for non-technical users to get their personal MCP URL
  *   POST /auth      — JSON endpoint called by the /connect page (email+password → token+URL)
- *   POST /mcp       — Streamable HTTP transport (MCP spec 2025-03-26)
- *   GET  /sse       — Legacy SSE stream (MCP spec 2024-11-05)
- *   POST /messages  — Legacy SSE message endpoint
+ *   POST /mcp       — Streamable HTTP transport (MCP spec 2025-03-26), stateless
+ *   GET  /sse       — retired legacy SSE transport; returns 410 Gone pointing to /mcp
+ *   POST /messages  — retired legacy SSE transport; returns 410 Gone pointing to /mcp
  *
  * Environment variables (Vercel dashboard):
  *   MAKERBLE_BASE_URL — optional, overrides the "production" entry in ENV_CONFIG below
@@ -25,12 +25,9 @@
  *   MAKERBLE_TOKEN    — optional org-wide fallback token
  */
 
-import { randomUUID } from "node:crypto";
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { makeApiClient, buildTools, registerTools } from "./makerble-tools.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -131,9 +128,6 @@ app.set("trust proxy", 1);
 
 app.use(express.json());
 
-// Session store: sessionId → { transport, email, token }
-const sessions = {};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Health check
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,8 +140,6 @@ app.get("/", (_req, res) => {
     endpoints: {
       connect:        "GET  /connect  — get your personal MCP URL (no technical knowledge needed)",
       streamableHttp: "POST /mcp      — MCP Streamable HTTP transport",
-      sseStream:      "GET  /sse      — MCP legacy SSE transport",
-      sseMessages:    "POST /messages — MCP legacy SSE messages",
     },
     auth: "Pass credentials via headers (X-Makerble-Email / X-Makerble-Token), " +
           "query params (?email=&token=), or set MAKERBLE_EMAIL / MAKERBLE_TOKEN env vars.",
@@ -890,43 +882,37 @@ app.all("/mcp", async (req, res) => {
     });
   }
 
-  try {
-    const sessionId = req.headers["mcp-session-id"];
-
-    // Existing session — reuse transport (environment was fixed at session start)
-    if (sessionId && sessions[sessionId]) {
-      const session = sessions[sessionId];
-      if (!(session.transport instanceof StreamableHTTPServerTransport)) {
-        return res.status(400).json({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Session uses a different transport protocol" },
-          id: null,
-        });
-      }
-      return await session.transport.handleRequest(req, res, req.body);
-    }
-
-    // New session — must be an initialise request
-    if (!sessionId && req.method === "POST" && isInitializeRequest(req.body)) {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (sid) => {
-          sessions[sid] = { transport, email: creds.email, token: creds.token, env: env.key };
-        },
-      });
-      transport.onclose = () => {
-        const sid = transport.sessionId;
-        if (sid && sessions[sid]) delete sessions[sid];
-      };
-      await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
-      return await transport.handleRequest(req, res, req.body);
-    }
-
-    return res.status(400).json({
+  // Stateless mode. This runs on Vercel, where consecutive requests are served
+  // by different short-lived instances, so an in-memory session map (the old
+  // `sessions[sessionId]` lookup) misses on almost every call after
+  // `initialize` and the client gets "Bad request: no valid session ID".
+  // Credentials and environment arrive on every request (headers or the
+  // personal-link query string), so nothing needs to persist between calls:
+  // each POST gets a fresh Server + transport, and no Mcp-Session-Id is
+  // issued. A stale Mcp-Session-Id cached by a client is ignored rather than
+  // rejected, so old connections recover without a disconnect/reconnect.
+  if (req.method !== "POST") {
+    // No server-initiated SSE stream and no session to DELETE in stateless mode.
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({
       jsonrpc: "2.0",
-      error: { code: -32000, message: "Bad request: no valid session ID" },
+      error: { code: -32000, message: "Method not allowed. Use POST for MCP requests." },
       id: null,
     });
+  }
+
+  try {
+    const server    = createMcpServer(creds.email, creds.token, env.baseUrl);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    res.on("close", () => {
+      transport.close().catch(() => {});
+      server.close().catch(() => {});
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
 
   } catch (err) {
     console.error("Error on /mcp:", err);
@@ -941,32 +927,30 @@ app.all("/mcp", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy SSE transport  (MCP 2024-11-05)
+// Legacy SSE transport  (MCP 2024-11-05) — retired
 // ─────────────────────────────────────────────────────────────────────────────
+// The old SSE transport can't work on Vercel: replies travel down the stream
+// opened by GET /sse, so every POST /messages must reach the same instance,
+// and Vercel spreads requests across short-lived instances and caps how long
+// a function may run. The spec has deprecated it in favour of Streamable
+// HTTP, and /connect only hands out /mcp links, so these routes now return
+// 410 Gone with a pointer to /mcp.
 
-app.get("/sse", async (req, res) => {
-  const creds = resolveCredentials(req);
-  const env   = resolveEnvironment(req);
+function sseRetired(_req, res) {
+  res.status(410).json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "The legacy SSE transport (/sse, /messages) has been retired. " +
+               "Use the Streamable HTTP endpoint at /mcp instead — visit /connect " +
+               "to get your personal /mcp link.",
+    },
+    id: null,
+  });
+}
 
-  if (!creds) {
-    return res.status(401).send("Unauthorised: no Makerble credentials. Visit /connect for your personal link.");
-  }
-
-  const transport = new SSEServerTransport("/messages", res);
-  sessions[transport.sessionId] = { transport, email: creds.email, token: creds.token, env: env.key };
-  res.on("close", () => { delete sessions[transport.sessionId]; });
-  await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
-});
-
-app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const session   = sessions[sessionId];
-
-  if (!session || !(session.transport instanceof SSEServerTransport)) {
-    return res.status(400).json({ error: "No SSE session found for sessionId" });
-  }
-  await session.transport.handlePostMessage(req, res, req.body);
-});
+app.all("/sse", sseRetired);
+app.all("/messages", sseRetired);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Start
@@ -976,8 +960,7 @@ if (process.env.NODE_ENV !== "test") {
   app.listen(PORT, () => {
     console.log(`\nMakerble MCP Server running on port ${PORT}`);
     console.log(`  Connect page:     http://localhost:${PORT}/connect`);
-    console.log(`  Streamable HTTP:  http://localhost:${PORT}/mcp`);
-    console.log(`  Legacy SSE:       http://localhost:${PORT}/sse\n`);
+    console.log(`  Streamable HTTP:  http://localhost:${PORT}/mcp\n`);
   });
 }
 
