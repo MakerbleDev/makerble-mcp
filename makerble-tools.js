@@ -6224,18 +6224,23 @@ export function buildTools(api) {
         "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Field " +
         "(a Custom Field): a question with a free answer rather than a Metric, e.g. 'Date of birth' (date), " +
         "'Postcode' (text) or 'Number of children' (number), for use on a Survey or Contact Form. A " +
-        "section_title Field is a heading, with section_text shown under it. If the organisation or the " +
+        "section_title Field is a heading, with section_text shown under it. A video, audio or picture Field " +
+        "is a Video, Audio or Picture question on a Survey (Story Category): an Attachment (file) Field that " +
+        "asks for that kind of media, which the person answering can record or take there and then with their " +
+        "camera or microphone, or attach from their device. It is returned with field_type 'file' and " +
+        "capture_type 'video', 'audio' or 'picture'. If the organisation or the " +
         "public library already has one with the same or a near-identical name (ignoring case, spacing and " +
         "punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
         "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
-        "Field (id, type 'field', name, owner, field_type; a section_title Field has only id, type and name) " +
+        "Field (id, type 'field', name, owner, field_type, and capture_type for a video, audio or picture Field; " +
+        "a section_title Field has only id, type and name) " +
         "and approved (always false: Fields are not shared in the public library).",
       inputSchema: {
         type: "object",
         properties: {
           organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
           field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
-          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey" },
           section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
           private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
           force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
