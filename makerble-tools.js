@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 260 Makerble MCP tool definitions.
+ * All 263 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1119,6 +1119,121 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/beneficiaries/bulk_project_moves/${id}`),
+    },
+
+    {
+      name: "makerble_label_contacts",
+      description:
+        "Add or remove a label on many Contacts (Beneficiaries) at once, as Add or remove on the Manage Contacts " +
+        "page does for the Contacts ticked there. label_kind says which kind of label: 'group' for Groups " +
+        "(Contact Groups, e.g. \"Girls' football\"). More kinds (Flags, Audiences, Skills Required, Type) are " +
+        "being added. Each change is made as if it were made on one Contact's Edit Contact page, so it appears on " +
+        "the Contact's History. " +
+        "\nadd_ids are the labels to give every chosen Contact and remove_ids the labels to take off every one of " +
+        "them; give at least one, and never the same id in both. For label_kind 'group' they are Group ids from " +
+        "makerble_list_groups. A Contact who already has a label being added, or lacks one being removed, is left " +
+        "as they are. " +
+        "\nChoose the Contacts in one of two ways: beneficiary_ids (at most 500), or everyone matching filter_data " +
+        "(the Manage Contacts filters, e.g. { project_ids: ['572'] }) minus excluded_ids; project_id is a shortcut " +
+        "for 'Contacts in this Project'. With neither, every Contact you can see in the organisation is chosen, so " +
+        "be specific. " +
+        "\nWorkflow to put named Contacts in a Group: (1) makerble_list_groups to find the Group's id; " +
+        "(2) makerble_list_contacts to find the Contacts' ids; (3) call this tool with label_kind 'group'. " +
+        "\nSkip rules: Contacts you only have Headline Only Access to are skipped (skip_counts.headline_only), and " +
+        "so are Contacts you may not edit (skip_counts.not_allowed). " +
+        "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
+        "run in the background: the reply has status 'pending' and an id; call makerble_get_bulk_action_progress " +
+        "with that id until status is 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "Errors: 404 for an organisation you aren't in; 422 for nothing to add or remove, an id that isn't one of " +
+        "the organisation's labels, an id in both add_ids and remove_ids, more than 500 beneficiary_ids, or a " +
+        "missing charity_id when you belong to several organisations.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          label_kind: {
+            type: "string",
+            enum: ["group"],
+            description: "Which kind of label: 'group' for Groups (Contact Groups)",
+          },
+          charity_id: {
+            type: "number",
+            description: "The organisation whose Contacts to change. Optional if you belong to only one organisation.",
+          },
+          add_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Labels to give every chosen Contact, e.g. Group ids from makerble_list_groups",
+          },
+          remove_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Labels to take off every chosen Contact",
+          },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to change, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: {
+            type: "object",
+            description: "Manage Contacts filters choosing the Contacts, e.g. { project_ids: ['572'] }. Used when beneficiary_ids is left out.",
+          },
+          project_id: {
+            type: "number",
+            description: "Shortcut for filter_data: choose the Contacts in this Project",
+          },
+          excluded_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact IDs matching the filters to leave out",
+          },
+        },
+        required: ["label_kind"],
+      },
+      handler: ({ label_kind, ...body }) => {
+        const paths = { group: "/beneficiaries/bulk_groups" };
+        if (!paths[label_kind]) {
+          throw new McpError(ErrorCode.InvalidParams, `Unknown label_kind '${label_kind}'. Use one of: ${Object.keys(paths).join(", ")}.`);
+        }
+        return post(paths[label_kind], body);
+      },
+    },
+
+    {
+      name: "makerble_list_groups",
+      description:
+        "List an organisation's Groups (Contact Groups): the labels Contacts (Beneficiaries) are sorted into, e.g. " +
+        "\"Girls' football\". These are the Groups the Edit Contact page offers. Use an id with " +
+        "makerble_label_contacts (label_kind 'group'). Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, title, created_at, updated_at }] }, by title.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/groups", p),
+    },
+
+    {
+      name: "makerble_get_bulk_action_progress",
+      description:
+        "Check a change to many Contacts that is running in the background (more than 50 Contacts), e.g. one " +
+        "started with makerble_label_contacts. Only the user who started it can see it. " +
+        "Returns { id, action_name, status, total_count, processed_count, changed_count, skip_counts, background, " +
+        "summary }: status is 'pending', 'running', 'completed' or 'failed'; processed_count of total_count Contacts " +
+        "have been reached so far; summary is the finished message once it has finished. Wait a few seconds " +
+        "between calls.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The id the bulk change returned" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/beneficiaries/bulk_actions/${id}`),
     },
 
     {
