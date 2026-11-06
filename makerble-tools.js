@@ -418,6 +418,8 @@ export function buildTools(api) {
         "Rows view of the My Projects page. A closed Project can't get new updates (Stories) or Contacts and its updates " +
         "can't be edited until it is reopened; closed Projects are listed on the organisation's Closed Projects page. Each " +
         "Project is closed or reopened as from its own settings menu, so its team is told.\n" +
+        "Closing a Project also archives the Progress Boards generated for it (\"<Survey> on <Project>\"), and reopening it " +
+        "reopens those boards; a board someone archived by hand stays archived.\n" +
         "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
         "If any listed Project is one the user may not change, nothing changes and the reply names those Projects.\n" +
         "close only changes listed Projects that are open, and reopen only those that are closed.\n" +
