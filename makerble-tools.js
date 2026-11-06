@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 259 Makerble MCP tool definitions.
+ * All 260 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6827,6 +6827,42 @@ export function buildTools(api) {
         required: ["organisation_id", "user_id", "contract_id"],
       },
       handler: ({ organisation_id, user_id, ...body }) => put(`/organisations/${organisation_id}/seats/${user_id}`, body),
+    },
+
+    // ── Usage (CP-8987) ───────────────────────────────────────────────────────
+    {
+      name: "makerble_get_usage",
+      description:
+        "Get an Organisation's (Charity's) usage against the allowances in its plan: the Usage page under Our Account › " +
+        "Usage in Makerble. Use it to answer 'are we close to any of our allowances', 'what will our usage bill be this " +
+        "month' or 'how much did we use last month'. Covers what an Organisation is charged for when it goes over an " +
+        "allowance: Contacts, Stories (survey responses), automation runs, API and integration runs, file storage " +
+        "uploaded (in GB), SMS and email. For this calendar month it returns, per usage type, quantity used so far, " +
+        "allowance (0 means charged from the first one), percent_used, status (within, near = 80% or more, over, " +
+        "waived), expected_quantity by month end at the current rate, the price over the allowance (unit_price per " +
+        "per_quantity, or the bundle tier_min to tier_max the expected total falls in), and charge_so_far and " +
+        "expected_charge; plus the totals charge_so_far and expected_charge, in the Organisation's billing currency, " +
+        "before VAT. A null charge means no price is set (unpriced is then true). File storage counts what was uploaded " +
+        "this month, not what is stored; Contacts are the current total including archived ones, and their bundle is " +
+        "charged every month the total is over the allowance. Set include_history to also get the previous 12 months " +
+        "(history), each with its usage, allowance and charge after any waivers. Going over an allowance never stops " +
+        "anyone working. Only the Organisation's admins (Organisation Admins / Charity Editors) can read this; anyone " +
+        "else gets not-found.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          include_history: { type: "boolean", description: "Also return the previous 12 months (default false)" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: async ({ organisation_id, include_history }) => {
+        const month = await get(`/organisations/${organisation_id}/usage`);
+        if (!include_history) return month;
+
+        const history = await get(`/organisations/${organisation_id}/usage/history`);
+        return { ...month, history: history.data };
+      },
     },
 
     // ── Age bands (CP-8902) ───────────────────────────────────────────────────
