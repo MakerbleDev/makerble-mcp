@@ -7497,24 +7497,28 @@ export function buildTools(api) {
         "'template' = Automation Templates: saved Contact Automations that can be applied to other Projects " +
         "(makerble_apply_automation_template). Leave kind out to get all three. Each item has active (false = " +
         "paused). Organisation editors and observers can see them; Contact Automations also show to Project " +
-        "Managers of their Project.",
+        "Managers of their Project. To find which automations add a particular Flag to Contacts (as the Manage " +
+        "Flags page's 'Automations that add this flag automatically' column does), give flag_id: only Contact " +
+        "Automations are returned. Flag ids are in makerble_get_automation_options kind 'contact'.",
       inputSchema: {
         type: "object",
         properties: {
           kind: { type: "string", enum: ["contact", "project", "template"], description: "Leave out for all three" },
           charity_id: { type: "number", description: "The Organisation (Charity) ID (filters Project Automations and Templates)" },
           project_id: { type: "number", description: "Only Contact Automations on this Project" },
+          flag_id: { type: "number", description: "Only Contact Automations whose actions add this Flag (implies kind 'contact')" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, at most 200" },
         },
       },
-      handler: async ({ kind, charity_id, project_id, page, per_page }) => {
+      handler: async ({ kind, charity_id, project_id, flag_id, page, per_page }) => {
         const paging = { page, per_page };
         const lists = {
-          contact: () => get("/contact_automations", { project_id, ...paging }),
+          contact: () => get("/contact_automations", { project_id, flag_id, ...paging }),
           project: () => get("/project_automations", { charity_id, ...paging }),
           template: () => get("/automation_templates", { charity_id, ...paging }),
         };
+        if (flag_id) return lists.contact();
         if (kind) return lists[kind]();
         const [contact_automations, project_automations, automation_templates] = await Promise.all(
           [lists.contact(), lists.project(), lists.template()]
