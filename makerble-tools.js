@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 269 Makerble MCP tool definitions.
+ * All 274 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1149,6 +1149,179 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/beneficiaries/bulk_project_moves/${id}`),
+    },
+
+    {
+      name: "makerble_label_contacts",
+      description:
+        "Add or remove a label on many Contacts (Beneficiaries) at once, or change their Type, as Add or remove " +
+        "does on the Manage Contacts page for the Contacts ticked there. label_kind says which: " +
+        "'group' for Groups (Contact Groups, e.g. \"Girls' football\"); 'flag' for Flags (Contact Flags, e.g. " +
+        "\"Safeguarding concern\"); 'audience' for Audiences (Contact Roles, e.g. Volunteers); 'skill_required' " +
+        "for Skills Required (Skills a Contact needs, e.g. First aid); 'type' for the Contact Type (Person, " +
+        "Organisation, Object, Animal). Each change is made as on one Contact's own screen. " +
+        "\nFor group, flag, audience and skill_required: add_ids are labels to give every chosen Contact and " +
+        "remove_ids labels to take off every one; give at least one, and never the same id in both. Find the ids " +
+        "with makerble_list_groups, makerble_list_flags, makerble_list_audiences or makerble_list_skills. A Contact " +
+        "who already has a label being added, or lacks one being removed, is left as they are. Audiences being " +
+        "added start on start_date (default today); removing an Audience ends it today rather than deleting it. " +
+        "\nFor type: beneficiary_type_id is the Type to change every chosen Contact to (makerble_list_contact_types). " +
+        "Bio fields that only show for one Type stay saved but are hidden. " +
+        "\nChoose the Contacts in one of two ways: beneficiary_ids (at most 500), or everyone matching filter_data " +
+        "(the Manage Contacts filters, e.g. { project_ids: ['572'] }) minus excluded_ids; project_id is a shortcut " +
+        "for 'Contacts in this Project'. With neither, every Contact you can see in the organisation is chosen, so " +
+        "be specific. " +
+        "\nWorkflow to put named Contacts in a Group: (1) makerble_list_groups to find the Group's id; " +
+        "(2) makerble_list_contacts to find the Contacts' ids; (3) call this tool with label_kind 'group'. " +
+        "\nSkip rules (counted in skip_counts): headline_only (you only have Headline Only Access); not_allowed " +
+        "(Groups and Type: you may not edit the Contact); raised_by_someone_else (only the person who raised a Flag " +
+        "may remove it); not_allowed_to_end (you may not end that Audience); not_allowed_to_remove (only " +
+        "Organisation Editors may remove a Skill Required). A skipped Contact is left unchanged. " +
+        "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
+        "run in the background: the reply has status 'pending' and an id; call makerble_get_bulk_action_progress " +
+        "with that id until status is 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "Errors: 404 for an organisation you aren't in; 422 for nothing to change, an id that isn't one of the " +
+        "organisation's labels you may use, a bad start_date, more than 500 beneficiary_ids, or a missing " +
+        "charity_id when you belong to several organisations.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          label_kind: {
+            type: "string",
+            enum: ["group", "flag", "audience", "skill_required", "type"],
+            description: "Which kind of label: 'group' (Groups), 'flag' (Flags), 'audience' (Audiences), 'skill_required' (Skills Required) or 'type' (Contact Type)",
+          },
+          charity_id: {
+            type: "number",
+            description: "The organisation whose Contacts to change. Optional if you belong to only one organisation.",
+          },
+          add_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Labels to give every chosen Contact, e.g. Group ids from makerble_list_groups",
+          },
+          remove_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Labels to take off every chosen Contact",
+          },
+          start_date: {
+            type: "string",
+            description: "label_kind 'audience' only: when the Audiences being added start, e.g. '2026-11-01'. Default today.",
+          },
+          beneficiary_type_id: {
+            type: "number",
+            description: "label_kind 'type' only: the Contact Type to change every chosen Contact to",
+          },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to change, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: {
+            type: "object",
+            description: "Manage Contacts filters choosing the Contacts, e.g. { project_ids: ['572'] }. Used when beneficiary_ids is left out.",
+          },
+          project_id: {
+            type: "number",
+            description: "Shortcut for filter_data: choose the Contacts in this Project",
+          },
+          excluded_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact IDs matching the filters to leave out",
+          },
+        },
+        required: ["label_kind"],
+      },
+      handler: ({ label_kind, ...body }) => {
+        const paths = {
+          group: "/beneficiaries/bulk_groups",
+          flag: "/beneficiaries/bulk_flags",
+          audience: "/beneficiaries/bulk_audiences",
+          skill_required: "/beneficiaries/bulk_required_skills",
+          type: "/beneficiaries/bulk_type",
+        };
+        if (!paths[label_kind]) {
+          throw new McpError(ErrorCode.InvalidParams, `Unknown label_kind '${label_kind}'. Use one of: ${Object.keys(paths).join(", ")}.`);
+        }
+        return post(paths[label_kind], body);
+      },
+    },
+
+    {
+      name: "makerble_list_groups",
+      description:
+        "List an organisation's Groups (Contact Groups): the labels Contacts (Beneficiaries) are sorted into, e.g. " +
+        "\"Girls' football\". These are the Groups the Edit Contact page offers. Use an id with " +
+        "makerble_label_contacts (label_kind 'group'). Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, title, created_at, updated_at }] }, by title.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/groups", p),
+    },
+
+    {
+      name: "makerble_list_flags",
+      description:
+        "List the Flags (Contact Flags) you may raise on Contacts (Beneficiaries) in an organisation, e.g. " +
+        "\"Safeguarding concern\". A Flag restricted to Teams is listed only if you are in one of them. Use an id " +
+        "with makerble_label_contacts (label_kind 'flag'). " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, color, created_at, updated_at }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/flags", p),
+    },
+
+    {
+      name: "makerble_list_skills",
+      description:
+        "List an organisation's Skills, e.g. \"First aid\", as offered in the Skills Required box on a Contact " +
+        "(Beneficiary) profile. Use an id with makerble_label_contacts (label_kind 'skill_required'). Any member of " +
+        "the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, created_at, updated_at }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/skills", p),
+    },
+
+    {
+      name: "makerble_get_bulk_action_progress",
+      description:
+        "Check a change to many Contacts that is running in the background (more than 50 Contacts), e.g. one " +
+        "started with makerble_label_contacts. Only the user who started it can see it. " +
+        "Returns { id, action_name, status, total_count, processed_count, changed_count, skip_counts, background, " +
+        "summary }: status is 'pending', 'running', 'completed' or 'failed'; processed_count of total_count Contacts " +
+        "have been reached so far; summary is the finished message once it has finished. Wait a few seconds " +
+        "between calls.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The id the bulk change returned" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/beneficiaries/bulk_actions/${id}`),
     },
 
     {
