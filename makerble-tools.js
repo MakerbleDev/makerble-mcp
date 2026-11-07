@@ -5871,7 +5871,8 @@ export function buildTools(api) {
       name: "makerble_get_tour",
       description:
         "Get one Welcome Tour by id, with its settings and its stops in order (group, title, text, what to click, " +
-        "the text shown after the click, and whether a click stop can be skipped). Makerble staff, or an " +
+        "the text shown after the click, and whether a click stop can be skipped), and watch_checklist_ids, the " +
+        "Checklists that Watch the journey shows straight after the tour. Makerble staff, or an " +
         "Organisation Admin of its Organisation.",
       inputSchema: {
         type: "object",
@@ -5892,8 +5893,13 @@ export function buildTools(api) {
         "shows the stop; an unticked stop keeps its wording), body (its wording, up to 280 characters of plain " +
         "text; empty uses Makerble's default_body) and skippable (stops that ask for a click). A stop_key the tour " +
         "doesn't have yet adds that stop. The Essentials stops (navbar_spaces, navbar_user) are always included. " +
+        "watch_checklist_ids chooses up to 2 Checklists (ids from makerble_list_checklists) for Watch the journey, " +
+        "the step of the welcome journey straight after the tour that walks a new colleague through each " +
+        "Checklist's steps; a person sees only those on their own workspaces (projects), and [] falls back to up " +
+        "to 2 Checklists on their workspaces, most recently updated first. More than 2 is refused. " +
         "Only the fields sent change. They can also set photo_skippable (\"People can skip adding a profile " +
-        "picture\") for the whole Organisation, with organisation_id and no id.\n\n" +
+        "picture\") and watch_skippable (\"People can skip Watch the journey\") for the whole Organisation, with " +
+        "organisation_id and no id.\n\n" +
         "Makerble staff (System Access) can change everything: without id it creates a tour (name and " +
         "organisation_id needed; it starts as a draft nobody sees), with id it changes only the fields sent. " +
         "Stops use these stop_key values: navbar_spaces (Spaces in the top navbar, click), navbar_user (your name " +
@@ -5906,14 +5912,21 @@ export function buildTools(api) {
         type: "object",
         properties: {
           id: { type: "number", description: "The Welcome Tour to update. Leave out to create one (staff only)." },
-          organisation_id: { type: "number", description: "The Organisation, when creating a tour or setting photo_skippable" },
+          organisation_id: { type: "number", description: "The Organisation, when creating a tour or setting photo_skippable or watch_skippable" },
           photo_skippable: { type: "boolean", description: "Whether people joining the Organisation can skip adding a profile picture" },
+          watch_skippable: { type: "boolean", description: "Whether people joining the Organisation can skip Watch the journey, the Checklists shown after the tour" },
           name: { type: "string" },
           team_id: { type: ["number", "null"], description: "The Team it is for; null for the Organisation's default" },
           mode: { type: "string", enum: ["required", "optional"] },
           status: { type: "string", enum: ["draft", "live"] },
           start_skippable: { type: "boolean" },
           later_limit: { type: "number", description: "1 to 10" },
+          watch_checklist_ids: {
+            type: "array",
+            items: { type: "number" },
+            maxItems: 2,
+            description: "Up to 2 Checklist ids, in order, for Watch the journey after the tour; [] to clear",
+          },
           stops: {
             type: "array",
             items: {
@@ -5935,9 +5948,9 @@ export function buildTools(api) {
           },
         },
       },
-      handler: async ({ id, photo_skippable, ...body }) => {
-        if (photo_skippable !== undefined && !id) {
-          return patch(`/organisations/${body.organisation_id}/welcome_journey_settings`, { photo_skippable });
+      handler: async ({ id, photo_skippable, watch_skippable, ...body }) => {
+        if ((photo_skippable !== undefined || watch_skippable !== undefined) && !id) {
+          return patch(`/organisations/${body.organisation_id}/welcome_journey_settings`, { photo_skippable, watch_skippable });
         }
         return id ? patch(`/tours/${id}`, body) : post("/tours", body);
       },
