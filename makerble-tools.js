@@ -5626,20 +5626,31 @@ export function buildTools(api) {
       handler: ({ id }) => del(`/api_keys/${id}`),
     },
 
-    // ── Announcements (CP-9007) ───────────────────────────────────────────────
+    // ── Announcements (CP-9007, CP-9058) ──────────────────────────────────────
     {
       name: "makerble_list_announcements",
       description:
-        "List Makerble's Announcements, newest first. An Announcement is the \"What's new in Makerble\" popup " +
-        "that each signed-in user in its audience sees once after logging in, between its start and end dates " +
-        "(e.g. \"Projects are now Workspaces\"). Makerble staff write them in Site Overview › Announcements. Only " +
-        "users with System Access (Makerble staff) can use the announcement tools; anyone else gets 403. Returns " +
-        "each one's title (headline), body (message), visual_type (name_change, vimeo or none), name_changes, " +
-        "audience, starts_on, ends_on, status (draft or scheduled), current_status (draft, scheduled, live or " +
-        "ended), seen_count (people who have closed it) and learn_more_click_count.",
+        "List Announcements, newest first. An Announcement is a popup that each signed-in user in its audience " +
+        "sees once, between its start and end dates. Two kinds: Makerble's own \"What's new in Makerble\" popups " +
+        "(scope_type null, e.g. \"Projects are now Workspaces\"), written by Makerble staff; and an Organisation's, " +
+        "Workspace's or Team's announcements (scope_type Charity, Project or Team, with scope_id), written by the " +
+        "people who look after it for the colleagues there. System Access users (Makerble staff) see every one. " +
+        "Anyone else sees only those for places where they hold the role: an Organisation Admin sees their " +
+        "Organisation's and its Workspaces' and Teams'; a Workspace editor (Project Editor) that Workspace's; a " +
+        "Team leader that Team's. Someone who can make announcements nowhere gets 403. Give scope_type and " +
+        "scope_id to list one place's. Returns each one's scope_type, scope_id, title (headline), body (message), " +
+        "visual_type (name_change, vimeo or none), name_changes, audience, starts_on, ends_on, status (draft or " +
+        "scheduled), current_status (draft, scheduled, live or ended), seen_count (people who have closed it) " +
+        "and learn_more_click_count.",
       inputSchema: {
         type: "object",
         properties: {
+          scope_type: {
+            type: "string",
+            enum: ["Charity", "Project", "Team"],
+            description: "With scope_id, only this place's: Charity (Organisation), Project (Workspace) or Team",
+          },
+          scope_id: { type: "number", description: "The Organisation, Workspace or Team ID" },
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
@@ -5651,8 +5662,10 @@ export function buildTools(api) {
     {
       name: "makerble_get_announcement",
       description:
-        "Get one Announcement (a \"What's new in Makerble\" popup) by id, with how many people have seen it " +
-        "(seen_count) and clicked its \"Learn more\" link (learn_more_click_count). System Access users only.",
+        "Get one Announcement (a popup: Makerble's own, or an Organisation's, Workspace's or Team's, see " +
+        "scope_type and scope_id) by id, with how many people have seen it (seen_count) and clicked its " +
+        "\"Learn more\" link (learn_more_click_count). System Access users can get any; anyone else only one " +
+        "for a place where they are an Organisation Admin, Workspace editor or Team leader, otherwise 403.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number", description: "The Announcement ID" } },
@@ -5664,9 +5677,18 @@ export function buildTools(api) {
     {
       name: "makerble_save_announcement",
       description:
-        "Create or update an Announcement: the \"What's new in Makerble\" popup each signed-in user in its " +
-        "audience sees once after logging in. Without id it creates one; with id it changes only the fields " +
-        "you send. System Access users only.\n\n" +
+        "Create or update an Announcement: a popup each signed-in user in its audience sees once, between its " +
+        "start and end dates. Without id it creates one; with id it changes only the fields you send.\n\n" +
+        "Whose announcement: to announce to the colleagues of an Organisation, a Workspace (Project) or a Team, " +
+        "give scope_type (Charity, Project or Team) and scope_id when creating. Its audience is then always the " +
+        "colleagues there (an Organisation's colleagues; a Workspace's editors, reporters and observers; a Team's " +
+        "members and leaders; never Contacts with a login), so leave audience out. Each colleague sees at most one " +
+        "of these a day, after any of Makerble's own. The user must be an Organisation Admin of that Organisation " +
+        "(or of the Workspace's or Team's Organisation), an editor of that Workspace, or a leader of that Team; " +
+        "otherwise 403. Find the ID with makerble_list_projects or makerble_list_teams. Without scope_type, it is " +
+        "one of Makerble's own \"What's new in Makerble\" popups, which only System Access users (Makerble staff) " +
+        "can make. An announcement never moves to another place, so scope_type and scope_id are ignored on " +
+        "update.\n\n" +
         "Writing rules: title (the headline, up to 90 characters) is in sentence case and says plainly what " +
         "changed, e.g. \"Surveys now have a Duplicate button\". body (the message, up to 280 characters) says what " +
         "the person needs to do, which is often nothing, e.g. \"Nothing has moved. Only the names have changed.\" " +
@@ -5674,8 +5696,9 @@ export function buildTools(api) {
         "Visual: for a rename, set visual_type to name_change and give 1 to 3 name_changes " +
         "[{old_name, new_name}], played as an animation in that order. For a video, set visual_type to vimeo " +
         "and vimeo_url (https://vimeo.com/<id>, or https://vimeo.com/<id>/<hash> for an unlisted video). " +
-        "Otherwise use none. learn_more_url is optional and must be a page in the Makerble User Guide " +
-        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
+        "Otherwise use none. The name change animation is for Makerble's own only. learn_more_url is optional: " +
+        "for Makerble's own it must be a page in the Makerble User Guide " +
+        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...); for a place's it can be any https page.\n\n" +
         "Workflow: save it as a draft first (status draft, the default for a new one), which nobody sees, and " +
         "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree, " +
         "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
@@ -5684,6 +5707,12 @@ export function buildTools(api) {
         type: "object",
         properties: {
           id: { type: "number", description: "The Announcement to update. Leave out to create a new one." },
+          scope_type: {
+            type: "string",
+            enum: ["Charity", "Project", "Team"],
+            description: "When creating: whose announcement, an Organisation (Charity), Workspace (Project) or Team. Leave out for Makerble's own.",
+          },
+          scope_id: { type: "number", description: "When creating, with scope_type: the Organisation, Workspace or Team ID" },
           title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
           body: { type: "string", description: "Message, up to 280 characters" },
           visual_type: { type: "string", enum: ["name_change", "vimeo", "none"] },
@@ -5697,14 +5726,17 @@ export function buildTools(api) {
             },
           },
           vimeo_url: { type: "string", description: "For vimeo: the Vimeo link" },
-          learn_more_url: { type: "string", description: "Optional link to a Makerble User Guide page" },
+          learn_more_url: {
+            type: "string",
+            description: "Optional. A Makerble User Guide page for Makerble's own; any https page for a place's",
+          },
           button_label: { type: "string", description: "Up to 24 characters; defaults to \"Got it\"" },
           audience: {
             type: "string",
             enum: ["everyone", "colleagues", "administrators"],
             description:
-              "everyone: every signed-in user. colleagues: everyone except Contacts with a login. " +
-              "administrators: Organisation Admins.",
+              "Makerble's own only. everyone: every signed-in user. colleagues: everyone except Contacts with a " +
+              "login. administrators: Organisation Admins. Ignored for a place's announcement.",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
