@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 268 Makerble MCP tool definitions.
+ * All 274 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -418,6 +418,8 @@ export function buildTools(api) {
         "Rows view of the My Projects page. A closed Project can't get new updates (Stories) or Contacts and its updates " +
         "can't be edited until it is reopened; closed Projects are listed on the organisation's Closed Projects page. Each " +
         "Project is closed or reopened as from its own settings menu, so its team is told.\n" +
+        "Closing a Project also archives the Progress Boards generated for it (\"<Survey> on <Project>\"), and reopening it " +
+        "reopens those boards; a board someone archived by hand stays archived.\n" +
         "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
         "If any listed Project is one the user may not change, nothing changes and the reply names those Projects.\n" +
         "close only changes listed Projects that are open, and reopen only those that are closed.\n" +
@@ -5712,6 +5714,99 @@ export function buildTools(api) {
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
     },
 
+    {
+      name: "makerble_list_wishes",
+      description:
+        "List the signed-in user's own Wishlist: the feature requests and feedback they have sent Makerble " +
+        "from the gift icon (Wishlist › Your wishlist), newest first. Use it when someone asks what they've " +
+        "asked Makerble for, or what happened to a request. Only the user's own are ever returned, never a " +
+        "colleague's. Each has kind (feature_request or feedback), body (what they wrote), status (where it is, " +
+        "in the words they see: \"Received\", \"We are looking at this\", \"Estimate sent to your bill payer\", " +
+        "\"Being built\", \"Shipped\"; feedback reads \"Read by the Makerble team\"), helpdesk_key (the Helpdesk " +
+        "ticket a feature request became, e.g. MC-2501, once it exists) and announcement_id (the Announcement " +
+        "that answered it, if any).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only items changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/wishes", p),
+    },
+
+    {
+      name: "makerble_create_wish",
+      description:
+        "Send Makerble a feature request or feedback for the signed-in user, as Wishlist › Your wishlist " +
+        "(the gift icon) does. kind feature_request goes to Makerble's Helpdesk and shows as \"Received\" " +
+        "straight away; if it needs custom work, Makerble sends an estimate to the organisation's bill payer, " +
+        "not to the user. kind feedback stays in Makerble and is read by the Makerble team.\n\n" +
+        "Workflow: write body in the user's own words, describing what they'd like Makerble to do and why. " +
+        "Never include names or details of the people the organisation supports (its Contacts). Show the user " +
+        "the text and get their agreement before sending, because it goes to Makerble's team. If the user " +
+        "belongs to more than one organisation, ask which one it's about and pass its charity_id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["feature_request", "feedback"] },
+          body: { type: "string", description: "What they'd like, up to 2,000 characters. No details of people they support." },
+          charity_id: {
+            type: "number",
+            description: "Which of the user's organisations it's about. Needed only if they belong to more than one.",
+          },
+        },
+        required: ["kind", "body"],
+      },
+      handler: (body) => post("/wishes", body),
+    },
+
+    {
+      name: "makerble_list_coming_soon",
+      description:
+        "List what Makerble has committed to building next, as Wishlist › Coming soon shows it (the API calls " +
+        "these Roadmap items): building_now items first, then up_next, each in order, with no dates. Use it " +
+        "when someone asks whether a feature is planned. Anyone can read the published items. Makerble staff " +
+        "(System Access) also see unpublished ones, and stale is true for any unchanged for 60 days. Returns " +
+        "each item's title, body (description), stage, stage_label, position and published.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only items changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/roadmap_items", p),
+    },
+
+    {
+      name: "makerble_save_coming_soon_item",
+      description:
+        "Create or update an item in Wishlist › Coming soon (a Roadmap item): something Makerble has " +
+        "committed to building. Without id it creates one at the end of its stage; with id it changes only " +
+        "the fields you send, and moving it to another stage puts it at the end of that stage. Only users " +
+        "with System Access (Makerble staff) can use this; anyone else gets 403.\n\n" +
+        "Writing rules: title (up to 90 characters) names the feature in customer language, e.g. " +
+        "\"Formula Trackers\". body (up to 280 characters) says what it will let people do, e.g. \"Add metrics " +
+        "together to show a combined result.\" Never give dates. Use Makerble's on-screen words (Contacts, " +
+        "Surveys, Workspaces), never database names.\n\n" +
+        "Workflow: create it with published false first, which only Makerble staff see, and show the user. Set " +
+        "published to true once they agree, because a published item shows to every Makerble user.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The item to update. Leave out to create a new one." },
+          title: { type: "string", description: "Up to 90 characters, customer language" },
+          body: { type: "string", description: "What it will let people do, up to 280 characters, no dates" },
+          stage: { type: "string", enum: ["building_now", "up_next"], description: "Building now or Up next" },
+          published: { type: "boolean", description: "Whether every Makerble user sees it in Coming soon" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/roadmap_items/${id}`, body) : post("/roadmap_items", body)),
+    },
+
     // ── Welcome Tours (CP-9049) ──────────────────────────────────────────────
     {
       name: "makerble_list_tours",
@@ -5755,11 +5850,15 @@ export function buildTools(api) {
       name: "makerble_save_tour",
       description:
         "Create or update a Welcome Tour, or change an Organisation's welcome journey settings.\n\n" +
-        "Organisation Admins can change only how strict their own Organisation's tours are: mode (required = " +
-        "Mandatory, optional = people can skip or end it), start_skippable (\"People can skip the tour when it is " +
-        "first offered\"), later_limit (how many times someone can choose \"I'll do this later\", 1 to 10) and, " +
-        "in stops, [{id, skippable}] for stops that ask for a click. They can also set photo_skippable " +
-        "(\"People can skip adding a profile picture\") for the whole Organisation, with organisation_id and no id.\n\n" +
+        "Organisation Admins can change what their Welcome journey settings page changes on their own " +
+        "Organisation's tours: mode (required = Mandatory, optional = people can skip or end it), start_skippable " +
+        "(\"People can skip the tour when it is first offered\"), later_limit (how many times someone can choose " +
+        "\"I'll do this later\", 1 to 10), and in stops, each named by id or stop_key: included (whether the tour " +
+        "shows the stop; an unticked stop keeps its wording), body (its wording, up to 280 characters of plain " +
+        "text; empty uses Makerble's default_body) and skippable (stops that ask for a click). A stop_key the tour " +
+        "doesn't have yet adds that stop. The Essentials stops (navbar_spaces, navbar_user) are always included. " +
+        "Only the fields sent change. They can also set photo_skippable (\"People can skip adding a profile " +
+        "picture\") for the whole Organisation, with organisation_id and no id.\n\n" +
         "Makerble staff (System Access) can change everything: without id it creates a tour (name and " +
         "organisation_id needed; it starts as a draft nobody sees), with id it changes only the fields sent. " +
         "Stops use these stop_key values: navbar_spaces (Spaces in the top navbar, click), navbar_user (your name " +
@@ -5788,9 +5887,10 @@ export function buildTools(api) {
                 id: { type: "number" },
                 position: { type: "number" },
                 group_name: { type: "string" },
-                stop_key: { type: "string" },
+                stop_key: { type: "string", description: "Names the stop instead of id; adds it if the tour doesn't have it" },
                 title: { type: "string" },
-                body: { type: "string" },
+                body: { type: "string", description: "The stop's wording; empty uses Makerble's default_body" },
+                included: { type: "boolean", description: "Whether the tour shows this stop" },
                 action_text: { type: "string" },
                 after_text: { type: "string" },
                 skippable: { type: "boolean" },
@@ -5806,6 +5906,50 @@ export function buildTools(api) {
         }
         return id ? patch(`/tours/${id}`, body) : post("/tours", body);
       },
+    },
+
+    {
+      name: "makerble_list_tour_progress",
+      description:
+        "See who has finished a Welcome Tour (CP-9053), as the Who has finished page does: the colleagues in the " +
+        "tour's Team (everyone in the Organisation for its default tour), by name, each with their team, status " +
+        "(not_started, in_progress, deferred = chose \"I'll do this later\", completed or skipped), tour (as the " +
+        "page shows it, e.g. \"Paused at stop 3 of 7\"), later_used (e.g. \"1 of 3\"), last_active_at and " +
+        "reminded_at. summary gives the page's tiles: finished, part_way, not_started and average_minutes (which " +
+        "counts only tours finished without \"I'll do this later\"). Only colleagues are listed, never Contacts " +
+        "(Beneficiaries) or active participants. Paginated. Use it to answer \"who hasn't finished the tour?\", " +
+        "then makerble_send_tour_reminder to nudge them. An Organisation Admin of the tour's Organisation, or " +
+        "Makerble staff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour ID, from makerble_list_tours" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/tours/${id}/progress`, p),
+    },
+
+    {
+      name: "makerble_send_tour_reminder",
+      description:
+        "Remind a colleague to finish their Welcome Tour: emails them a link that opens the tour at the stop " +
+        "they reached, as Send a reminder on the Who has finished page does. Each person can be reminded once " +
+        "every 7 days; a second reminder sooner is refused with a message saying when the next one can be sent, " +
+        "as is someone who has finished or isn't a colleague in the Organisation. Returns reminded_at and " +
+        "next_reminder_from. Find who hasn't finished with makerble_list_tour_progress first, and check with the " +
+        "user before emailing people. An Organisation Admin of the tour's Organisation, or Makerble staff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour ID" },
+          user_id: { type: "number", description: "The colleague to remind, from makerble_list_tour_progress" },
+        },
+        required: ["id", "user_id"],
+      },
+      handler: ({ id, user_id }) => post(`/tours/${id}/reminders`, { user_id }),
     },
 
     // ── Guidance Panels ───────────────────────────────────────────────────────
@@ -7528,24 +7672,28 @@ export function buildTools(api) {
         "'template' = Automation Templates: saved Contact Automations that can be applied to other Projects " +
         "(makerble_apply_automation_template). Leave kind out to get all three. Each item has active (false = " +
         "paused). Organisation editors and observers can see them; Contact Automations also show to Project " +
-        "Managers of their Project.",
+        "Managers of their Project. To find which automations add a particular Flag to Contacts (as the Manage " +
+        "Flags page's 'Automations that add this flag automatically' column does), give flag_id: only Contact " +
+        "Automations are returned. Flag ids are in makerble_get_automation_options kind 'contact'.",
       inputSchema: {
         type: "object",
         properties: {
           kind: { type: "string", enum: ["contact", "project", "template"], description: "Leave out for all three" },
           charity_id: { type: "number", description: "The Organisation (Charity) ID (filters Project Automations and Templates)" },
           project_id: { type: "number", description: "Only Contact Automations on this Project" },
+          flag_id: { type: "number", description: "Only Contact Automations whose actions add this Flag (implies kind 'contact')" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, at most 200" },
         },
       },
-      handler: async ({ kind, charity_id, project_id, page, per_page }) => {
+      handler: async ({ kind, charity_id, project_id, flag_id, page, per_page }) => {
         const paging = { page, per_page };
         const lists = {
-          contact: () => get("/contact_automations", { project_id, ...paging }),
+          contact: () => get("/contact_automations", { project_id, flag_id, ...paging }),
           project: () => get("/project_automations", { charity_id, ...paging }),
           template: () => get("/automation_templates", { charity_id, ...paging }),
         };
+        if (flag_id) return lists.contact();
         if (kind) return lists[kind]();
         const [contact_automations, project_automations, automation_templates] = await Promise.all(
           [lists.contact(), lists.project(), lists.template()]
