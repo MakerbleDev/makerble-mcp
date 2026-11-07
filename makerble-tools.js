@@ -4503,7 +4503,9 @@ export function buildTools(api) {
         "422 errors name each problem. Workflow: (1) makerble_list_signup_pages to check the organisation doesn't " +
         "already have this Signup Page. (2) makerble_list_projects, makerble_list_contact_bio_forms and " +
         "makerble_list_surveys for the ids. (3) makerble_create_signup_page. (4) Optionally " +
-        "makerble_set_signup_page_emails for its confirmation emails.",
+        "makerble_set_signup_page_emails for its confirmation emails. Set allow_finish_later: true when people will " +
+        "need to save a long Signup Page part-way through: they then get a Save & Finish Later button and a resume link " +
+        "(unfinished forms are deleted 30 days after they were last saved).",
       inputSchema: {
         type: "object",
         properties: {
@@ -4521,6 +4523,7 @@ export function buildTools(api) {
           },
           description: { type: "string" },
           thank_you_message: { type: "string" },
+          allow_finish_later: { type: "boolean", description: "Default false. Let people save the Signup Page part-way through and finish it later from a resume link (Allow people to save this form and finish it later)" },
           individuals: {
             type: "array",
             description: "Fixed only: Individual B, C, ... in order",
