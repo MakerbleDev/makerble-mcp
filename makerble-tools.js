@@ -4751,8 +4751,10 @@ export function buildTools(api) {
         "System Access users only). frameworks is the ordered list of existing Impact Frameworks; " +
         "new_frameworks names new, empty Impact Frameworks to create and add at the end (e.g. one per " +
         "Objective). value_source is 'organisation_values' (each Organisation's own Financial Values, the " +
-        "default) or 'set_values' (values defined in the set per Outcome, set later with " +
-        "makerble_update_framework_set). status 'draft' hides it from people who can't edit it.\n" +
+        "default) or 'set_values' (values defined in the set per Outcome, and optionally per Outcome's own " +
+        "Indicator, set later with makerble_update_framework_set). level3_singular/plural name each " +
+        "Outcome's own Indicators, e.g. 'Measure' for the TOM System. status 'draft' hides it from people " +
+        "who can't edit it.\n" +
         "Workflow: (1) makerble_list_framework_sets to avoid duplicating an existing set. " +
         "(2) makerble_create_framework_set. (3) Link the Organisation's own Indicators to the set's " +
         "Outcomes so its Stories count towards them.",
@@ -4767,6 +4769,8 @@ export function buildTools(api) {
           level1_plural: { type: "string", description: "e.g. goals" },
           level2_singular: { type: "string", description: "e.g. Target" },
           level2_plural: { type: "string", description: "e.g. targets" },
+          level3_singular: { type: "string", description: "e.g. Measure (default Indicator)" },
+          level3_plural: { type: "string", description: "e.g. measures (default indicators)" },
           value_source: { type: "string", enum: ["organisation_values", "set_values"] },
           version_label: { type: "string", description: "e.g. '2025 review'" },
           supersedes_id: { type: "number", description: "The Framework Set this version replaces" },
@@ -4797,9 +4801,11 @@ export function buildTools(api) {
       description:
         "Update a Framework Set the user can edit. Only the fields sent change, except that frameworks " +
         "(when sent) replaces the whole ordered list and financial_values (when sent) replaces the " +
-        "Financial Value chosen for each Outcome. financial_values are used when value_source is " +
-        "'set_values': find Outcome IDs with makerble_list_outcomes and Financial Values the Organisation " +
-        "can use in Makerble.",
+        "Financial Values chosen for the set. financial_values are used when value_source is " +
+        "'set_values'. Give a row an indicator_id to value one of the Outcome's own Indicators (e.g. a " +
+        "TOMs Measure); a Story counting as that Indicator then uses its value instead of the Outcome's. " +
+        "Find Outcome IDs with makerble_list_outcomes, an Outcome's own Indicators with " +
+        "makerble_list_outcome_indicators, and Financial Values the Organisation can use in Makerble.",
       inputSchema: {
         type: "object",
         properties: {
@@ -4812,6 +4818,8 @@ export function buildTools(api) {
           level1_plural: { type: "string" },
           level2_singular: { type: "string" },
           level2_plural: { type: "string" },
+          level3_singular: { type: "string" },
+          level3_plural: { type: "string" },
           value_source: { type: "string", enum: ["organisation_values", "set_values"] },
           version_label: { type: "string" },
           supersedes_id: { type: "number" },
@@ -4834,7 +4842,14 @@ export function buildTools(api) {
             type: "array",
             items: {
               type: "object",
-              properties: { outcome_id: { type: "number" }, financial_value_id: { type: "number" } },
+              properties: {
+                outcome_id: { type: "number" },
+                indicator_id: {
+                  type: "number",
+                  description: "Optional: one of the Outcome's own Indicators; omit for the Outcome's own value",
+                },
+                financial_value_id: { type: "number" },
+              },
               required: ["outcome_id", "financial_value_id"],
             },
           },
@@ -4852,7 +4867,9 @@ export function buildTools(api) {
         "Indicators (progress trackers) linked to an Outcome inside a Framework Set, e.g. its 'Bootcamp " +
         "completions' Indicator linked to SDG Target 4.4. Every Story recorded against that Indicator " +
         "then counts towards the Outcome, in every project (all_projects: true) or only the projects " +
-        "in project_ids. Returns indicator_name, outcome_title, project_ids and all_projects.",
+        "in project_ids. Returns indicator_name, outcome_title, framework_indicator_id and " +
+        "framework_indicator_name (which of the Outcome's own Indicators it counts as, if any), project_ids " +
+        "and all_projects.",
       inputSchema: {
         type: "object",
         properties: {
@@ -4872,18 +4889,26 @@ export function buildTools(api) {
         "Link one of an Organisation's Indicators to an Outcome (e.g. an SDG Target) in a Framework Set the " +
         "Organisation can use, so its Stories count towards that Outcome. The Indicator must be one the " +
         "Organisation owns or uses in its projects. Leave project_ids empty to count it in every project, " +
-        "or list the projects it should count in; linking again with more projects adds them. Requires an " +
-        "Organisation admin.\n" +
+        "or list the projects it should count in; linking again with more projects adds them. Optionally " +
+        "give framework_indicator_id: which of the Outcome's own Indicators the Organisation's Indicator " +
+        "counts as (e.g. the TOMs Measure 'NT1: Local direct employees (FTE)' under a TOMs Outcome). In a " +
+        "set with its own Financial Values, Stories are then valued at that Indicator's value. It can't be " +
+        "changed on an existing link: remove the link first. Requires an Organisation admin.\n" +
         "Workflow: (1) makerble_list_framework_sets to choose a set. (2) makerble_get_framework_set for its " +
         "Impact Frameworks (template_id), then find the Outcome ID inside the right framework, e.g. with " +
-        "makerble_list_outcomes. (3) makerble_list_indicators for the Organisation's Indicator. " +
-        "(4) makerble_link_indicator_to_framework.",
+        "makerble_list_outcomes. (3) Optionally makerble_list_outcome_indicators for that Outcome's own " +
+        "Indicators. (4) makerble_list_indicators for the Organisation's Indicator. " +
+        "(5) makerble_link_indicator_to_framework.",
       inputSchema: {
         type: "object",
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           indicator_id: { type: "number" },
           outcome_id: { type: "number", description: "An Outcome in one of the set's Impact Frameworks" },
+          framework_indicator_id: {
+            type: "number",
+            description: "Optional: one of the Outcome's own Indicators that this Indicator counts as",
+          },
           project_ids: { type: "array", items: { type: "number" }, description: "Empty or omitted: every project" },
         },
         required: ["charity_id", "indicator_id", "outcome_id"],
