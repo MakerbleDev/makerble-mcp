@@ -4251,10 +4251,14 @@ export function buildTools(api) {
     {
       name: "makerble_list_dropdown_fields",
       description:
-        "List all Dropdown/List fields (Ratio Sets). Type 'identity' = Contact Bio Forms; 'progress' = Scale Indicators.",
+        "List all Dropdown/List fields (Ratio Sets). Type 'identity' = Contact Bio Forms; 'progress' = Scale Indicators. " +
+        "To find a Dropdown, pass search: it matches the Dropdown's name, its answer choices (Sub Ratios), and the places it is used " +
+        "(Contact Bio Forms, Project Templates and Event Forms in your organisations, choice trackers (Scale Indicators) built on it, " +
+        "and the Surveys (Story Categories) those trackers are in), ignoring case. Returns the same paginated list, narrowed.",
       inputSchema: {
         type: "object",
         properties: {
+          search: { type: "string", description: "Text to look for in the Dropdown's name, answer choices or places used" },
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
