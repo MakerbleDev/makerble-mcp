@@ -256,7 +256,7 @@ export function buildTools(api) {
     {
       name: "makerble_update_organisation",
       description:
-        "Change an Organisation's (Charity's) settings from Charity Preferences. For now that is the " +
+        "Change an Organisation's (Charity's) settings from Charity Preferences: the " +
         "\"Default story level privacy setting on each project\": the Story Privacy Level each NEW project " +
         "in the Organisation starts with (who can see the Survey Responses / Stories posted in it). " +
         "Existing projects keep their own level; to change one project's level use makerble_update_project_settings. " +
@@ -264,7 +264,10 @@ export function buildTools(api) {
         "charity_plus_network (Network & organisation colleagues only), everyone (Everyone). " +
         "Use makerble_get_organisation to see the current level (default_project_story_privacy). " +
         "Only an Organisation Admin (Charity Editor) can do this; anyone else gets forbidden. " +
-        "Returns the Organisation {id, name, default_project_story_privacy, created_at, updated_at}.",
+        "Also participant_pass_sign_in_enabled ('Enable contacts to sign in using a participant pass'): when false, " +
+        "a Contact's profile hides the Participating As tab unless the Contact is already linked to a user. " +
+        "Send only the settings to change. " +
+        "Returns the Organisation {id, name, default_project_story_privacy, participant_pass_sign_in_enabled, created_at, updated_at}.",
       inputSchema: {
         type: "object",
         properties: {
@@ -274,8 +277,12 @@ export function buildTools(api) {
             enum: ["only_project_colleagues", "only_charity_colleagues", "charity_plus_network", "everyone"],
             description: "The Story Privacy Level each new project starts with.",
           },
+          participant_pass_sign_in_enabled: {
+            type: "boolean",
+            description: "Enable contacts to sign in using a participant pass.",
+          },
         },
-        required: ["id", "default_project_story_privacy"],
+        required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
     },
