@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 274 Makerble MCP tool definitions.
+ * All 275 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2050,16 +2050,49 @@ export function buildTools(api) {
     // ── Cases ──────────────────────────────────────────────────────────────────
     {
       name: "makerble_list_cases",
-      description: "List all Cases. Each Case belongs to one Contact and one Project.",
+      description:
+        "List all Cases. Each Case belongs to one Contact (Beneficiary) and one Project. " +
+        "To find Cases by their answers to Case Form questions (custom field definitions), as the " +
+        "filters on the Manage Cases page do: call makerble_list_case_filter_fields first for the " +
+        "question IDs and each question's filter_format, then pass custom_field_definition_hash. " +
+        "A Case must match every question given.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
-          per_page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
           last_synced_datetime: { type: "string" },
+          custom_field_definition_hash: {
+            type: "object",
+            description:
+              "Answers to filter by, keyed by question ID, in the question's filter_format: " +
+              "text → \"theft\" (answer contains it, ignoring case); number_range → {min, max}; " +
+              "date_range / time_range / datetime_range → {from, to} (e.g. \"2025-01-31\", \"09:00\", " +
+              "\"2025-01-31T14:00\"), both ends included and either optional; choice_ids → [choice IDs]; " +
+              "yes_no → [\"yes\"] (ticked) or [\"no\"] (not ticked or unanswered); " +
+              "has_files_no_files → [\"has_files\"] or [\"no_files\"]; album_ids → [Album IDs].",
+          },
         },
       },
       handler: (p) => get("/cases", p),
+    },
+
+    {
+      name: "makerble_list_case_filter_fields",
+      description:
+        "List the Case Form questions (custom field definitions) that Cases can be filtered by: the " +
+        "questions on the Case Forms of the organisations whose Cases the user can see, each once, " +
+        "alphabetically. Returns each question's id, name, field_type, filter_format and, for select " +
+        "questions, its answer choices [{id, name}]. Use the id and filter_format to build " +
+        "custom_field_definition_hash for makerble_list_cases.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/cases/filter_fields", p),
     },
 
     {
