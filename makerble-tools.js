@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 274 Makerble MCP tool definitions.
+ * All 275 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2222,6 +2222,39 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/checklists/${id}`),
+    },
+
+    {
+      name: "makerble_get_checklist_summary",
+      description:
+        "Get the Checklist Summary for one Checklist: an oversight table showing, for each project (Workspace) " +
+        "you oversee that uses the Checklist, who manages it, its other colleagues, and how far its Contacts have got " +
+        "through each step. Use it to answer questions like 'which projects are behind on the Intake checklist?' or " +
+        "'who is responsible for the project with the lowest consent-form completion?'. A Checklist is a list of steps " +
+        "(actions) an organisation expects to be done for each Contact (Beneficiary), e.g. 'Consent form', 'Enrol'. " +
+        "Only Organisation Admins, Team Leaders and Album Editors can use this; others get 403. " +
+        "Workflow: 1) find the checklist_id with makerble_list_checklists (or from a Checklist the user names); " +
+        "2) call this tool; 3) to rank projects by a step, pass sort 'step_<n>' (n = the step number from the steps list) " +
+        "and direction 'asc' to find the furthest behind. " +
+        "Returns {checklist_id, checklist_name, sort, direction, steps: [{id, number, action_type, title}], page, page_size, " +
+        "page_count, total_count, data: [{project_id, project_name, managed_by: [names of Project Managers], " +
+        "workspace_colleagues: [names of reporters and observers], contacts_count (Contacts in the project with this " +
+        "Checklist), steps: [{action_id, number, done_count, percent}]}]}. Only Contacts the user may see are counted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number", description: "ID of the Checklist to summarise" },
+          sort: {
+            type: "string",
+            description: "Column to sort projects by: 'project' (default, by name), 'managed_by', 'colleagues', or 'step_<number>' to sort by the share of Contacts who have done that step (1 = first step)",
+          },
+          direction: { type: "string", enum: ["asc", "desc"], description: "Sort direction; default asc" },
+          page: { type: "number", description: "Page number, starting at 1" },
+          per_page: { type: "number", description: "Projects per page (default 10, max 200)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/summary`, p),
     },
 
     {
