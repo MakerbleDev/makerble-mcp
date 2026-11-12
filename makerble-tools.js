@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 275 Makerble MCP tool definitions.
+ * All 276 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1941,7 +1941,9 @@ export function buildTools(api) {
     {
       name: "makerble_list_survey_campaigns",
       description:
-        "List all Survey Campaigns (Project Story Categories) — Surveys deployed to specific Projects.",
+        "List all Survey Campaigns (Project Story Categories) — Surveys deployed to specific Projects. " +
+        "Each has force_interval ('Force colleagues to select an interval'): when true and the campaign has " +
+        "Waves, survey links, stories and automations for it must name a Wave (interval).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1971,6 +1973,26 @@ export function buildTools(api) {
       },
       handler: ({ project_story_category_id, ...p }) =>
         get(`/project_story_categories/${project_story_category_id}/survey_waves`, p),
+    },
+
+    {
+      name: "makerble_update_survey_campaign_settings",
+      description:
+        "Change a Survey Campaign's (Project Story Category's) settings, as its Settings page does. " +
+        "force_interval is 'Force colleagues to select an interval': when true and the campaign has intervals " +
+        "(Waves), every story, survey invitation, shared link and automation for it must name an interval. " +
+        "New Survey Campaigns start with it on. Needs Project Editor (Project Manager) or Organisation Editor " +
+        "access. Get project_story_category_id from makerble_list_survey_campaigns. Returns the updated campaign.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          force_interval: { type: "boolean", description: "Force colleagues to select an interval" },
+        },
+        required: ["project_story_category_id", "force_interval"],
+      },
+      handler: ({ project_story_category_id, force_interval }) =>
+        patch(`/project_story_categories/${project_story_category_id}`, { force_interval }),
     },
 
     {
@@ -2005,7 +2027,10 @@ export function buildTools(api) {
           project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
           beneficiary_ids: { type: "array", items: { type: "number" }, description: "Contact IDs in the Survey Campaign's Project" },
           emails: { type: "array", items: { type: "string" }, description: "Email addresses; matched to or creating Contacts. Nothing is emailed." },
-          send_survey_wave_id: { type: "number", description: "Optional Wave ID from makerble_list_survey_waves" },
+          send_survey_wave_id: {
+            type: "number",
+            description: "Wave ID from makerble_list_survey_waves. Required when the Survey Campaign has force_interval true and has Waves; otherwise the call is refused with 'Select an interval for this survey.'",
+          },
           link_expiry: { type: "string", enum: ["use_once", "evergreen"], default: "use_once" },
           is_anonymised: { type: "boolean", default: false, description: "Record responses anonymously" },
         },
