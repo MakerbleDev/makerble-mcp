@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 274 Makerble MCP tool definitions.
+ * All 277 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1305,6 +1305,68 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/skills", p),
+    },
+
+    {
+      name: "makerble_list_saved_filters",
+      description:
+        "List the Saved Filters (FilterHistory) for Contacts (Beneficiaries), Events and Cases that you can see: your " +
+        "own, and the ones colleagues have shared. These are the filters on a project's Workflow > Saved filters tab. " +
+        "project_ids are the projects named in a filter's criteria; it can be added to a project's toolbar only for " +
+        "one of those, and only when can_add_shortcut is true. To add one, call makerble_get_saved_filter for its " +
+        "views and projects, then makerble_add_saved_filter_shortcut. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, type, organisation_id, shared, " +
+        "project_ids, can_add_shortcut, created_at, updated_at }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["contacts", "events", "cases"], description: "Only Saved Filters of this kind." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/saved_filters", p),
+    },
+
+    {
+      name: "makerble_get_saved_filter",
+      description:
+        "Get one Saved Filter (FilterHistory) with what you need to add it to a project's toolbar: shortcut_views, " +
+        "the views of its app a shortcut can open (e.g. Contacts > Overview, Events > Calendar, or one of your Custom " +
+        "tables), each { key, label, group }, and shortcut_projects, the projects you may add it to, each { id, name }. " +
+        "shortcut_projects is empty when can_add_shortcut is false. Pass a key and a project id to " +
+        "makerble_add_saved_filter_shortcut.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Saved Filter's id, from makerble_list_saved_filters." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/saved_filters/${id}`),
+    },
+
+    {
+      name: "makerble_add_saved_filter_shortcut",
+      description:
+        "Add a Saved Filter to a project's toolbar (Workflow) as a shortcut, as the Saved Filter's Add to workflow " +
+        "button does. Clicking the shortcut opens the chosen view with the filter applied. The shortcut goes first on " +
+        "the toolbar. Steps: 1) makerble_list_saved_filters to find the filter; 2) makerble_get_saved_filter for its " +
+        "shortcut_views and shortcut_projects; 3) this tool with one of each. You must be an Organisation Admin or an " +
+        "Editor of the project. Colleagues who can't see the Saved Filter don't see its shortcut. " +
+        "Returns { id, name, project_id, saved_filter_id, view_key, created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Saved Filter's id." },
+          project_id: { type: "number", description: "One of the Saved Filter's shortcut_projects." },
+          view_key: { type: "string", description: "One of the Saved Filter's shortcut_views keys, e.g. contacts_overview." },
+          name: { type: "string", description: "The shortcut's label on the toolbar. Defaults to the Saved Filter's name." },
+        },
+        required: ["id", "project_id", "view_key"],
+      },
+      handler: ({ id, ...body }) => post(`/saved_filters/${id}/shortcuts`, body),
     },
 
     {
