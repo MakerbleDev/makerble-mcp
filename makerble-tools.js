@@ -2342,8 +2342,11 @@ export function buildTools(api) {
         "custom_field_category_ids = Custom Forms for contacts, case_form_ids, label_ids) or pairs: " +
         "relationship_sides '<relationship_category_id>:parent|child', project_states " +
         "'<project_id>:<beneficiary_state_id>', project_event_categories '<project_id>:<event_category_id>', " +
-        "survey_waves '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
-        "campaign without Waves>'. The two 'for a relative' types take relatives: [{relationship_side, " +
+        "survey_waves, one of '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
+        "campaign without Waves>' (that campaign in its Project), 'survey:<story_category_id (Survey)>' (that " +
+        "Survey in any Project) or 'shared:<story_category_id>:<send_survey_wave_id of a Shared Wave>' (that " +
+        "Shared Interval of the Survey in any Project). With many Projects, prefer a Survey or Shared Interval " +
+        "over listing every campaign. The two 'for a relative' types take relatives: [{relationship_side, " +
         "beneficiary_category_ids or survey_waves}], where the side is the relative's own (e.g. the Son). " +
         "Instead of specific values, criteria {any: true} counts any record of the kind ('Any [noun]' on " +
         "the Create Checklist page, named by any_name, e.g. 'Any relationship'). Criteria with nothing " +
