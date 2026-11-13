@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 276 Makerble MCP tool definitions.
+ * All 279 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6050,6 +6050,92 @@ export function buildTools(api) {
           return patch(`/organisations/${body.organisation_id}/welcome_journey_settings`, { photo_skippable, watch_skippable });
         }
         return id ? patch(`/tours/${id}`, body) : post("/tours", body);
+      },
+    },
+
+    {
+      name: "makerble_list_training_materials",
+      description:
+        "List an Organisation's Training materials (CP-9130), as on the Training materials page under Helpdesk: links " +
+        "to the organisation's own training documents and videos (crib sheets in Google Docs, Word Online, SharePoint, " +
+        "Loom and so on), each shown to the whole Organisation or to chosen Teams and Workspaces (Projects). Returns " +
+        "only what the signed-in user may see: an Organisation Admin sees them all, anyone else sees those for " +
+        "everyone, for their Teams and for Workspaces they have a role on. Each has id, name, url, description, " +
+        "material_type (document or video), all_organisation, team_ids, project_ids, owner_name (who to ask about it), " +
+        "reviewed_at and, for Organisation Admins, review_due (last reviewed over 12 months ago). Use it to point " +
+        "someone to the right guide, e.g. 'how do I add a new school?'. Pass project_id for one Workspace's training.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "Only the materials linked to this Workspace (Project)" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only those changed since, ISO 8601" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/training_materials`, params),
+    },
+
+    {
+      name: "makerble_create_training_material",
+      description:
+        "Add a Training material (CP-9130) to an Organisation: a name and an https link to one of its own training " +
+        "documents or videos, and who it is for: all_organisation true, and/or team_ids (from the Organisation's Teams) " +
+        "and project_ids (Workspaces). At least one is required. Makerble stores only the link, so remind the user to " +
+        "share the document with the same people, or they will see a request-access page. Only an Organisation Admin " +
+        "(or Makerble staff) can add one. owner_id (the person colleagues should ask) defaults to the user and must be " +
+        "an Organisation Admin. Returns the material, with its id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "e.g. 'How to add a new school'" },
+          url: { type: "string", description: "The document's link, starting https://" },
+          description: { type: "string", description: "Optional: one or two lines saying who it is for" },
+          material_type: { type: "string", enum: ["document", "video"], description: "Default document" },
+          all_organisation: { type: "boolean", description: "For everyone in the Organisation" },
+          team_ids: { type: "array", items: { type: "number" }, description: "Teams it is for" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Workspaces (Projects) it is for" },
+          owner_id: { type: "number", description: "Who to ask about it; an Organisation Admin" },
+        },
+        required: ["organisation_id", "name", "url"],
+      },
+      handler: ({ organisation_id, ...body }) => post(`/organisations/${organisation_id}/training_materials`, body),
+    },
+
+    {
+      name: "makerble_update_training_material",
+      description:
+        "Change, mark as reviewed or remove one of an Organisation's Training materials (CP-9130). Send only the " +
+        "fields to change; team_ids and project_ids replace who it is linked to (moving a guide from one Team to " +
+        "another takes it away from the first Team's members). mark_as_reviewed true sets its last reviewed date to " +
+        "now, clearing Review due. remove true deletes it from Makerble (the document itself is untouched); confirm " +
+        "with the user first. Only an Organisation Admin (or Makerble staff). Get ids from makerble_list_training_materials.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          id: { type: "number", description: "The Training material ID" },
+          name: { type: "string" },
+          url: { type: "string", description: "Starting https://" },
+          description: { type: "string" },
+          material_type: { type: "string", enum: ["document", "video"] },
+          all_organisation: { type: "boolean" },
+          team_ids: { type: "array", items: { type: "number" } },
+          project_ids: { type: "array", items: { type: "number" } },
+          owner_id: { type: "number" },
+          mark_as_reviewed: { type: "boolean", description: "Set its last reviewed date to now" },
+          remove: { type: "boolean", description: "Delete it from Makerble instead of changing it" },
+        },
+        required: ["organisation_id", "id"],
+      },
+      handler: async ({ organisation_id, id, remove, ...body }) => {
+        const path = `/organisations/${organisation_id}/training_materials/${id}`;
+        if (!remove) return patch(path, body);
+        await del(path);
+        return { removed: true, id };
       },
     },
 
