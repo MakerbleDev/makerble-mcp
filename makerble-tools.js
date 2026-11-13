@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 279 Makerble MCP tool definitions.
+ * All 280 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -7260,6 +7260,30 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "entries"],
       },
       handler: (p) => post("/impact_frameworks", p),
+    },
+
+    {
+      name: "makerble_copy_impact_framework",
+      description:
+        "Copies an Impact Framework (a Template, the organisation's theory of change) so it can be adapted " +
+        "without changing the original. Use it when the user wants a framework like one they already have, " +
+        "or wants to start from an ImpactStore framework or from a project's own Theory of Change. The copy is " +
+        "named 'Copy of <name>' and keeps the original's stages, its metrics (Activity and Attendance trackers " +
+        "(Changes), Outcomes and the trackers placed on it), causes, description and colour, but none of its " +
+        "projects: it is not added to any project. It belongs to the user, private and unapproved, in the " +
+        "original's organisation if the user belongs to it, otherwise among the user's own frameworks. The " +
+        "user may copy their own frameworks, any framework of an organisation they belong to, a Theory of " +
+        "Change of a project they edit, and approved ImpactStore frameworks; anything else answers 404. " +
+        "Returns data: the copy as makerble_get_library_item shows it (id, type 'impact_framework', name, owner, " +
+        "stages). To add metrics to the copy or remove them, use the copy's id with the Impact Framework tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template) to copy" },
+        },
+        required: ["id"],
+      },
+      handler: (p) => post(`/impact_frameworks/${p.id}/copy`, {}),
     },
 
     {
