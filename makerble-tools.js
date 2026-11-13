@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 277 Makerble MCP tool definitions.
+ * All 279 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -256,7 +256,7 @@ export function buildTools(api) {
     {
       name: "makerble_update_organisation",
       description:
-        "Change an Organisation's (Charity's) settings from Charity Preferences. For now that is the " +
+        "Change an Organisation's (Charity's) settings from Charity Preferences: the " +
         "\"Default story level privacy setting on each project\": the Story Privacy Level each NEW project " +
         "in the Organisation starts with (who can see the Survey Responses / Stories posted in it). " +
         "Existing projects keep their own level; to change one project's level use makerble_update_project_settings. " +
@@ -264,7 +264,10 @@ export function buildTools(api) {
         "charity_plus_network (Network & organisation colleagues only), everyone (Everyone). " +
         "Use makerble_get_organisation to see the current level (default_project_story_privacy). " +
         "Only an Organisation Admin (Charity Editor) can do this; anyone else gets forbidden. " +
-        "Returns the Organisation {id, name, default_project_story_privacy, created_at, updated_at}.",
+        "Also participant_pass_sign_in_enabled ('Enable contacts to sign in using a participant pass'): when false, " +
+        "a Contact's profile hides the Participating As tab unless the Contact is already linked to a user. " +
+        "Send only the settings to change. " +
+        "Returns the Organisation {id, name, default_project_story_privacy, participant_pass_sign_in_enabled, created_at, updated_at}.",
       inputSchema: {
         type: "object",
         properties: {
@@ -274,8 +277,12 @@ export function buildTools(api) {
             enum: ["only_project_colleagues", "only_charity_colleagues", "charity_plus_network", "everyone"],
             description: "The Story Privacy Level each new project starts with.",
           },
+          participant_pass_sign_in_enabled: {
+            type: "boolean",
+            description: "Enable contacts to sign in using a participant pass.",
+          },
         },
-        required: ["id", "default_project_story_privacy"],
+        required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
     },
@@ -1941,7 +1948,9 @@ export function buildTools(api) {
     {
       name: "makerble_list_survey_campaigns",
       description:
-        "List all Survey Campaigns (Project Story Categories) — Surveys deployed to specific Projects.",
+        "List all Survey Campaigns (Project Story Categories) — Surveys deployed to specific Projects. " +
+        "Each has force_interval ('Force colleagues to select an interval'): when true and the campaign has " +
+        "Waves, survey links, stories and automations for it must name a Wave (interval).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1971,6 +1980,26 @@ export function buildTools(api) {
       },
       handler: ({ project_story_category_id, ...p }) =>
         get(`/project_story_categories/${project_story_category_id}/survey_waves`, p),
+    },
+
+    {
+      name: "makerble_update_survey_campaign_settings",
+      description:
+        "Change a Survey Campaign's (Project Story Category's) settings, as its Settings page does. " +
+        "force_interval is 'Force colleagues to select an interval': when true and the campaign has intervals " +
+        "(Waves), every story, survey invitation, shared link and automation for it must name an interval. " +
+        "New Survey Campaigns start with it on. Needs Project Editor (Project Manager) or Organisation Editor " +
+        "access. Get project_story_category_id from makerble_list_survey_campaigns. Returns the updated campaign.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          force_interval: { type: "boolean", description: "Force colleagues to select an interval" },
+        },
+        required: ["project_story_category_id", "force_interval"],
+      },
+      handler: ({ project_story_category_id, force_interval }) =>
+        patch(`/project_story_categories/${project_story_category_id}`, { force_interval }),
     },
 
     {
@@ -2005,7 +2034,10 @@ export function buildTools(api) {
           project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
           beneficiary_ids: { type: "array", items: { type: "number" }, description: "Contact IDs in the Survey Campaign's Project" },
           emails: { type: "array", items: { type: "string" }, description: "Email addresses; matched to or creating Contacts. Nothing is emailed." },
-          send_survey_wave_id: { type: "number", description: "Optional Wave ID from makerble_list_survey_waves" },
+          send_survey_wave_id: {
+            type: "number",
+            description: "Wave ID from makerble_list_survey_waves. Required when the Survey Campaign has force_interval true and has Waves; otherwise the call is refused with 'Select an interval for this survey.'",
+          },
           link_expiry: { type: "string", enum: ["use_once", "evergreen"], default: "use_once" },
           is_anonymised: { type: "boolean", default: false, description: "Record responses anonymously" },
         },
@@ -2225,6 +2257,39 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_checklist_summary",
+      description:
+        "Get the Checklist Summary for one Checklist: an oversight table showing, for each project (Workspace) " +
+        "you oversee that uses the Checklist, who manages it, its other colleagues, and how far its Contacts have got " +
+        "through each step. Use it to answer questions like 'which projects are behind on the Intake checklist?' or " +
+        "'who is responsible for the project with the lowest consent-form completion?'. A Checklist is a list of steps " +
+        "(actions) an organisation expects to be done for each Contact (Beneficiary), e.g. 'Consent form', 'Enrol'. " +
+        "Only Organisation Admins, Team Leaders and Album Editors can use this; others get 403. " +
+        "Workflow: 1) find the checklist_id with makerble_list_checklists (or from a Checklist the user names); " +
+        "2) call this tool; 3) to rank projects by a step, pass sort 'step_<n>' (n = the step number from the steps list) " +
+        "and direction 'asc' to find the furthest behind. " +
+        "Returns {checklist_id, checklist_name, sort, direction, steps: [{id, number, action_type, title}], page, page_size, " +
+        "page_count, total_count, data: [{project_id, project_name, managed_by: [names of Project Managers], " +
+        "workspace_colleagues: [names of reporters and observers], contacts_count (Contacts in the project with this " +
+        "Checklist), steps: [{action_id, number, done_count, percent}]}]}. Only Contacts the user may see are counted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number", description: "ID of the Checklist to summarise" },
+          sort: {
+            type: "string",
+            description: "Column to sort projects by: 'project' (default, by name), 'managed_by', 'colleagues', or 'step_<number>' to sort by the share of Contacts who have done that step (1 = first step)",
+          },
+          direction: { type: "string", enum: ["asc", "desc"], description: "Sort direction; default asc" },
+          page: { type: "number", description: "Page number, starting at 1" },
+          per_page: { type: "number", description: "Projects per page (default 10, max 200)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/summary`, p),
+    },
+
+    {
       name: "makerble_get_checklist_progress",
       description:
         "See where the Contacts on a Checklist have got to: the pipeline shown in the Progress section of the " +
@@ -2342,8 +2407,11 @@ export function buildTools(api) {
         "custom_field_category_ids = Custom Forms for contacts, case_form_ids, label_ids) or pairs: " +
         "relationship_sides '<relationship_category_id>:parent|child', project_states " +
         "'<project_id>:<beneficiary_state_id>', project_event_categories '<project_id>:<event_category_id>', " +
-        "survey_waves '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
-        "campaign without Waves>'. The two 'for a relative' types take relatives: [{relationship_side, " +
+        "survey_waves, one of '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
+        "campaign without Waves>' (that campaign in its Project), 'survey:<story_category_id (Survey)>' (that " +
+        "Survey in any Project) or 'shared:<story_category_id>:<send_survey_wave_id of a Shared Wave>' (that " +
+        "Shared Interval of the Survey in any Project). With many Projects, prefer a Survey or Shared Interval " +
+        "over listing every campaign. The two 'for a relative' types take relatives: [{relationship_side, " +
         "beneficiary_category_ids or survey_waves}], where the side is the relative's own (e.g. the Son). " +
         "Instead of specific values, criteria {any: true} counts any record of the kind ('Any [noun]' on " +
         "the Create Checklist page, named by any_name, e.g. 'Any relationship'). Criteria with nothing " +
