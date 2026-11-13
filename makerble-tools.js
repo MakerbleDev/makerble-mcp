@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 279 Makerble MCP tool definitions.
+ * All 281 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6136,6 +6136,81 @@ export function buildTools(api) {
         if (!remove) return patch(path, body);
         await del(path);
         return { removed: true, id };
+      },
+    },
+
+    {
+      name: "makerble_list_unavailability",
+      description:
+        "List when a colleague (User) can't work for an Organisation (Charity) (CP-7456): annual leave, sick leave, " +
+        "training or other, as on the Staff availability page and the colleague's Unavailability page. Each range has " +
+        "from_date, to_date, all_day, from_time and to_time (part days) in the Organisation's timezone, reason_type, a " +
+        "readable summary such as '3/12/2026 13:00–17:30 · Training', and private_note only when the signed-in user is " +
+        "that colleague or an Organisation Admin (Charity Editor). Anyone can list their own; Team Leaders can list their " +
+        "Team, Project Editors the colleagues in their Project, and Organisation Admins everyone. Use it before booking " +
+        "staff onto events, or to answer 'who is off next week?'. A colleague in several Organisations has separate " +
+        "unavailability in each, so organisation_id is required.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only those changed since, ISO 8601" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id, ...params }) =>
+        get(`/users/${user_id}/unavailabilities`, { charity_id: organisation_id, ...params }),
+    },
+
+    {
+      name: "makerble_set_unavailability",
+      description:
+        "Record, change or remove when a colleague (User) can't work for an Organisation (Charity) (CP-7456). Makerble " +
+        "won't then assign them to events automatically at those times, and warns anyone assigning them by hand. " +
+        "To record: give from_date and to_date (YYYY-MM-DD) and reason_type; for part of a day set all_day false and " +
+        "give from_time and to_time (HH:MM), in the Organisation's timezone. To change one: pass its id (from " +
+        "makerble_list_unavailability) and only the fields to change. To remove: pass id and remove true. The same " +
+        "people as for listing may do this; private_note (up to 150 characters, health information for sick leave) is " +
+        "only for the colleague themselves and Organisation Admins.\n\n" +
+        "Workflow when the colleague is already on the rota: the reply lists conflicting_events, the upcoming events " +
+        "they are an Event Worker on during the range, each with editable (whether the signed-in user may change it) and " +
+        "unassigned. Each event's Event Managers are emailed either way. Show the user the list and ask which events to " +
+        "take the colleague off; then call again with the same id and unassign_event_ids (only editable events are " +
+        "changed), or pass unassign_event_ids in the first call if the user has already said.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          id: { type: "number", description: "The range to change or remove; leave out to record a new one" },
+          from_date: { type: "string", description: "YYYY-MM-DD" },
+          to_date: { type: "string", description: "YYYY-MM-DD" },
+          all_day: { type: "boolean", description: "Default true. False for part of a day, with from_time and to_time" },
+          from_time: { type: "string", description: "HH:MM, for part of a day" },
+          to_time: { type: "string", description: "HH:MM, for part of a day" },
+          reason_type: { type: "string", enum: ["annual_leave", "sick_leave", "training", "other"] },
+          private_note: { type: "string", description: "Optional, up to 150 characters" },
+          unassign_event_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Events from conflicting_events to take the colleague off",
+          },
+          remove: { type: "boolean", description: "Remove the range given by id instead of changing it" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: async ({ user_id, organisation_id, id, remove, ...body }) => {
+        const base = `/users/${user_id}/unavailabilities`;
+        if (remove) {
+          if (!id) throw new McpError(ErrorCode.InvalidParams, "Pass the id of the range to remove");
+          await del(`${base}/${id}?charity_id=${organisation_id}`);
+          return { removed: true, id };
+        }
+        const payload = { charity_id: organisation_id, ...body };
+        return id ? patch(`${base}/${id}`, payload) : post(base, payload);
       },
     },
 
