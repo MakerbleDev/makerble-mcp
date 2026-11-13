@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 279 Makerble MCP tool definitions.
+ * All 280 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5800,7 +5800,8 @@ export function buildTools(api) {
         "for Makerble's own it must be a page in the Makerble User Guide " +
         "(https://makerble.atlassian.net/wiki/spaces/MCPD/...); for a place's it can be any https page.\n\n" +
         "Workflow: save it as a draft first (status draft, the default for a new one), which nobody sees, and " +
-        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree, " +
+        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree " +
+        "(or use makerble_schedule_announcement to pick the next free days for one of Makerble's own), " +
         "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
         "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
       inputSchema: {
@@ -5844,6 +5845,31 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_schedule_announcement",
+      description:
+        "Schedule one of Makerble's own \"What's new in Makerble\" Announcements on the next free days. Each " +
+        "person sees at most one of Makerble's announcements a day, so announcements whose dates overlap take " +
+        "turns and the later ones wait. This sets the start date to the first day, from today, on which no other " +
+        "Makerble announcement starts, keeps the announcement's own length (14 days if it has no dates yet), and " +
+        "sets its status to scheduled. Any dates it had are replaced.\n\n" +
+        "When to use: once the feature an announcement describes is live on production, to schedule its draft " +
+        "(made earlier with makerble_save_announcement). Don't use it before the feature is live: a scheduled " +
+        "announcement whose start date is today shows to people straight away. To choose the dates yourself, use " +
+        "makerble_save_announcement with status scheduled, starts_on and ends_on instead.\n\n" +
+        "Only System Access users (Makerble staff) can use it (otherwise 403), and only for Makerble's own " +
+        "announcements: an Organisation's, Workspace's or Team's gets 422. Returns the Announcement with its new " +
+        "starts_on, ends_on and status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Announcement to schedule (from makerble_list_announcements)" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => patch(`/announcements/${id}`, { schedule_on_next_free_days: true }),
     },
 
     {
