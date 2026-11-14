@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 283 Makerble MCP tool definitions.
+ * All 285 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1165,11 +1165,12 @@ export function buildTools(api) {
         "does on the Manage Contacts page for the Contacts ticked there. label_kind says which: " +
         "'group' for Groups (Contact Groups, e.g. \"Girls' football\"); 'flag' for Flags (Contact Flags, e.g. " +
         "\"Safeguarding concern\"); 'audience' for Audiences (Contact Roles, e.g. Volunteers); 'skill_required' " +
-        "for Skills Required (Skills a Contact needs, e.g. First aid); 'type' for the Contact Type (Person, " +
+        "for what a Contact needs a specialist in (Specialisms (Skills), e.g. Eating disorders; API: Skills " +
+        "Required); 'type' for the Contact Type (Person, " +
         "Organisation, Object, Animal). Each change is made as on one Contact's own screen. " +
         "\nFor group, flag, audience and skill_required: add_ids are labels to give every chosen Contact and " +
         "remove_ids labels to take off every one; give at least one, and never the same id in both. Find the ids " +
-        "with makerble_list_groups, makerble_list_flags, makerble_list_audiences or makerble_list_skills. A Contact " +
+        "with makerble_list_groups, makerble_list_flags, makerble_list_audiences or makerble_list_specialisms. A Contact " +
         "who already has a label being added, or lacks one being removed, is left as they are. Audiences being " +
         "added start on start_date (default today); removing an Audience ends it today rather than deleting it. " +
         "\nFor type: beneficiary_type_id is the Type to change every chosen Contact to (makerble_list_contact_types). " +
@@ -1183,7 +1184,9 @@ export function buildTools(api) {
         "\nSkip rules (counted in skip_counts): headline_only (you only have Headline Only Access); not_allowed " +
         "(Groups and Type: you may not edit the Contact); raised_by_someone_else (only the person who raised a Flag " +
         "may remove it); not_allowed_to_end (you may not end that Audience); not_allowed_to_remove (only " +
-        "Organisation Editors may remove a Skill Required). A skipped Contact is left unchanged. " +
+        "Organisation Editors may remove a specialist need). A skipped Contact is left unchanged. For skill_required, " +
+        "needs are added as importance 'essential' unless you pass 'desirable', and only needs added by hand are " +
+        "added or removed: a need a Contact has from a form answer (see makerble_link_specialism_to_answers) stays. " +
         "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
         "run in the background: the reply has status 'pending' and an id; call makerble_get_bulk_action_progress " +
         "with that id until status is 'completed' or 'failed'. " +
@@ -1197,7 +1200,7 @@ export function buildTools(api) {
           label_kind: {
             type: "string",
             enum: ["group", "flag", "audience", "skill_required", "type"],
-            description: "Which kind of label: 'group' (Groups), 'flag' (Flags), 'audience' (Audiences), 'skill_required' (Skills Required) or 'type' (Contact Type)",
+            description: "Which kind of label: 'group' (Groups), 'flag' (Flags), 'audience' (Audiences), 'skill_required' (what Contacts need a specialist in) or 'type' (Contact Type)",
           },
           charity_id: {
             type: "number",
@@ -1212,6 +1215,11 @@ export function buildTools(api) {
             type: "array",
             items: { type: "number" },
             description: "Labels to take off every chosen Contact",
+          },
+          importance: {
+            type: "string",
+            enum: ["essential", "desirable"],
+            description: "label_kind 'skill_required' only: how much the Contacts need the Specialisms being added. Default essential.",
           },
           start_date: {
             type: "string",
@@ -1296,12 +1304,16 @@ export function buildTools(api) {
     },
 
     {
-      name: "makerble_list_skills",
+      name: "makerble_list_specialisms",
       description:
-        "List an organisation's Skills, e.g. \"First aid\", as offered in the Skills Required box on a Contact " +
-        "(Beneficiary) profile. Use an id with makerble_label_contacts (label_kind 'skill_required'). Any member of " +
-        "the organisation can list them. " +
-        "Returns { page, page_size, page_count, total_count, data: [{ id, name, created_at, updated_at }] }, by name.",
+        "List an organisation's Specialisms (Skills), e.g. \"Eating disorders\". Colleagues (Users) have Specialisms, " +
+        "and Contacts (Beneficiaries) need a specialist in some of them (Skills Required), so Makerble can suggest the " +
+        "right colleague for a Contact. Use an id with makerble_label_contacts (label_kind 'skill_required') to record " +
+        "what Contacts need, with makerble_set_colleague_specialisms for what a colleague specialises in, or with " +
+        "makerble_link_specialism_to_answers. Each one lists linked_answers: the Contact form answers that make a " +
+        "Contact need it automatically. Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, created_at, updated_at, " +
+        "linked_answers: [{ ratio_set_id, sub_ratio_ids, importance }] }] }, by name.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1312,6 +1324,74 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/skills", p),
+    },
+
+    {
+      name: "makerble_set_colleague_specialisms",
+      description:
+        "Read or change a colleague's (User's) Specialisms (Skills) in one organisation, as the Specialisms box on " +
+        "their profile does. A colleague in several organisations has separate Specialisms in each. Pass add_skill_ids " +
+        "and/or remove_skill_ids to change them (ids from makerble_list_specialisms; another organisation's are " +
+        "ignored); pass neither to just read them. Any member of the organisation can read them; only the colleague " +
+        "themselves, a Team Leader of one of their Teams in that organisation, or an Organisation Editor can change " +
+        "them. The organisation must have Specialisms turned on. " +
+        "Workflow to record that a colleague specialises in something: (1) makerble_list_specialisms for its id; " +
+        "(2) makerble_list_users for the colleague's id; (3) this tool with add_skill_ids. " +
+        "Returns { user_id, charity_id, can_change, data: [{ id, name }] } after any change. " +
+        "Errors: 403 if you may not change them; 404 for an organisation you aren't in, a colleague who isn't in it, " +
+        "or Specialisms turned off.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague's User ID" },
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          add_skill_ids: { type: "array", items: { type: "number" }, description: "Specialisms to add" },
+          remove_skill_ids: { type: "array", items: { type: "number" }, description: "Specialisms to remove" },
+        },
+        required: ["user_id"],
+      },
+      handler: async ({ user_id, charity_id, add_skill_ids, remove_skill_ids }) => {
+        const path = `/users/${user_id}/specialisms`;
+        let result;
+        if (add_skill_ids?.length) result = await post(path, { charity_id, skill_ids: add_skill_ids });
+        if (remove_skill_ids?.length) result = await del(path, { charity_id, skill_ids: remove_skill_ids });
+        return result ?? get(path, { charity_id });
+      },
+    },
+
+    {
+      name: "makerble_link_specialism_to_answers",
+      description:
+        "Link a Specialism (Skill) to answers in the organisation's Contact forms, or unlink them, as \"Contacts who " +
+        "need this specialism\" on the Specialism's edit page does. Every Contact (Beneficiary) whose form records a " +
+        "linked answer then needs a specialist in it, Essential or Desirable as you say, and stops needing it when the " +
+        "answer changes, so staff don't have to record each Contact's needs by hand. Example: link \"Eating " +
+        "disorders\" to \"Presenting issue = Anorexia\". A question is a dropdown (Ratio Set) on one of the " +
+        "organisation's Contact forms (Beneficiary Categories) and its answers are Sub Ratios. " +
+        "Workflow: (1) makerble_list_specialisms for the Specialism's id; (2) find the question's ratio_set_id among " +
+        "the Contact form fields, and its answers' ids (sub_ratio_ids); (3) call this tool. To unlink, pass " +
+        "unlink: true with the sub_ratio_ids. Linking an answer that is already linked changes its importance. " +
+        "Contacts are updated in the background, which can take a few minutes for a large organisation; the user " +
+        "gets a Makerble notification when it's done. Only Organisation Editors can do this. " +
+        "Returns { id, name, linked_answers: [{ ratio_set_id, sub_ratio_ids, importance }] }. " +
+        "Errors: 403 if you aren't an Organisation Editor; 404 for another organisation's Specialism; 422 for a " +
+        "question that isn't on the organisation's Contact forms, no answers, or a bad importance.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          skill_id: { type: "number", description: "The Specialism (Skill)" },
+          ratio_set_id: { type: "number", description: "The dropdown question on a Contact form, e.g. Presenting issue. Needed to link." },
+          sub_ratio_ids: { type: "array", items: { type: "number" }, description: "Its answers to link or unlink, e.g. Anorexia" },
+          importance: { type: "string", enum: ["essential", "desirable"], description: "How much Contacts matched this way need it. Default essential." },
+          unlink: { type: "boolean", description: "true to unlink the sub_ratio_ids instead of linking them" },
+        },
+        required: ["skill_id", "sub_ratio_ids"],
+      },
+      handler: ({ skill_id, ratio_set_id, sub_ratio_ids, importance, unlink }) => {
+        const path = `/skills/${skill_id}/linked_answers`;
+        if (unlink) return del(path, { sub_ratio_ids });
+        return post(path, { ratio_set_id, sub_ratio_ids, importance });
+      },
     },
 
     {
@@ -1340,7 +1420,9 @@ export function buildTools(api) {
         "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it. " +
         "weekly_availability is the Contact's Weekly availability: the most recently saved answer to any Weekly availability field on their Contact Forms, " +
         "as times ([{day, from, to}], in the organisation's timezone) with source_form_id (the Contact Form it came from), source_field_id and answered_at, " +
-        "or null if they have none. Use it to suggest appointment times. When Field Visibility hides that field from you, times is null and restricted is true.",
+        "or null if they have none. Use it to suggest appointment times. When Field Visibility hides that field from you, times is null and restricted is true. " +
+        "required_skills is what the Contact needs a specialist in (Specialisms, API: Skills Required): [{id, skill_id, name, importance: 'essential'|'desirable', " +
+        "source: 'manual' (added by hand) | 'form_answer' (from an answer in their Contact form; goes when the answer changes)}]. One Specialism can appear twice, once from each source.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
