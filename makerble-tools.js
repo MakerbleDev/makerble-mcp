@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 281 Makerble MCP tool definitions.
+ * All 283 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5800,7 +5800,8 @@ export function buildTools(api) {
         "for Makerble's own it must be a page in the Makerble User Guide " +
         "(https://makerble.atlassian.net/wiki/spaces/MCPD/...); for a place's it can be any https page.\n\n" +
         "Workflow: save it as a draft first (status draft, the default for a new one), which nobody sees, and " +
-        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree, " +
+        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree " +
+        "(or use makerble_schedule_announcement to pick the next free days for one of Makerble's own), " +
         "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
         "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
       inputSchema: {
@@ -5844,6 +5845,31 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_schedule_announcement",
+      description:
+        "Schedule one of Makerble's own \"What's new in Makerble\" Announcements on the next free days. Each " +
+        "person sees at most one of Makerble's announcements a day, so announcements whose dates overlap take " +
+        "turns and the later ones wait. This sets the start date to the first day, from today, on which no other " +
+        "Makerble announcement starts, keeps the announcement's own length (14 days if it has no dates yet), and " +
+        "sets its status to scheduled. Any dates it had are replaced.\n\n" +
+        "When to use: once the feature an announcement describes is live on production, to schedule its draft " +
+        "(made earlier with makerble_save_announcement). Don't use it before the feature is live: a scheduled " +
+        "announcement whose start date is today shows to people straight away. To choose the dates yourself, use " +
+        "makerble_save_announcement with status scheduled, starts_on and ends_on instead.\n\n" +
+        "Only System Access users (Makerble staff) can use it (otherwise 403), and only for Makerble's own " +
+        "announcements: an Organisation's, Workspace's or Team's gets 422. Returns the Announcement with its new " +
+        "starts_on, ends_on and status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Announcement to schedule (from makerble_list_announcements)" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => patch(`/announcements/${id}`, { schedule_on_next_free_days: true }),
     },
 
     {
@@ -7335,6 +7361,30 @@ export function buildTools(api) {
         required: ["organisation_id", "name", "entries"],
       },
       handler: (p) => post("/impact_frameworks", p),
+    },
+
+    {
+      name: "makerble_copy_impact_framework",
+      description:
+        "Copies an Impact Framework (a Template, the organisation's theory of change) so it can be adapted " +
+        "without changing the original. Use it when the user wants a framework like one they already have, " +
+        "or wants to start from an ImpactStore framework or from a project's own Theory of Change. The copy is " +
+        "named 'Copy of <name>' and keeps the original's stages, its metrics (Activity and Attendance trackers " +
+        "(Changes), Outcomes and the trackers placed on it), causes, description and colour, but none of its " +
+        "projects: it is not added to any project. It belongs to the user, private and unapproved, in the " +
+        "original's organisation if the user belongs to it, otherwise among the user's own frameworks. The " +
+        "user may copy their own frameworks, any framework of an organisation they belong to, a Theory of " +
+        "Change of a project they edit, and approved ImpactStore frameworks; anything else answers 404. " +
+        "Returns data: the copy as makerble_get_library_item shows it (id, type 'impact_framework', name, owner, " +
+        "stages). To add metrics to the copy or remove them, use the copy's id with the Impact Framework tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template) to copy" },
+        },
+        required: ["id"],
+      },
+      handler: (p) => post(`/impact_frameworks/${p.id}/copy`, {}),
     },
 
     {
