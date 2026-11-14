@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 283 Makerble MCP tool definitions.
+ * All 284 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5803,7 +5803,15 @@ export function buildTools(api) {
         "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree " +
         "(or use makerble_schedule_announcement to pick the next free days for one of Makerble's own), " +
         "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
-        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
+        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.\n\n" +
+        "Targeting (Makerble's own only, System Access users): roles narrows who sees it to people holding at least " +
+        "one of the listed roles, in place of audience. Contacts with a login (active_participant) and Survey " +
+        "Portal users (survey_portal_user) are left out unless you list their role. audience_rules narrows it " +
+        "further by behaviour, as JSON over named facts: each rule is exactly one of {fact, params}, {all: [rules]}, " +
+        "{any: [rules]} or {not: rule}. For example, only people whose organisation hasn't set up Distance " +
+        "Travelled in any of their organisations: {\"all\": [{\"fact\": \"distance_travelled_not_set_up\"}]}. " +
+        "Call makerble_list_announcement_facts first for the facts and their params; an unknown fact or param is " +
+        "refused with 422, naming the rule. Send roles [] or audience_rules {} to clear them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5837,7 +5845,25 @@ export function buildTools(api) {
             enum: ["everyone", "colleagues", "administrators"],
             description:
               "Makerble's own only. everyone: every signed-in user. colleagues: everyone except Contacts with a " +
-              "login. administrators: Organisation Admins. Ignored for a place's announcement.",
+              "login. administrators: Organisation Admins. Ignored for a place's announcement, and when roles has any.",
+          },
+          roles: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["organisation_admin", "editor", "reporter", "observer", "team_leader", "active_participant", "survey_portal_user"],
+            },
+            description:
+              "Makerble's own only. Show it only to people holding one of these roles, in place of audience: " +
+              "organisation_admin (Organisation Admin), editor (Workspace editor), reporter, observer, team_leader, " +
+              "active_participant (Contact with a login), survey_portal_user. Empty or left out: audience decides.",
+          },
+          audience_rules: {
+            type: "object",
+            description:
+              "Makerble's own only. Behaviour rules over named facts from makerble_list_announcement_facts, e.g. " +
+              "{\"all\": [{\"fact\": \"distance_travelled_not_set_up\", \"params\": {\"across\": \"all_organisations\"}}]}. " +
+              "{} for none.",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
@@ -5845,6 +5871,23 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_announcement_facts",
+      description:
+        "List the named facts an Announcement's audience_rules can use to target people by behaviour, such as " +
+        "distance_travelled_not_set_up (the person's organisation hasn't set up Distance Travelled) or " +
+        "has_not_added_a_story (they haven't added a story yet). Each fact has a key (what a rule names), a " +
+        "description, a label and its params with the values they accept and their default. A fact about a " +
+        "person's organisations takes across: for someone in several organisations, whether it must hold for any " +
+        "one of them (any_organisation, the default), every one (all_organisations) or the oldest one they belong " +
+        "to (first_organisation).\n\n" +
+        "When to use: before setting audience_rules with makerble_save_announcement, to see which facts exist. " +
+        "Facts are written in Makerble's code, so the list only changes with a release. Only System Access users " +
+        "(Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/announcements/facts"),
     },
 
     {
