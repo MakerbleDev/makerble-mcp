@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 286 Makerble MCP tool definitions.
+ * All 287 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1337,7 +1337,10 @@ export function buildTools(api) {
         "Get a single Contact (Beneficiary) by ID, including all custom fields. " +
         "Opening a Contact this way is recorded in its Access Log (the audit trail of who viewed it), " +
         "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts. " +
-        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it.",
+        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it. " +
+        "weekly_availability is the Contact's Weekly availability: the most recently saved answer to any Weekly availability field on their Contact Forms, " +
+        "as times ([{day, from, to}], in the organisation's timezone) with source_form_id (the Contact Form it came from), source_field_id and answered_at, " +
+        "or null if they have none. Use it to suggest appointment times. When Field Visibility hides that field from you, times is null and restricted is true.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -1483,7 +1486,8 @@ export function buildTools(api) {
         "Create a new Contact (Beneficiary). Required: name, owner_id. " +
         "Call makerble_list_contact_bio_form_fields first to get custom field IDs. " +
         "Call makerble_list_contact_types to get beneficiary_type_id (1=Person, 2=Object, 3=Organisation, 4=Animal). " +
-        "Setting a field Field Visibility hides from you is refused with 422 and errors naming the field: leave it out and tell the user someone who can see it must fill it in.",
+        "Setting a field Field Visibility hides from you is refused with 422 and errors naming the field: leave it out and tell the user someone who can see it must fill it in. " +
+        "A Weekly availability field (type weekly_availability) takes a list of days and times: [{\"day\": \"monday\", \"from\": \"15:30\", \"to\": \"18:00\"}], days monday to sunday, times HH:MM in 15-minute steps in the organisation's timezone, To after From. Overlapping times on a day are joined when saved. An answer it can't read is refused with 422 and errors saying why.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1498,7 +1502,7 @@ export function buildTools(api) {
           beneficiary_category_ids: { type: "array", items: { type: "number" } },
           custom_fields: {
             type: "object",
-            description: "Dictionary of custom_field_id (string key) to value",
+            description: "Dictionary of custom_field_id (string key) to value. A weekly_availability field's value is a list of {day, from, to}.",
           },
         },
         required: ["name", "owner_id"],
@@ -1597,7 +1601,8 @@ export function buildTools(api) {
       name: "makerble_list_contact_bio_form_fields",
       description:
         "List custom field definitions for Contact Bio Forms. " +
-        "Filter by beneficiary_category_ids. Use field IDs when creating a contact.",
+        "Filter by beneficiary_category_ids. Use field IDs when creating a contact. " +
+        "field_data_type says what kind of answer a field takes. A Weekly availability field (type weekly_availability) takes a list of days and times: [{\"day\": \"monday\", \"from\": \"15:30\", \"to\": \"18:00\"}], days monday to sunday, times HH:MM in 15-minute steps in the organisation's timezone, To after From. Overlapping times on a day are joined when saved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5884,7 +5889,15 @@ export function buildTools(api) {
         "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree " +
         "(or use makerble_schedule_announcement to pick the next free days for one of Makerble's own), " +
         "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
-        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
+        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.\n\n" +
+        "Targeting (Makerble's own only, System Access users): roles narrows who sees it to people holding at least " +
+        "one of the listed roles, in place of audience. Contacts with a login (active_participant) and Survey " +
+        "Portal users (survey_portal_user) are left out unless you list their role. audience_rules narrows it " +
+        "further by behaviour, as JSON over named facts: each rule is exactly one of {fact, params}, {all: [rules]}, " +
+        "{any: [rules]} or {not: rule}. For example, only people whose organisation hasn't set up Distance " +
+        "Travelled in any of their organisations: {\"all\": [{\"fact\": \"distance_travelled_not_set_up\"}]}. " +
+        "Call makerble_list_announcement_facts first for the facts and their params; an unknown fact or param is " +
+        "refused with 422, naming the rule. Send roles [] or audience_rules {} to clear them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5918,7 +5931,25 @@ export function buildTools(api) {
             enum: ["everyone", "colleagues", "administrators"],
             description:
               "Makerble's own only. everyone: every signed-in user. colleagues: everyone except Contacts with a " +
-              "login. administrators: Organisation Admins. Ignored for a place's announcement.",
+              "login. administrators: Organisation Admins. Ignored for a place's announcement, and when roles has any.",
+          },
+          roles: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["organisation_admin", "editor", "reporter", "observer", "team_leader", "active_participant", "survey_portal_user"],
+            },
+            description:
+              "Makerble's own only. Show it only to people holding one of these roles, in place of audience: " +
+              "organisation_admin (Organisation Admin), editor (Workspace editor), reporter, observer, team_leader, " +
+              "active_participant (Contact with a login), survey_portal_user. Empty or left out: audience decides.",
+          },
+          audience_rules: {
+            type: "object",
+            description:
+              "Makerble's own only. Behaviour rules over named facts from makerble_list_announcement_facts, e.g. " +
+              "{\"all\": [{\"fact\": \"distance_travelled_not_set_up\", \"params\": {\"across\": \"all_organisations\"}}]}. " +
+              "{} for none.",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
@@ -5926,6 +5957,23 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_announcement_facts",
+      description:
+        "List the named facts an Announcement's audience_rules can use to target people by behaviour, such as " +
+        "distance_travelled_not_set_up (the person's organisation hasn't set up Distance Travelled) or " +
+        "has_not_added_a_story (they haven't added a story yet). Each fact has a key (what a rule names), a " +
+        "description, a label and its params with the values they accept and their default. A fact about a " +
+        "person's organisations takes across: for someone in several organisations, whether it must hold for any " +
+        "one of them (any_organisation, the default), every one (all_organisations) or the oldest one they belong " +
+        "to (first_organisation).\n\n" +
+        "When to use: before setting audience_rules with makerble_save_announcement, to see which facts exist. " +
+        "Facts are written in Makerble's code, so the list only changes with a release. Only System Access users " +
+        "(Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/announcements/facts"),
     },
 
     {
@@ -6376,8 +6424,9 @@ export function buildTools(api) {
         "\"Learn more\" link to the page's article in the Makerble User Guide, and an optional Vimeo video. " +
         "Panels are the same for every Organisation. Returns each panel's key (use it with " +
         "makerble_get_guidance_panel and makerble_update_guidance_panel), page_name, module (the sidebar " +
-        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, visual " +
-        "(what shows beside the text now: vimeo, animation, image or none), updated_at and updated_by. Only " +
+        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, storyboard " +
+        "(the animation drawn when there is no video, or null), visual (what shows beside the text now: vimeo, " +
+        "storyboard, animation, image or none), updated_at and updated_by. Only " +
         "Makerble staff with System Access can use the Guidance Panel tools; anyone else gets 403.",
       inputSchema: {
         type: "object",
@@ -6409,7 +6458,8 @@ export function buildTools(api) {
     {
       name: "makerble_update_guidance_panel",
       description:
-        "Change a Guidance Panel's wording or video: the Show/Hide Guidance introduction at the top of a " +
+        "Change a Guidance Panel's wording, video or animation storyboard: the Show/Hide Guidance introduction " +
+        "(shown as the page's \"Intro\") at the top of a " +
         "Manage page. The page shows the change from its next load, and the change is kept as a version " +
         "attributed to the user. Send only the fields to change; points replaces the whole list in the order " +
         "given.\n\n" +
@@ -6425,7 +6475,20 @@ export function buildTools(api) {
         "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
         "vimeo_url must be empty (to go back to the page's own image or animation) or one of " +
         "https://vimeo.com/<id>, https://vimeo.com/<id>/<hash> for an unlisted video, or " +
-        "https://player.vimeo.com/video/<id>?h=<hash>. A broken rule returns 422 with every message in errors: " +
+        "https://player.vimeo.com/video/<id>?h=<hash>.\n\n" +
+        "storyboard is the Intro's animation, drawn in the page's module colour from Makerble building " +
+        "blocks whenever there is no Vimeo link (a video always wins). Send null to remove it. It is an object: " +
+        "archetype (assemble: the parts of a page of the feature come together; flow: a short walkthrough of " +
+        "using it; concept: a metaphor for the idea, which Matt must approve before it is saved), loop_seconds " +
+        "(4 to 20), alt (10 to 250 characters describing what the animation shows, read by screen readers) and " +
+        "1 to 24 steps played in order. Step types: appear (puts a block on the stage: block is one of top_bar, " +
+        "sidebar_item, table_row, card, button, field, chip, avatar or chart_bar; optional id that later steps " +
+        "target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
+        "needs value 0 to 100), move_cursor, click, highlight and check (each with target, the id of a block on " +
+        "the stage), type (target is a field, text is what is typed), swap (replaces the target's text with " +
+        "text) and cut (clears the stage for the next scene; earlier blocks can't be targeted after it). Use the " +
+        "feature's real button and page names in sentence case. Up to 8,000 characters of JSON.\n\n" +
+        "A broken rule returns 422 with every message in errors: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
         "ahead.",
       inputSchema: {
@@ -6451,6 +6514,36 @@ export function buildTools(api) {
           staff_text: { type: "string", description: "Shown instead of the main action to people who can't use it" },
           user_guide_url: { type: "string", description: "A page in the Makerble User Guide (MCPD space)" },
           vimeo_url: { type: "string", description: "A Vimeo link, or an empty string to remove the video" },
+          storyboard: {
+            type: ["object", "null"],
+            description: "The Intro's animation (see the rules above), or null to remove it",
+            properties: {
+              archetype: { type: "string", enum: ["assemble", "flow", "concept"] },
+              loop_seconds: { type: "integer", minimum: 4, maximum: 20 },
+              alt: { type: "string", description: "What the animation shows, 10 to 250 characters" },
+              steps: {
+                type: "array",
+                minItems: 1,
+                maxItems: 24,
+                items: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string", enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut"] },
+                    block: {
+                      type: "string",
+                      enum: ["top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar"],
+                    },
+                    id: { type: "string" },
+                    target: { type: "string" },
+                    text: { type: "string" },
+                    value: { type: "integer", minimum: 0, maximum: 100 },
+                  },
+                  required: ["type"],
+                },
+              },
+            },
+            required: ["archetype", "loop_seconds", "alt", "steps"],
+          },
         },
         required: ["key"],
       },
@@ -6998,7 +7091,7 @@ export function buildTools(api) {
         properties: {
           organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
           field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
-          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey. A Weekly availability Field can only be made as part of a Contact Form (makerble_create_contact_form), not here" },
           section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
           private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
           force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
@@ -7302,7 +7395,7 @@ export function buildTools(api) {
                   type: "object",
                   properties: {
                     field_name: { type: "string" },
-                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"] },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature", "weekly_availability"], description: "weekly_availability asks for the days and times a Contact can usually attend (Contact Forms only)" },
                     section_text: { type: "string", description: "section_title only: the text under the heading" },
                     private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
                   },
