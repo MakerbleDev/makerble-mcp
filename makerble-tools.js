@@ -6343,8 +6343,9 @@ export function buildTools(api) {
         "\"Learn more\" link to the page's article in the Makerble User Guide, and an optional Vimeo video. " +
         "Panels are the same for every Organisation. Returns each panel's key (use it with " +
         "makerble_get_guidance_panel and makerble_update_guidance_panel), page_name, module (the sidebar " +
-        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, visual " +
-        "(what shows beside the text now: vimeo, animation, image or none), updated_at and updated_by. Only " +
+        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, storyboard " +
+        "(the animation drawn when there is no video, or null), visual (what shows beside the text now: vimeo, " +
+        "storyboard, animation, image or none), updated_at and updated_by. Only " +
         "Makerble staff with System Access can use the Guidance Panel tools; anyone else gets 403.",
       inputSchema: {
         type: "object",
@@ -6376,7 +6377,8 @@ export function buildTools(api) {
     {
       name: "makerble_update_guidance_panel",
       description:
-        "Change a Guidance Panel's wording or video: the Show/Hide Guidance introduction at the top of a " +
+        "Change a Guidance Panel's wording, video or animation storyboard: the Show/Hide Guidance introduction " +
+        "(shown as the page's \"Intro\") at the top of a " +
         "Manage page. The page shows the change from its next load, and the change is kept as a version " +
         "attributed to the user. Send only the fields to change; points replaces the whole list in the order " +
         "given.\n\n" +
@@ -6392,7 +6394,20 @@ export function buildTools(api) {
         "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
         "vimeo_url must be empty (to go back to the page's own image or animation) or one of " +
         "https://vimeo.com/<id>, https://vimeo.com/<id>/<hash> for an unlisted video, or " +
-        "https://player.vimeo.com/video/<id>?h=<hash>. A broken rule returns 422 with every message in errors: " +
+        "https://player.vimeo.com/video/<id>?h=<hash>.\n\n" +
+        "storyboard is the Intro's animation, drawn in the page's module colour from Makerble building " +
+        "blocks whenever there is no Vimeo link (a video always wins). Send null to remove it. It is an object: " +
+        "archetype (assemble: the parts of a page of the feature come together; flow: a short walkthrough of " +
+        "using it; concept: a metaphor for the idea, which Matt must approve before it is saved), loop_seconds " +
+        "(4 to 20), alt (10 to 250 characters describing what the animation shows, read by screen readers) and " +
+        "1 to 24 steps played in order. Step types: appear (puts a block on the stage: block is one of top_bar, " +
+        "sidebar_item, table_row, card, button, field, chip, avatar or chart_bar; optional id that later steps " +
+        "target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
+        "needs value 0 to 100), move_cursor, click, highlight and check (each with target, the id of a block on " +
+        "the stage), type (target is a field, text is what is typed), swap (replaces the target's text with " +
+        "text) and cut (clears the stage for the next scene; earlier blocks can't be targeted after it). Use the " +
+        "feature's real button and page names in sentence case. Up to 8,000 characters of JSON.\n\n" +
+        "A broken rule returns 422 with every message in errors: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
         "ahead.",
       inputSchema: {
@@ -6418,6 +6433,36 @@ export function buildTools(api) {
           staff_text: { type: "string", description: "Shown instead of the main action to people who can't use it" },
           user_guide_url: { type: "string", description: "A page in the Makerble User Guide (MCPD space)" },
           vimeo_url: { type: "string", description: "A Vimeo link, or an empty string to remove the video" },
+          storyboard: {
+            type: ["object", "null"],
+            description: "The Intro's animation (see the rules above), or null to remove it",
+            properties: {
+              archetype: { type: "string", enum: ["assemble", "flow", "concept"] },
+              loop_seconds: { type: "integer", minimum: 4, maximum: 20 },
+              alt: { type: "string", description: "What the animation shows, 10 to 250 characters" },
+              steps: {
+                type: "array",
+                minItems: 1,
+                maxItems: 24,
+                items: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string", enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut"] },
+                    block: {
+                      type: "string",
+                      enum: ["top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar"],
+                    },
+                    id: { type: "string" },
+                    target: { type: "string" },
+                    text: { type: "string" },
+                    value: { type: "integer", minimum: 0, maximum: 100 },
+                  },
+                  required: ["type"],
+                },
+              },
+            },
+            required: ["archetype", "loop_seconds", "alt", "steps"],
+          },
         },
         required: ["key"],
       },
