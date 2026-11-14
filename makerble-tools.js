@@ -5897,7 +5897,13 @@ export function buildTools(api) {
         "{any: [rules]} or {not: rule}. For example, only people whose organisation hasn't set up Distance " +
         "Travelled in any of their organisations: {\"all\": [{\"fact\": \"distance_travelled_not_set_up\"}]}. " +
         "Call makerble_list_announcement_facts first for the facts and their params; an unknown fact or param is " +
-        "refused with 422, naming the rule. Send roles [] or audience_rules {} to clear them.",
+        "refused with 422, naming the rule. Send roles [] or audience_rules {} to clear them.\n\n" +
+        "Pages (Makerble's own only, System Access users): page_keys limits it to some pages, so a feature is " +
+        "announced where it lives, e.g. [\"contacts\"] for a Contacts feature shows it only when someone opens " +
+        "Manage Contacts, including when they move there from another page without reloading. A page key is the " +
+        "key of the page's Intro (guidance panel), such as contacts, events, checklists, surveys, tasks or " +
+        "custom_tables; pages without an Intro can't be chosen. An unknown key is refused with 422, listing the " +
+        "keys available. Send page_keys [] to show it on any page again (the default).",
       inputSchema: {
         type: "object",
         properties: {
@@ -5950,6 +5956,13 @@ export function buildTools(api) {
               "Makerble's own only. Behaviour rules over named facts from makerble_list_announcement_facts, e.g. " +
               "{\"all\": [{\"fact\": \"distance_travelled_not_set_up\", \"params\": {\"across\": \"all_organisations\"}}]}. " +
               "{} for none.",
+          },
+          page_keys: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Makerble's own only. The pages it shows on, by each page's Intro key, e.g. [\"contacts\"] for Manage " +
+              "Contacts. Empty or left out when creating: any page. Sent, it replaces the list.",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
