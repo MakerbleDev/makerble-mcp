@@ -7010,7 +7010,7 @@ export function buildTools(api) {
         properties: {
           organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
           field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
-          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey. A Weekly availability Field can only be made as part of a Contact Form (makerble_create_contact_form), not here" },
           section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
           private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
           force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
@@ -7314,7 +7314,7 @@ export function buildTools(api) {
                   type: "object",
                   properties: {
                     field_name: { type: "string" },
-                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"] },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature", "weekly_availability"], description: "weekly_availability asks for the days and times a Contact can usually attend (Contact Forms only)" },
                     section_text: { type: "string", description: "section_title only: the text under the heading" },
                     private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
                   },
