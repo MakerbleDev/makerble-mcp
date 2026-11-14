@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 289 Makerble MCP tool definitions.
+ * All 291 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -7787,6 +7787,57 @@ export function buildTools(api) {
         const history = await get(`/organisations/${organisation_id}/usage/history`);
         return { ...month, history: history.data };
       },
+    },
+
+    // ── Setup guide (CP-9056) ─────────────────────────────────────────────────
+    {
+      name: "makerble_get_setup_guide",
+      description:
+        "Get an Organisation's (Charity's) Setup guide: the main things to set up in Makerble, how far each has got and " +
+        "whether it is done. It is the Setup guide page in Makerble (Help › Setup guide, or the card at the bottom of the " +
+        "left sidebar). Use it to answer 'what should we set up next' or 'how far through setup are we'. Returns " +
+        "done_count of total_count (items marked not relevant leave the total), finished (true once every item is done " +
+        "or not relevant), and data: each item's key, title, section (e.g. 'Automate your reporting', or null), progress " +
+        "in words (e.g. '3 of 5 workspaces'), done_when (what counts as done), done and not_relevant. Items (key): teams " +
+        "(Create your teams; only for Organisations with 11 or more staff), workspaces (Projects), welcome_tour, " +
+        "checklists (a Checklist on each open workspace), reporting_requirements (Reporting Cycles with a Report " +
+        "Template), demographics (the Demographics tab of Contacts with 2 Ratio Sets) and metrics (an Engagement " +
+        "Tracker and an Indicator on each open workspace). Makerble ticks items off itself, and once done an item stays " +
+        "done. Only the Organisation's Organisation Admins (Charity Editors) and Makerble staff can read it, and only " +
+        "while the Setup guide is switched on for the Organisation; anyone else gets a 403 error.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id }) => get(`/organisations/${organisation_id}/setup_guide`),
+    },
+    {
+      name: "makerble_set_setup_guide_item",
+      description:
+        "Mark one item of an Organisation's (Charity's) Setup guide as 'Not relevant to us', or undo that. An item marked " +
+        "not relevant leaves the guide's total, so the Organisation can finish its Setup guide without it; Makerble " +
+        "records who chose it and when. This never ticks an item as done: Makerble does that itself when it sees the " +
+        "work done. Get the item keys from makerble_get_setup_guide (teams, workspaces, welcome_tour, checklists, " +
+        "reporting_requirements, demographics, metrics). Returns the whole Setup guide after the change. Only the " +
+        "Organisation's Organisation Admins (Charity Editors) and Makerble staff can do this.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          item_key: {
+            type: "string",
+            enum: ["teams", "workspaces", "welcome_tour", "checklists", "reporting_requirements", "demographics", "metrics"],
+            description: "The item's key, from makerble_get_setup_guide",
+          },
+          not_relevant: { type: "boolean", description: "true marks it Not relevant to us; false is Undo" },
+        },
+        required: ["organisation_id", "item_key", "not_relevant"],
+      },
+      handler: ({ organisation_id, item_key, not_relevant }) =>
+        patch(`/organisations/${organisation_id}/setup_guide/items/${encodeURIComponent(item_key)}`, { not_relevant }),
     },
 
     // ── Age bands (CP-8902) ───────────────────────────────────────────────────
