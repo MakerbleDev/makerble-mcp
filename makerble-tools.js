@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 283 Makerble MCP tool definitions.
+ * All 286 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5636,6 +5636,87 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/event_categories", p),
+    },
+
+    {
+      name: "makerble_get_event_format",
+      description:
+        "Get one Event Format (called Event Category / event_category in the API) with all its settings. " +
+        "An Event Format is a template for events — e.g. Workshops, Classes, Meetings, Therapy sessions — " +
+        "managed on an organisation's Manage Event Formats page. Only an Organisation Admin of its " +
+        "organisation can read it (others get 403; another organisation's returns 404). Find the id with " +
+        "makerble_list_event_formats. Use it to check whether a format is a one-to-one or group appointment " +
+        "and how long its appointments last. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/event_categories/${id}`),
+    },
+
+    {
+      name: "makerble_create_event_format",
+      description:
+        "Create an Event Format (called Event Category / event_category in the API): a template for an " +
+        "organisation's events, as Create Event Format on the Manage Event Formats page. Only an Organisation " +
+        "Admin of charity_id can create one (others get 403). Give it a name and the organisation's Guest " +
+        "Statuses its events use (guest_status_ids, in order). To make it an appointment, set appointment_type " +
+        "('one_to_one' or 'group'), and optionally default_length_minutes and the preparation and debrief time " +
+        "a colleague needs either side. To use it in a Project afterwards, add it to the Project in Makerble. " +
+        "Invalid settings return 422 with errors listing each problem. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) the Event Format belongs to" },
+          name: { type: "string", description: "Name, e.g. 'Therapy session' or 'Drop-in'" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          appointment_type: {
+            type: ["string", "null"],
+            enum: ["one_to_one", "group", null],
+            description: "Whether events of this format are appointments: 'one_to_one' (one guest each, e.g. a therapy session), 'group', or null for Not an appointment",
+          },
+          default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
+          preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
+          debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: (body) => post("/event_categories", body),
+    },
+
+    {
+      name: "makerble_update_event_format",
+      description:
+        "Edit an Event Format (called Event Category / event_category in the API), as Edit on the Manage " +
+        "Event Formats page. Only the settings you send change. Only an Organisation Admin of its organisation " +
+        "can edit it (others get 403; another organisation's returns 404). Use it to rename a format, change " +
+        "its Guest Statuses, or set whether it is a one-to-one or group appointment (appointment_type; null " +
+        "for Not an appointment), its default length, and the preparation and debrief time either side. " +
+        "Invalid settings return 422 with errors, e.g. a default length not in 5-minute steps. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id, from makerble_list_event_formats" },
+          name: { type: "string" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          appointment_type: {
+            type: ["string", "null"],
+            enum: ["one_to_one", "group", null],
+            description: "Whether events of this format are appointments: 'one_to_one' (one guest each, e.g. a therapy session), 'group', or null for Not an appointment",
+          },
+          default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
+          preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
+          debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/event_categories/${id}`, body),
     },
 
     {
