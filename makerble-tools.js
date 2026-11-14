@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 286 Makerble MCP tool definitions.
+ * All 288 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6270,6 +6270,55 @@ export function buildTools(api) {
       },
       handler: ({ user_id, organisation_id, ...params }) =>
         get(`/users/${user_id}/unavailabilities`, { charity_id: organisation_id, ...params }),
+    },
+
+    {
+      name: "makerble_get_colleague_capacity",
+      description:
+        "Get a colleague's (User's) capacity caps in one Organisation (Charity), and how much they have taken on, " +
+        "as in the Edit capacity popup on the Staff Availability page (CP-9146). Caps: max_per_day and max_per_week " +
+        "(appointments) and max_one_to_one_contacts (Contacts with an upcoming one-to-one appointment with them); " +
+        "null means no limit. usage gives appointments_today, appointments_this_week and ongoing_one_to_one_contacts, " +
+        "in the Organisation's time zone. An appointment is an event whose Event Format (event category) has an " +
+        "appointment_type (one_to_one or group, see makerble_get_event_format) where the colleague is an Event Worker. " +
+        "Use it to tell whether a colleague is fully booked before assigning them to an event or a new Contact. " +
+        "Anyone who sees the colleague on Staff Availability can read this: the colleague themselves, their Team " +
+        "Leaders, Project Editors of their Projects and Organisation Admins (Charity Editors). can_edit says whether " +
+        "the signed-in user may change the caps with makerble_set_colleague_capacity. 403 if they can't see the " +
+        "colleague, 404 for an Organisation they aren't in. " +
+        "Returns { user_id, charity_id, max_per_day, max_per_week, max_one_to_one_contacts, can_edit, usage }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID. A colleague has separate caps in each Organisation" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id }) => get(`/users/${user_id}/capacity`, { charity_id: organisation_id }),
+    },
+
+    {
+      name: "makerble_set_colleague_capacity",
+      description:
+        "Set a colleague's (User's) capacity caps in one Organisation (Charity), as Edit capacity on the Staff " +
+        "Availability page does (CP-9146): max_per_day and max_per_week (appointments) and max_one_to_one_contacts " +
+        "(Contacts with an upcoming one-to-one appointment with them). Only the caps you send change; send null to " +
+        "remove a limit. Whole numbers from 0 to 1000. Only an Organisation Admin (Charity Editor), or a Team Leader " +
+        "of a Team the colleague is in, may set them; a colleague can't set their own (403). Invalid values return 422 " +
+        "with errors. Returns the same as makerble_get_colleague_capacity.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          max_per_day: { type: ["number", "null"], description: "Maximum appointments a day, or null for no limit" },
+          max_per_week: { type: ["number", "null"], description: "Maximum appointments a week, or null for no limit" },
+          max_one_to_one_contacts: { type: ["number", "null"], description: "Maximum ongoing one-to-one Contacts, or null for no limit" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id, ...caps }) => patch(`/users/${user_id}/capacity?charity_id=${organisation_id}`, caps),
     },
 
     {
