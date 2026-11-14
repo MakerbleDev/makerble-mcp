@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 285 Makerble MCP tool definitions.
+ * All 293 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -5726,6 +5726,87 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_event_format",
+      description:
+        "Get one Event Format (called Event Category / event_category in the API) with all its settings. " +
+        "An Event Format is a template for events — e.g. Workshops, Classes, Meetings, Therapy sessions — " +
+        "managed on an organisation's Manage Event Formats page. Only an Organisation Admin of its " +
+        "organisation can read it (others get 403; another organisation's returns 404). Find the id with " +
+        "makerble_list_event_formats. Use it to check whether a format is a one-to-one or group appointment " +
+        "and how long its appointments last. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/event_categories/${id}`),
+    },
+
+    {
+      name: "makerble_create_event_format",
+      description:
+        "Create an Event Format (called Event Category / event_category in the API): a template for an " +
+        "organisation's events, as Create Event Format on the Manage Event Formats page. Only an Organisation " +
+        "Admin of charity_id can create one (others get 403). Give it a name and the organisation's Guest " +
+        "Statuses its events use (guest_status_ids, in order). To make it an appointment, set appointment_type " +
+        "('one_to_one' or 'group'), and optionally default_length_minutes and the preparation and debrief time " +
+        "a colleague needs either side. To use it in a Project afterwards, add it to the Project in Makerble. " +
+        "Invalid settings return 422 with errors listing each problem. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) the Event Format belongs to" },
+          name: { type: "string", description: "Name, e.g. 'Therapy session' or 'Drop-in'" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          appointment_type: {
+            type: ["string", "null"],
+            enum: ["one_to_one", "group", null],
+            description: "Whether events of this format are appointments: 'one_to_one' (one guest each, e.g. a therapy session), 'group', or null for Not an appointment",
+          },
+          default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
+          preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
+          debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: (body) => post("/event_categories", body),
+    },
+
+    {
+      name: "makerble_update_event_format",
+      description:
+        "Edit an Event Format (called Event Category / event_category in the API), as Edit on the Manage " +
+        "Event Formats page. Only the settings you send change. Only an Organisation Admin of its organisation " +
+        "can edit it (others get 403; another organisation's returns 404). Use it to rename a format, change " +
+        "its Guest Statuses, or set whether it is a one-to-one or group appointment (appointment_type; null " +
+        "for Not an appointment), its default length, and the preparation and debrief time either side. " +
+        "Invalid settings return 422 with errors, e.g. a default length not in 5-minute steps. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id, from makerble_list_event_formats" },
+          name: { type: "string" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          appointment_type: {
+            type: ["string", "null"],
+            enum: ["one_to_one", "group", null],
+            description: "Whether events of this format are appointments: 'one_to_one' (one guest each, e.g. a therapy session), 'group', or null for Not an appointment",
+          },
+          default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
+          preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
+          debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/event_categories/${id}`, body),
+    },
+
+    {
       name: "makerble_delete_event_format",
       description:
         "Permanently delete an Event Format (called Event Category / event_category in the API). " +
@@ -5890,7 +5971,15 @@ export function buildTools(api) {
         "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree " +
         "(or use makerble_schedule_announcement to pick the next free days for one of Makerble's own), " +
         "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
-        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.",
+        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.\n\n" +
+        "Targeting (Makerble's own only, System Access users): roles narrows who sees it to people holding at least " +
+        "one of the listed roles, in place of audience. Contacts with a login (active_participant) and Survey " +
+        "Portal users (survey_portal_user) are left out unless you list their role. audience_rules narrows it " +
+        "further by behaviour, as JSON over named facts: each rule is exactly one of {fact, params}, {all: [rules]}, " +
+        "{any: [rules]} or {not: rule}. For example, only people whose organisation hasn't set up Distance " +
+        "Travelled in any of their organisations: {\"all\": [{\"fact\": \"distance_travelled_not_set_up\"}]}. " +
+        "Call makerble_list_announcement_facts first for the facts and their params; an unknown fact or param is " +
+        "refused with 422, naming the rule. Send roles [] or audience_rules {} to clear them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5924,7 +6013,25 @@ export function buildTools(api) {
             enum: ["everyone", "colleagues", "administrators"],
             description:
               "Makerble's own only. everyone: every signed-in user. colleagues: everyone except Contacts with a " +
-              "login. administrators: Organisation Admins. Ignored for a place's announcement.",
+              "login. administrators: Organisation Admins. Ignored for a place's announcement, and when roles has any.",
+          },
+          roles: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["organisation_admin", "editor", "reporter", "observer", "team_leader", "active_participant", "survey_portal_user"],
+            },
+            description:
+              "Makerble's own only. Show it only to people holding one of these roles, in place of audience: " +
+              "organisation_admin (Organisation Admin), editor (Workspace editor), reporter, observer, team_leader, " +
+              "active_participant (Contact with a login), survey_portal_user. Empty or left out: audience decides.",
+          },
+          audience_rules: {
+            type: "object",
+            description:
+              "Makerble's own only. Behaviour rules over named facts from makerble_list_announcement_facts, e.g. " +
+              "{\"all\": [{\"fact\": \"distance_travelled_not_set_up\", \"params\": {\"across\": \"all_organisations\"}}]}. " +
+              "{} for none.",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
@@ -5932,6 +6039,23 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_announcement_facts",
+      description:
+        "List the named facts an Announcement's audience_rules can use to target people by behaviour, such as " +
+        "distance_travelled_not_set_up (the person's organisation hasn't set up Distance Travelled) or " +
+        "has_not_added_a_story (they haven't added a story yet). Each fact has a key (what a rule names), a " +
+        "description, a label and its params with the values they accept and their default. A fact about a " +
+        "person's organisations takes across: for someone in several organisations, whether it must hold for any " +
+        "one of them (any_organisation, the default), every one (all_organisations) or the oldest one they belong " +
+        "to (first_organisation).\n\n" +
+        "When to use: before setting audience_rules with makerble_save_announcement, to see which facts exist. " +
+        "Facts are written in Makerble's code, so the list only changes with a release. Only System Access users " +
+        "(Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/announcements/facts"),
     },
 
     {
@@ -6279,6 +6403,55 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_colleague_capacity",
+      description:
+        "Get a colleague's (User's) capacity caps in one Organisation (Charity), and how much they have taken on, " +
+        "as in the Edit capacity popup on the Staff Availability page (CP-9146). Caps: max_per_day and max_per_week " +
+        "(appointments) and max_one_to_one_contacts (Contacts with an upcoming one-to-one appointment with them); " +
+        "null means no limit. usage gives appointments_today, appointments_this_week and ongoing_one_to_one_contacts, " +
+        "in the Organisation's time zone. An appointment is an event whose Event Format (event category) has an " +
+        "appointment_type (one_to_one or group, see makerble_get_event_format) where the colleague is an Event Worker. " +
+        "Use it to tell whether a colleague is fully booked before assigning them to an event or a new Contact. " +
+        "Anyone who sees the colleague on Staff Availability can read this: the colleague themselves, their Team " +
+        "Leaders, Project Editors of their Projects and Organisation Admins (Charity Editors). can_edit says whether " +
+        "the signed-in user may change the caps with makerble_set_colleague_capacity. 403 if they can't see the " +
+        "colleague, 404 for an Organisation they aren't in. " +
+        "Returns { user_id, charity_id, max_per_day, max_per_week, max_one_to_one_contacts, can_edit, usage }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID. A colleague has separate caps in each Organisation" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id }) => get(`/users/${user_id}/capacity`, { charity_id: organisation_id }),
+    },
+
+    {
+      name: "makerble_set_colleague_capacity",
+      description:
+        "Set a colleague's (User's) capacity caps in one Organisation (Charity), as Edit capacity on the Staff " +
+        "Availability page does (CP-9146): max_per_day and max_per_week (appointments) and max_one_to_one_contacts " +
+        "(Contacts with an upcoming one-to-one appointment with them). Only the caps you send change; send null to " +
+        "remove a limit. Whole numbers from 0 to 1000. Only an Organisation Admin (Charity Editor), or a Team Leader " +
+        "of a Team the colleague is in, may set them; a colleague can't set their own (403). Invalid values return 422 " +
+        "with errors. Returns the same as makerble_get_colleague_capacity.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          max_per_day: { type: ["number", "null"], description: "Maximum appointments a day, or null for no limit" },
+          max_per_week: { type: ["number", "null"], description: "Maximum appointments a week, or null for no limit" },
+          max_one_to_one_contacts: { type: ["number", "null"], description: "Maximum ongoing one-to-one Contacts, or null for no limit" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id, ...caps }) => patch(`/users/${user_id}/capacity?charity_id=${organisation_id}`, caps),
+    },
+
+    {
       name: "makerble_set_unavailability",
       description:
         "Record, change or remove when a colleague (User) can't work for an Organisation (Charity) (CP-7456). Makerble " +
@@ -6382,8 +6555,9 @@ export function buildTools(api) {
         "\"Learn more\" link to the page's article in the Makerble User Guide, and an optional Vimeo video. " +
         "Panels are the same for every Organisation. Returns each panel's key (use it with " +
         "makerble_get_guidance_panel and makerble_update_guidance_panel), page_name, module (the sidebar " +
-        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, visual " +
-        "(what shows beside the text now: vimeo, animation, image or none), updated_at and updated_by. Only " +
+        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, storyboard " +
+        "(the animation drawn when there is no video, or null), visual (what shows beside the text now: vimeo, " +
+        "storyboard, animation, image or none), updated_at and updated_by. Only " +
         "Makerble staff with System Access can use the Guidance Panel tools; anyone else gets 403.",
       inputSchema: {
         type: "object",
@@ -6415,7 +6589,8 @@ export function buildTools(api) {
     {
       name: "makerble_update_guidance_panel",
       description:
-        "Change a Guidance Panel's wording or video: the Show/Hide Guidance introduction at the top of a " +
+        "Change a Guidance Panel's wording, video or animation storyboard: the Show/Hide Guidance introduction " +
+        "(shown as the page's \"Intro\") at the top of a " +
         "Manage page. The page shows the change from its next load, and the change is kept as a version " +
         "attributed to the user. Send only the fields to change; points replaces the whole list in the order " +
         "given.\n\n" +
@@ -6431,7 +6606,20 @@ export function buildTools(api) {
         "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
         "vimeo_url must be empty (to go back to the page's own image or animation) or one of " +
         "https://vimeo.com/<id>, https://vimeo.com/<id>/<hash> for an unlisted video, or " +
-        "https://player.vimeo.com/video/<id>?h=<hash>. A broken rule returns 422 with every message in errors: " +
+        "https://player.vimeo.com/video/<id>?h=<hash>.\n\n" +
+        "storyboard is the Intro's animation, drawn in the page's module colour from Makerble building " +
+        "blocks whenever there is no Vimeo link (a video always wins). Send null to remove it. It is an object: " +
+        "archetype (assemble: the parts of a page of the feature come together; flow: a short walkthrough of " +
+        "using it; concept: a metaphor for the idea, which Matt must approve before it is saved), loop_seconds " +
+        "(4 to 20), alt (10 to 250 characters describing what the animation shows, read by screen readers) and " +
+        "1 to 24 steps played in order. Step types: appear (puts a block on the stage: block is one of top_bar, " +
+        "sidebar_item, table_row, card, button, field, chip, avatar or chart_bar; optional id that later steps " +
+        "target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
+        "needs value 0 to 100), move_cursor, click, highlight and check (each with target, the id of a block on " +
+        "the stage), type (target is a field, text is what is typed), swap (replaces the target's text with " +
+        "text) and cut (clears the stage for the next scene; earlier blocks can't be targeted after it). Use the " +
+        "feature's real button and page names in sentence case. Up to 8,000 characters of JSON.\n\n" +
+        "A broken rule returns 422 with every message in errors: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
         "ahead.",
       inputSchema: {
@@ -6457,6 +6645,36 @@ export function buildTools(api) {
           staff_text: { type: "string", description: "Shown instead of the main action to people who can't use it" },
           user_guide_url: { type: "string", description: "A page in the Makerble User Guide (MCPD space)" },
           vimeo_url: { type: "string", description: "A Vimeo link, or an empty string to remove the video" },
+          storyboard: {
+            type: ["object", "null"],
+            description: "The Intro's animation (see the rules above), or null to remove it",
+            properties: {
+              archetype: { type: "string", enum: ["assemble", "flow", "concept"] },
+              loop_seconds: { type: "integer", minimum: 4, maximum: 20 },
+              alt: { type: "string", description: "What the animation shows, 10 to 250 characters" },
+              steps: {
+                type: "array",
+                minItems: 1,
+                maxItems: 24,
+                items: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string", enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut"] },
+                    block: {
+                      type: "string",
+                      enum: ["top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar"],
+                    },
+                    id: { type: "string" },
+                    target: { type: "string" },
+                    text: { type: "string" },
+                    value: { type: "integer", minimum: 0, maximum: 100 },
+                  },
+                  required: ["type"],
+                },
+              },
+            },
+            required: ["archetype", "loop_seconds", "alt", "steps"],
+          },
         },
         required: ["key"],
       },
@@ -7004,7 +7222,7 @@ export function buildTools(api) {
         properties: {
           organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
           field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
-          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey. A Weekly availability Field can only be made as part of a Contact Form (makerble_create_contact_form), not here" },
           section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
           private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
           force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
@@ -7308,7 +7526,7 @@ export function buildTools(api) {
                   type: "object",
                   properties: {
                     field_name: { type: "string" },
-                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature"] },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature", "weekly_availability"], description: "weekly_availability asks for the days and times a Contact can usually attend (Contact Forms only)" },
                     section_text: { type: "string", description: "section_title only: the text under the heading" },
                     private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
                   },
@@ -7651,6 +7869,57 @@ export function buildTools(api) {
         const history = await get(`/organisations/${organisation_id}/usage/history`);
         return { ...month, history: history.data };
       },
+    },
+
+    // ── Setup guide (CP-9056) ─────────────────────────────────────────────────
+    {
+      name: "makerble_get_setup_guide",
+      description:
+        "Get an Organisation's (Charity's) Setup guide: the main things to set up in Makerble, how far each has got and " +
+        "whether it is done. It is the Setup guide page in Makerble (Help › Setup guide, or the card at the bottom of the " +
+        "left sidebar). Use it to answer 'what should we set up next' or 'how far through setup are we'. Returns " +
+        "done_count of total_count (items marked not relevant leave the total), finished (true once every item is done " +
+        "or not relevant), and data: each item's key, title, section (e.g. 'Automate your reporting', or null), progress " +
+        "in words (e.g. '3 of 5 workspaces'), done_when (what counts as done), done and not_relevant. Items (key): teams " +
+        "(Create your teams; only for Organisations with 11 or more staff), workspaces (Projects), welcome_tour, " +
+        "checklists (a Checklist on each open workspace), reporting_requirements (Reporting Cycles with a Report " +
+        "Template), demographics (the Demographics tab of Contacts with 2 Ratio Sets) and metrics (an Engagement " +
+        "Tracker and an Indicator on each open workspace). Makerble ticks items off itself, and once done an item stays " +
+        "done. Only the Organisation's Organisation Admins (Charity Editors) and Makerble staff can read it, and only " +
+        "while the Setup guide is switched on for the Organisation; anyone else gets a 403 error.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id }) => get(`/organisations/${organisation_id}/setup_guide`),
+    },
+    {
+      name: "makerble_set_setup_guide_item",
+      description:
+        "Mark one item of an Organisation's (Charity's) Setup guide as 'Not relevant to us', or undo that. An item marked " +
+        "not relevant leaves the guide's total, so the Organisation can finish its Setup guide without it; Makerble " +
+        "records who chose it and when. This never ticks an item as done: Makerble does that itself when it sees the " +
+        "work done. Get the item keys from makerble_get_setup_guide (teams, workspaces, welcome_tour, checklists, " +
+        "reporting_requirements, demographics, metrics). Returns the whole Setup guide after the change. Only the " +
+        "Organisation's Organisation Admins (Charity Editors) and Makerble staff can do this.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          item_key: {
+            type: "string",
+            enum: ["teams", "workspaces", "welcome_tour", "checklists", "reporting_requirements", "demographics", "metrics"],
+            description: "The item's key, from makerble_get_setup_guide",
+          },
+          not_relevant: { type: "boolean", description: "true marks it Not relevant to us; false is Undo" },
+        },
+        required: ["organisation_id", "item_key", "not_relevant"],
+      },
+      handler: ({ organisation_id, item_key, not_relevant }) =>
+        patch(`/organisations/${organisation_id}/setup_guide/items/${encodeURIComponent(item_key)}`, { not_relevant }),
     },
 
     // ── Age bands (CP-8902) ───────────────────────────────────────────────────
