@@ -1337,7 +1337,10 @@ export function buildTools(api) {
         "Get a single Contact (Beneficiary) by ID, including all custom fields. " +
         "Opening a Contact this way is recorded in its Access Log (the audit trail of who viewed it), " +
         "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts. " +
-        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it.",
+        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it. " +
+        "weekly_availability is the Contact's Weekly availability: the most recently saved answer to any Weekly availability field on their Contact Forms, " +
+        "as times ([{day, from, to}], in the organisation's timezone) with source_form_id (the Contact Form it came from), source_field_id and answered_at, " +
+        "or null if they have none. Use it to suggest appointment times. When Field Visibility hides that field from you, times is null and restricted is true.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -1483,7 +1486,8 @@ export function buildTools(api) {
         "Create a new Contact (Beneficiary). Required: name, owner_id. " +
         "Call makerble_list_contact_bio_form_fields first to get custom field IDs. " +
         "Call makerble_list_contact_types to get beneficiary_type_id (1=Person, 2=Object, 3=Organisation, 4=Animal). " +
-        "Setting a field Field Visibility hides from you is refused with 422 and errors naming the field: leave it out and tell the user someone who can see it must fill it in.",
+        "Setting a field Field Visibility hides from you is refused with 422 and errors naming the field: leave it out and tell the user someone who can see it must fill it in. " +
+        "A Weekly availability field (type weekly_availability) takes a list of days and times: [{\"day\": \"monday\", \"from\": \"15:30\", \"to\": \"18:00\"}], days monday to sunday, times HH:MM in 15-minute steps in the organisation's timezone, To after From. Overlapping times on a day are joined when saved. An answer it can't read is refused with 422 and errors saying why.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1498,7 +1502,7 @@ export function buildTools(api) {
           beneficiary_category_ids: { type: "array", items: { type: "number" } },
           custom_fields: {
             type: "object",
-            description: "Dictionary of custom_field_id (string key) to value",
+            description: "Dictionary of custom_field_id (string key) to value. A weekly_availability field's value is a list of {day, from, to}.",
           },
         },
         required: ["name", "owner_id"],
@@ -1597,7 +1601,8 @@ export function buildTools(api) {
       name: "makerble_list_contact_bio_form_fields",
       description:
         "List custom field definitions for Contact Bio Forms. " +
-        "Filter by beneficiary_category_ids. Use field IDs when creating a contact.",
+        "Filter by beneficiary_category_ids. Use field IDs when creating a contact. " +
+        "field_data_type says what kind of answer a field takes. A Weekly availability field (type weekly_availability) takes a list of days and times: [{\"day\": \"monday\", \"from\": \"15:30\", \"to\": \"18:00\"}], days monday to sunday, times HH:MM in 15-minute steps in the organisation's timezone, To after From. Overlapping times on a day are joined when saved.",
       inputSchema: {
         type: "object",
         properties: {
