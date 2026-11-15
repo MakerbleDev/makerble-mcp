@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 293 Makerble MCP tool definitions.
+ * All 297 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6301,6 +6301,100 @@ export function buildTools(api) {
         }
         return id ? patch(`/tours/${id}`, body) : post("/tours", body);
       },
+    },
+
+    // ── Feature tours (CP-9155) ──────────────────────────────────────────────
+    {
+      name: "makerble_list_feature_tours",
+      description:
+        "List feature tours (CP-9155). A feature tour is a short guided tour that introduces one feature to people " +
+        "who already use Makerble, unlike a Welcome Tour, which is a new colleague's first tour. It belongs to no " +
+        "Organisation: Makerble staff write it once. A live tour with a page_key is offered by \"Take the tour\" on " +
+        "that page's Intro (the Show/Hide Guidance panel at the top of a Manage page, e.g. page_key contacts); each " +
+        "Intro has at most one live tour. auto_prompt offers it once, the first time someone opens its page. Each " +
+        "stop is one of the stops Welcome Tours use (stop_key) and shows Makerble's default_title and default_body " +
+        "unless it has its own title or body. Makerble staff (System Access) only; anyone else gets 403. Returns " +
+        "each tour with its stops in order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only feature tours changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/feature_tours", p),
+    },
+
+    {
+      name: "makerble_get_feature_tour",
+      description:
+        "Get one feature tour by id, with its key, name, status, page_key (the Intro that offers it), auto_prompt " +
+        "and its stops in order, each with its own title and body (null means Makerble's default_title and " +
+        "default_body are shown) and whether it waits for Next or a click (action). Makerble staff only.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID, from makerble_list_feature_tours" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_tours/${id}`),
+    },
+
+    {
+      name: "makerble_save_feature_tour",
+      description:
+        "Create or update a feature tour, the short tour that introduces one feature to people already using " +
+        "Makerble. Makerble staff (System Access) only.\n\n" +
+        "Without id it creates one: key (unique, lowercase words joined by underscores, e.g. contacts_filters) and " +
+        "name are needed, and it starts as a draft nobody sees. With id it changes only the fields sent. page_key is " +
+        "the page whose Intro offers it with \"Take the tour\" (e.g. contacts, events; null for none, so it starts " +
+        "only from an announcement). auto_prompt offers it once on someone's first visit to that page. Stops use " +
+        "the same stop_key values as Welcome Tours: navbar_spaces, navbar_user, focus_table, contacts_table, " +
+        "contacts_search, contacts_filters, events_table, event_guests. Leave a stop's title or body empty to show " +
+        "Makerble's default. A stop with id changes it, a stop without id adds one, and _destroy: true removes it. " +
+        "A tour can't be live without a stop, and only one live tour can use each page_key.\n\n" +
+        "Workflow: list or get the tour first, change what the user asked for, and save. Make a tour live only once " +
+        "the user agrees, because a live tour is offered to people straight away.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The feature tour to update. Leave out to create one." },
+          key: { type: "string", description: "Unique, lowercase words joined by underscores" },
+          name: { type: "string" },
+          status: { type: "string", enum: ["draft", "live"] },
+          page_key: { type: ["string", "null"], description: "The key of the page whose Intro offers the tour, e.g. contacts; null for none" },
+          auto_prompt: { type: "boolean", description: "Offer the tour once, the first time someone opens its page" },
+          stops: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number", description: "Changes this stop; leave out to add one" },
+                position: { type: "number" },
+                stop_key: { type: "string" },
+                title: { type: "string", description: "Up to 120 characters; empty uses Makerble's default_title" },
+                body: { type: "string", description: "Up to 600 characters; empty uses Makerble's default_body" },
+                _destroy: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/feature_tours/${id}`, body) : post("/feature_tours", body)),
+    },
+
+    {
+      name: "makerble_delete_feature_tour",
+      description:
+        "Delete a feature tour, its stops and everyone's progress through it. Makerble staff only. Check with the " +
+        "user first; to stop offering a tour without losing it, set its status to draft with " +
+        "makerble_save_feature_tour instead.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/feature_tours/${id}`),
     },
 
     {
