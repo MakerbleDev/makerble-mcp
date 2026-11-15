@@ -5985,7 +5985,10 @@ export function buildTools(api) {
         "Manage Contacts, including when they move there from another page without reloading. A page key is the " +
         "key of the page's Intro (guidance panel), such as contacts, events, checklists, surveys, tasks or " +
         "custom_tables; pages without an Intro can't be chosen. An unknown key is refused with 422, listing the " +
-        "keys available. Send page_keys [] to show it on any page again (the default).",
+        "keys available. Send page_keys [] to show it on any page again (the default).\n\n" +
+        "Feature tour (Makerble's own only): feature_tour_id links a feature tour (from makerble_list_feature_tours). " +
+        "While that tour is live, the popup's button says \"Take the tour\" instead of button_label and starts the " +
+        "tour on its first page. Send null to clear it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6045,6 +6048,10 @@ export function buildTools(api) {
             description:
               "Makerble's own only. The pages it shows on, by each page's Intro key, e.g. [\"contacts\"] for Manage " +
               "Contacts. Empty or left out when creating: any page. Sent, it replaces the list.",
+          },
+          feature_tour_id: {
+            type: ["number", "null"],
+            description: "Makerble's own only. The feature tour its button starts with \"Take the tour\" while the tour is live; null to clear",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
