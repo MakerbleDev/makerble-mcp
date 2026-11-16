@@ -1508,6 +1508,11 @@ export function buildTools(api) {
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
         "data: [{id, event, action (Created/Edited/Destroyed), user_id, user_name (\"System\" for background jobs such as CSV imports), created_at}]}. " +
         "One Save can write several Versions a fraction of a second apart. " +
+        "To compare Versions side by side (the Version History page), pass include_fields: true: each Version then also has " +
+        "fields: [{key, label, value, state, changed}], one per field of the record, where value is the field's display value, " +
+        "state is \"value\", \"blank\" (the field existed but was empty), \"absent\" (the field didn't exist yet or had been " +
+        "removed, e.g. a survey question taken off the survey) or \"restricted\" (Field Visibility hides it from you; value is null), " +
+        "and changed is true when the value differs from the Version saved just before. " +
         "To see what the record looked like in a Version, call makerble_get_version with its id.",
       inputSchema: {
         type: "object",
@@ -1521,6 +1526,10 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200." },
           last_sync_datetime: { type: "string", description: "Only Versions created after this ISO 8601 datetime." },
+          include_fields: {
+            type: "boolean",
+            description: "Add each Version's labelled fields, compared with the Version before (see description). Default false.",
+          },
         },
         required: ["record_type", "record_id"],
       },
@@ -1613,7 +1622,10 @@ export function buildTools(api) {
         "For a Story, full_object is {schema_version, story (the Story's own fields), privacy_settings, contact_ids, " +
         "outcome_ids, label_ids, media, answers: [{kind, field_id, label, contact_id, sub_ratio_id, sub_ratio_label, value}]}, " +
         "so a survey question keeps the label it had then. " +
-        "Compare two Versions' full_object to see exactly what changed between them. " +
+        "Also returns fields: [{key, label, value, state, changed}], the record's fields labelled as the Version History page " +
+        "shows them: state is \"value\", \"blank\", \"absent\" (not a field of the record at that time) or \"restricted\", " +
+        "and changed is true when the value differs from the Version saved just before this one. " +
+        "Use fields to see what changed; use full_object for the raw snapshot. " +
         "For a Contact, fields Field Visibility hides from you are null in full_object and named in restricted_fields. " +
         "Get Version IDs from makerble_list_versions. Same permissions as makerble_list_versions.",
       inputSchema: {
