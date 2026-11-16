@@ -2067,7 +2067,10 @@ export function buildTools(api) {
       description:
         "Get a single Survey (Story Category) with full detail: current_fields (ordered questions with " +
         "field_class_name, outcome_id, indicator_type), scale_indicator_choices (choice config per indicator), " +
-        "and verdict_data (scoring bands). Always call this before creating a story.",
+        "and verdict_data (scoring bands), plus contact_mode: 'one_contact' (About One Contact: each response is " +
+        "about one person) or 'several_contacts' (Several Or No Contacts: staff record answers for a group, e.g. " +
+        "attendance), which is how the survey is shown when someone tries it on a toolkit page. Always call this " +
+        "before creating a story.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -7919,7 +7922,9 @@ export function buildTools(api) {
         "scale; verdicts: classifies each respondent automatically; repeats: meant to be asked at intervals). " +
         "Several options in one filter match any of them; different filters must all match. Returns a page of " +
         "Surveys, each with id, name, description, shared_by, question_count, estimated_minutes, themes, " +
-        "audiences, libraries_count (how many organisations use it), yours and added_to_a_project, plus facets: " +
+        "audiences, contact_mode (one_contact: each response is About One Contact; several_contacts: Several Or " +
+        "No Contacts, recorded for a group), libraries_count (how many organisations use it), yours and " +
+        "added_to_a_project, plus facets: " +
         "each filter option with how many Surveys it would return. Then call makerble_get_explore_survey to read " +
         "a Survey's sections and questions before suggesting it. To search every kind of ImpactStore item by " +
         "words at once, use makerble_search_impact_store; to search the user's own organisation's Surveys, use " +
