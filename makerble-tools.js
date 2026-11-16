@@ -13,9 +13,12 @@ import {
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 
-export function makeApiClient(baseUrl, email, token) {
+// apiKey is an AI assistant key (mk_live_…) from a personal link made in Makerble's User Settings, then AI
+// assistants (CP-9182). It is sent as Authorization: Bearer instead of the email and token, and its use counts as
+// API usage for the organisation chosen for it.
+export function makeApiClient(baseUrl, email, token, apiKey = null) {
   async function request(method, path, body = null, params = null) {
-    if (!email || !token) {
+    if (!apiKey && (!email || !token)) {
       throw new McpError(
         ErrorCode.InvalidRequest,
         "MAKERBLE_EMAIL and MAKERBLE_TOKEN environment variables must be set."
@@ -43,8 +46,7 @@ export function makeApiClient(baseUrl, email, token) {
     }
 
     const headers = {
-      "X-User-Email": email,
-      "X-User-Token": token,
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : { "X-User-Email": email, "X-User-Token": token }),
       // Lets Makerble attribute Access Log views to the MCP server rather than the API.
       "X-Makerble-Client": "makerble-mcp",
       "Content-Type": "application/json",
