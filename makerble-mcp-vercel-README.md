@@ -2,7 +2,7 @@
 
 Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **300 tools** covering the full Makerble API.
 
-Non-technical users get their personal link from **`/connect`** — no curl, no config files, no tokens to hunt down.
+Non-technical users get their personal link from Makerble itself (**User Settings, then AI assistants**), where they choose which organisation its use is billed to, or from **`/connect`** — no curl, no config files, no tokens to hunt down.
 
 ---
 
@@ -98,11 +98,12 @@ Currently requires a developer. Share the `/connect` page link with the IT team.
 
 ## Authentication — how it works
 
-Three credential sources are checked in order:
+Credential sources are checked in order:
 
 | Priority | Source | Used by |
 |---|---|---|
-| 1 | `X-Makerble-Email` + `X-Makerble-Token` headers | Claude Code, programmatic clients |
+| 1 | `X-Makerble-Key`, or `X-Makerble-Email` + `X-Makerble-Token` headers | Claude Code, programmatic clients |
+| 2 | `?key=mk_live_...` query param | Personal links from Makerble's User Settings, then AI assistants (CP-9182). Sent to the API as `Authorization: Bearer`, and its use counts as API usage for the organisation chosen for it |
 | 2 | `?email=...&token=...` query params | Personal URLs from `/connect` page |
 | 3 | `MAKERBLE_EMAIL` + `MAKERBLE_TOKEN` env vars | Single-org fallback / local dev |
 

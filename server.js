@@ -1,9 +1,10 @@
 /**
  * server.js — Makerble MCP HTTP Server
  *
- * Authentication — three sources checked in order of priority:
- *   1. Request headers:  X-Makerble-Email + X-Makerble-Token  (programmatic / Claude Code)
- *   2. Query parameters: ?email=...&token=...                  (personal URL from /connect page)
+ * Authentication — sources checked in order of priority:
+ *   1. Request headers:  X-Makerble-Key, or X-Makerble-Email + X-Makerble-Token  (programmatic / Claude Code)
+ *   2. Query parameters: ?key=mk_live_...   (personal link from Makerble's User Settings, then AI assistants)
+ *                        ?email=...&token=... (personal URL from /connect page)
  *   3. Environment vars: MAKERBLE_EMAIL + MAKERBLE_TOKEN       (single-org fallback / local dev)
  *
  * Environment (which Makerble deployment to talk to) — same resolution pattern:
@@ -66,6 +67,13 @@ const DEFAULT_ENV = "production";
 // Called per-request so each user's credentials are isolated.
 
 function resolveCredentials(req) {
+  // 0. An AI assistant key (CP-9182), from a personal link made in Makerble. Its use is billed to the
+  //    organisation chosen for it.
+  const key = req.headers["x-makerble-key"] || req.query.key;
+  if (key && key.toString().startsWith("mk_live_")) {
+    return { key: key.toString(), source: req.headers["x-makerble-key"] ? "headers" : "query" };
+  }
+
   // 1. Headers (programmatic clients / Claude Code)
   const headerEmail = req.headers["x-makerble-email"];
   const headerToken = req.headers["x-makerble-token"];
@@ -105,8 +113,8 @@ function resolveEnvironment(req) {
 // scoped to that user/session — two users can be pointed at different deployments
 // at the same time.
 
-function createMcpServer(email, token, baseUrl) {
-  const api    = makeApiClient(baseUrl, email, token);
+function createMcpServer(creds, baseUrl) {
+  const api    = makeApiClient(baseUrl, creds.email, creds.token, creds.key);
   const tools  = buildTools(api);
   const server = new Server(
     { name: "makerble-mcp", version: "1.0.0" },
@@ -516,6 +524,11 @@ app.get("/connect", (_req, res) => {
         Sign in with your Makerble account to get a personal link that lets
         Claude, ChatGPT, and other AI assistants access your Makerble data.
       </p>
+      <p class="subtitle">
+        Already signed in to Makerble? Get your link from
+        <a id="settingsLink" href="https://makerble.com/ai_assistant_link">User Settings, then AI assistants</a>,
+        where you also choose which organisation its use is billed to.
+      </p>
 
       <div class="env-tabs" id="envTabs">
         <div class="env-tab active" data-env="production">Production</div>
@@ -623,6 +636,7 @@ app.get("/connect", (_req, res) => {
   <script>
     let currentUrl = "";
     let selectedEnv = "production";
+    const SETTINGS_URLS = ${JSON.stringify(Object.fromEntries(Object.entries(ENV_CONFIG).map(([key, env]) => [key, env.baseUrl.replace(/\/api\/v2$/, "/ai_assistant_link")])))};
 
     document.getElementById("envTabs").addEventListener("click", (e) => {
       const tab = e.target.closest(".env-tab");
@@ -630,6 +644,7 @@ app.get("/connect", (_req, res) => {
       document.querySelectorAll(".env-tab").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       selectedEnv = tab.dataset.env;
+      document.getElementById("settingsLink").href = SETTINGS_URLS[selectedEnv];
     });
 
     function togglePassword() {
@@ -769,6 +784,14 @@ app.post("/auth", async (req, res) => {
 
     const data = await response.json();
 
+    // Someone who hasn't accepted their Makerble invitation has no password of their own yet (CP-9182).
+    if (data.error === "invitation-pending") {
+      return res.status(401).json({
+        error: "You haven't set your Makerble password yet. Open the invitation email we sent you to set one, " +
+               "or use Forgot your password? on the Makerble sign in page to get a new invitation link.",
+      });
+    }
+
     if (!response.ok || !data.authentication_token) {
       return res.status(401).json({
         error: `Invalid email or password for ${env.label}. Please check your details and try again.`,
@@ -841,7 +864,7 @@ app.all("/mcp", async (req, res) => {
   }
 
   try {
-    const server    = createMcpServer(creds.email, creds.token, env.baseUrl);
+    const server    = createMcpServer(creds, env.baseUrl);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
