@@ -104,7 +104,7 @@ Credential sources are checked in order:
 |---|---|---|
 | 1 | `X-Makerble-Key`, or `X-Makerble-Email` + `X-Makerble-Token` headers | Claude Code, programmatic clients |
 | 2 | `?key=mk_live_...` query param | Personal links from Makerble's User Settings, then AI assistants (CP-9182). Sent to the API as `Authorization: Bearer`, and its use counts as API usage for the organisation chosen for it |
-| 2 | `?email=...&token=...` query params | Personal URLs from `/connect` page |
+| 2 | `?email=...&token=...` query params | Older personal URLs from `/connect`. `/connect` now makes `?key=` links, billed to an organisation the person chooses, and makes these only for a Makerble environment that doesn't yet have `/api/v2/ai_assistant_link` |
 | 3 | `MAKERBLE_EMAIL` + `MAKERBLE_TOKEN` env vars | Single-org fallback / local dev |
 
 Credentials are never stored on the server. The token lives in the user's personal URL only.

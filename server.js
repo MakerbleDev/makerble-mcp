@@ -96,6 +96,50 @@ function resolveCredentials(req) {
   return null;
 }
 
+// ─── AI assistant link (CP-9182) ──────────────────────────────────────────────
+// Makes the person's AI assistant link through API v2, billed to the organisation they choose. With one
+// organisation it is chosen for them; with several the /connect page asks which (choose_organisation); with
+// none there is nothing to bill, so they're told. A Makerble environment that doesn't have the endpoint yet
+// answers 404, and the old email and token link is made instead (key: null) until it does.
+
+async function makeAssistantLink(env, email, token, charityId) {
+  const headers = {
+    "X-User-Email": email,
+    "X-User-Token": token,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  const status = await fetch(`${env.baseUrl}/ai_assistant_link`, { headers });
+  if (status.status === 404) return { key: null };
+  if (!status.ok) return failure(502, "Makerble couldn't make your link just now. Please try again in a moment.");
+
+  const { organisations = [] } = await status.json();
+  if (organisations.length === 0) {
+    return failure(403, "You'll be able to connect an AI assistant once you're part of an organisation on Makerble.");
+  }
+
+  const chosen = charityId
+    ? organisations.find((o) => String(o.id) === String(charityId))
+    : organisations.length === 1 && organisations[0];
+  if (!chosen) {
+    return { error: true, status: 409, body: { choose_organisation: true, organisations } };
+  }
+
+  const created = await fetch(`${env.baseUrl}/ai_assistant_link`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ charity_id: chosen.id }),
+  });
+  if (!created.ok) return failure(502, "Makerble couldn't make your link just now. Please try again in a moment.");
+
+  const { url } = await created.json();
+  return { key: new URL(url).searchParams.get("key"), organisationName: chosen.name };
+}
+
+function failure(status, error) {
+  return { error: true, status, body: { error } };
+}
+
 // ─── Environment resolution ───────────────────────────────────────────────────
 // Same header → query → default pattern as credentials. Unknown values fall
 // back to production rather than erroring, so a typo can't silently break a link.
@@ -253,6 +297,18 @@ app.get("/connect", (_req, res) => {
     }
 
     input:focus { border-color: #0d6efd; background: #fff; }
+
+    select {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid #767676;
+      border-radius: 8px;
+      font-size: 15px;
+      margin-bottom: 6px;
+      background: #fafbfc;
+    }
+
+    .hint { margin: 0 0 18px; font-size: 13px; color: #5d6883; }
 
     button {
       width: 100%;
@@ -551,6 +607,12 @@ app.get("/connect", (_req, res) => {
         </button>
       </div>
 
+      <div id="organisationBox" hidden>
+        <label for="organisation">Organisation to bill for its use</label>
+        <select id="organisation"></select>
+        <p class="hint">Your assistant's use counts as API usage for this organisation.</p>
+      </div>
+
       <button id="connectBtn" onclick="connect()">Get my personal link</button>
       <div class="error" id="errorBox"></div>
     </div>
@@ -558,6 +620,7 @@ app.get("/connect", (_req, res) => {
     <div class="result" id="resultSection">
       <h2>✓ Your personal MCP link is ready</h2>
       <div class="env-badge" id="envBadge"></div>
+      <p class="hint" id="billedTo" hidden></p>
       <p>Copy the link below and paste it into your AI assistant. That's it — no further setup needed.</p>
 
       <div class="url-box">
@@ -645,6 +708,7 @@ app.get("/connect", (_req, res) => {
       tab.classList.add("active");
       selectedEnv = tab.dataset.env;
       document.getElementById("settingsLink").href = SETTINGS_URLS[selectedEnv];
+      document.getElementById("organisationBox").hidden = true;
     });
 
     function togglePassword() {
@@ -682,9 +746,14 @@ app.get("/connect", (_req, res) => {
         const res  = await fetch("/auth", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, env: selectedEnv }),
+          body: JSON.stringify({ email, password, env: selectedEnv, charity_id: chosenOrganisation() }),
         });
         const data = await res.json();
+
+        if (data.choose_organisation) {
+          showOrganisations(data.organisations);
+          return;
+        }
 
         if (!res.ok) {
           showError(data.error || "Sign-in failed. Please check your email and password.");
@@ -698,6 +767,12 @@ app.get("/connect", (_req, res) => {
         badge.textContent = data.env_label + " environment";
         badge.classList.toggle("non-prod", data.env !== "production");
 
+        const billedTo = document.getElementById("billedTo");
+        billedTo.hidden = !data.organisation_name;
+        billedTo.textContent = data.organisation_name
+          ? "Its use counts as API usage for " + data.organisation_name + ". Any earlier personal link has stopped working."
+          : "";
+
         document.getElementById("formSection").style.display  = "none";
         document.getElementById("resultSection").style.display = "block";
 
@@ -707,6 +782,19 @@ app.get("/connect", (_req, res) => {
         btn.disabled = false;
         btn.textContent = "Get my personal link";
       }
+    }
+
+    // Someone in several organisations chooses which one their assistant's use is billed to (CP-9182).
+    function chosenOrganisation() {
+      const box = document.getElementById("organisationBox");
+      return box.hidden ? undefined : document.getElementById("organisation").value;
+    }
+
+    function showOrganisations(organisations) {
+      const select = document.getElementById("organisation");
+      select.replaceChildren(...organisations.map((o) => new Option(o.name, o.id)));
+      document.getElementById("organisationBox").hidden = false;
+      select.focus();
     }
 
     function showError(msg) {
@@ -762,7 +850,7 @@ app.get("/connect", (_req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.post("/auth", async (req, res) => {
-  const { email, password, env: rawEnv } = req.body || {};
+  const { email, password, env: rawEnv, charity_id: charityId } = req.body || {};
 
   if (!email || !password) {
     return res.status(400).json({ error: "email and password are required." });
@@ -798,7 +886,6 @@ app.post("/auth", async (req, res) => {
       });
     }
 
-    // Build the personal MCP URL with credentials + environment as query params.
     // We use the request host so this works on any deployment (Vercel, localhost, custom domain).
     // Protocol: trust the (now-trusted) req.protocol, but fall back to https unless
     // we're clearly on localhost — belt-and-braces against ever generating an
@@ -806,12 +893,21 @@ app.post("/auth", async (req, res) => {
     const isLocalhost = /^(localhost|127\.0\.0\.1)/.test(req.get("host") || "");
     const protocol = isLocalhost ? req.protocol : "https";
     const host   = `${protocol}://${req.get("host")}`;
-    const mcpUrl = `${host}/mcp?email=${encodeURIComponent(email)}` +
-                   `&token=${encodeURIComponent(data.authentication_token)}` +
-                   `&env=${envKey}`;
+
+    // The link carries an AI assistant key whose use counts as API usage for an organisation the person
+    // chooses (CP-9182), the same link as Makerble's User Settings, then AI assistants.
+    const link = await makeAssistantLink(env, email, data.authentication_token, charityId);
+    if (link.error) return res.status(link.status).json(link.body);
+
+    const mcpUrl = link.key
+      ? `${host}/mcp?key=${encodeURIComponent(link.key)}&env=${envKey}`
+      : `${host}/mcp?email=${encodeURIComponent(email)}` +
+        `&token=${encodeURIComponent(data.authentication_token)}` +
+        `&env=${envKey}`;
 
     return res.json({
       mcp_url:  mcpUrl,
+      organisation_name: link.organisationName || null,
       user_id:  data.user_id,
       env:      envKey,
       env_label: env.label,
