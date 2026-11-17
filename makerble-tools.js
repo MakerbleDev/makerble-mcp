@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 300 Makerble MCP tool definitions.
+ * All 301 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2109,6 +2109,46 @@ export function buildTools(api) {
       },
       handler: ({ story_category_id, ...p }) =>
         get(`/story_categories/${story_category_id}/verdicts`, p),
+    },
+
+    {
+      name: "makerble_get_survey_itemised_totals",
+      description:
+        "Compare one Survey's (Story Category's) results side by side across Projects or Albums (Bundles): its " +
+        "Itemised totals. Returns one table per tracker in the Survey, in question order, plus Verdict tables when " +
+        "the Survey has Verdicts on, with a row per Project (or per Album, adding up its Projects) that uses the " +
+        "Survey and that you may view. Table kinds: activity (Activity change: amount), engagement (Participation " +
+        "change: amount), achievement (Achievement tracker / binary indicator: Yes and Not ticked answers with " +
+        "percentages), choice (Choice tracker / scale indicator: answers per choice with percentages), numerical " +
+        "(Numerical tracker / value indicator: sum and mean average, with unit), verdicts, verdicts_across_intervals " +
+        "and change_in_verdicts_across_intervals (per Shared Interval / wave). An answer is one Contact's response " +
+        "in one Story. Each table has columns [{key, title}], optional column_groups and unit, and rows " +
+        "[{id, name, values, percentages?}] where values line up with columns. Paginated by table." +
+        "\nUse it when asked to compare a survey's results between projects or albums. Workflow: (1) makerble_list_surveys " +
+        "or makerble_get_survey → story_category_id. (2) Optionally makerble_list_projects or makerble_list_albums → " +
+        "project_ids or album_ids; leave both out for every Project you may view that uses the Survey. (3) Call this " +
+        "tool, optionally filtered by Date happened, Date posted (YYYY-MM-DD), label_ids, Contact group_ids, and scope " +
+        "('earliest' or 'latest' counts only each Contact's earliest or latest response).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          story_category_id: { type: "number", description: "The Survey (Story Category) id." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to show, a row each. Leave out for all you may view." },
+          album_ids: { type: "array", items: { type: "number" }, description: "Albums (Bundles) to show, a row each adding up its Projects. Overrides project_ids." },
+          date_happened_from: { type: "string", description: "YYYY-MM-DD: only Stories that happened on or after this date." },
+          date_happened_to: { type: "string", description: "YYYY-MM-DD: only Stories that happened on or before this date." },
+          date_posted_from: { type: "string", description: "YYYY-MM-DD: only Stories posted on or after this date." },
+          date_posted_to: { type: "string", description: "YYYY-MM-DD: only Stories posted on or before this date." },
+          label_ids: { type: "array", items: { type: "number" }, description: "Only Stories with one of these Labels." },
+          group_ids: { type: "array", items: { type: "number" }, description: "Only answers from Contacts in one of these Contact Groups." },
+          scope: { type: "string", enum: ["all", "earliest", "latest"], description: "Which responses from each Contact count (default all)." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Tables per page (default 10, max 200)." },
+        },
+        required: ["story_category_id"],
+      },
+      handler: ({ story_category_id, ...p }) =>
+        get(`/story_categories/${story_category_id}/itemised_totals`, p),
     },
 
     {
