@@ -3265,8 +3265,13 @@ export function buildTools(api) {
         "event_filter_params / qualifying_event_filter_params}: on the days change_id was recorded for a " +
         "Contact at an event, the % of those days the qualifying Engagement Trackers were also recorded " +
         "for them at an event on the same date, e.g. all 4 meals on every class day = from '100', to '100'), " +
-        "distance_travelled ({trackers: [{indicator_id, directions: " +
-        "['improved'|'no_change'|'worsened']}], same_project}), indicator_comparisons ({indicator_id: " +
+        "distance_travelled (Distance Travelled Direction: {trackers: [{indicator_id, directions: " +
+        "['improved'|'no_change'|'worsened'|'reached_top']}], match: 'any'|'all'|'at_least', match_count, " +
+        "same_project}; compares each Contact's first and latest answer to each Choice Tracker, reached_top = " +
+        "latest answer is the best on the scale; match says how many trackers a Contact must meet, default any, " +
+        "e.g. improved in at least 2 of 3 goals = match 'at_least', match_count 2; with denominator " +
+        "'enough_data' the % is out of Contacts with two responses on that many trackers), " +
+        "indicator_comparisons ({indicator_id: " +
         "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
         "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
         "details, e.g. group_ids, beneficiary_types, age_from / age_to ({year, month, day}), " +
