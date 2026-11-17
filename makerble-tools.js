@@ -6881,15 +6881,27 @@ export function buildTools(api) {
         "storyboard is the Intro's animation, drawn in the page's module colour from Makerble building " +
         "blocks whenever there is no Vimeo link (a video always wins). Send null to remove it. It is an object: " +
         "archetype (assemble: the parts of a page of the feature come together; flow: a short walkthrough of " +
-        "using it; concept: a metaphor for the idea, which Matt must approve before it is saved), loop_seconds " +
-        "(4 to 20), alt (10 to 250 characters describing what the animation shows, read by screen readers) and " +
-        "1 to 24 steps played in order. Step types: appear (puts a block on the stage: block is one of top_bar, " +
-        "sidebar_item, table_row, card, button, field, chip, avatar or chart_bar; optional id that later steps " +
-        "target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
-        "needs value 0 to 100), move_cursor, click, highlight and check (each with target, the id of a block on " +
-        "the stage), type (target is a field, text is what is typed), swap (replaces the target's text with " +
-        "text) and cut (clears the stage for the next scene; earlier blocks can't be targeted after it). Use the " +
-        "feature's real button and page names in sentence case. Up to 8,000 characters of JSON.\n\n" +
+        "using it; journey: one piece of data travels from page to page by itself, e.g. a tick on a Register " +
+        "turning up on the contact's profile timeline; concept: a metaphor for the idea, which Matt must approve " +
+        "before it is saved), loop_seconds (4 to 20), alt (10 to 250 characters describing what the animation " +
+        "shows, read by screen readers) and 1 to 24 steps played in order. Step types: appear (puts a block on " +
+        "the stage: block is one of top_bar, sidebar_item, table_row, card, button, field, chip, avatar, " +
+        "chart_bar, cell (a tickable Register cell), timeline_item or calendar_event; optional id that later " +
+        "steps target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
+        "needs value 0 to 100 and a calendar_event value 1 (Monday) to 5 (Friday); an avatar, table_row, card or " +
+        "timeline_item may have face 1 to 5, one of the Makerble avatars, so people are faces, not initials), " +
+        "move_cursor, click, highlight and check (each with target, the id of a block on the stage), type " +
+        "(target is a field, text is what is typed), swap (replaces the target's text with text), cut (clears " +
+        "the stage for the next scene; earlier blocks can't be targeted after it), frame (must be a scene's " +
+        "first step: draws the scene as a simplified page, captioned with text or the page's usual name; frame " +
+        "is register, profile, table, web_page, calendar or compare), carry (target is a block on the stage, to " +
+        "is the id of a block that appears after the next cut: at that cut the carried block stays in flight, " +
+        "then flies onto the to block, the only way anything outlives a cut) and zoom (scales in on target for " +
+        "two beats, then back out). A Journey has two or three framed scenes, carries its hero (the tick, the " +
+        "booking) from one to the next, uses the same face for the same person in every scene, holds the payoff " +
+        "with check and highlight rather than zoom (the frames read without it), and runs 10 to 12 seconds; " +
+        "people who turn off motion see only its last scene. Use the feature's real button and page " +
+        "names in sentence case. Up to 8,000 characters of JSON.\n\n" +
         "A broken rule returns 422 with every message in errors: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
         "ahead.",
@@ -6920,7 +6932,7 @@ export function buildTools(api) {
             type: ["object", "null"],
             description: "The Intro's animation (see the rules above), or null to remove it",
             properties: {
-              archetype: { type: "string", enum: ["assemble", "flow", "concept"] },
+              archetype: { type: "string", enum: ["assemble", "flow", "journey", "concept"] },
               loop_seconds: { type: "integer", minimum: 4, maximum: 20 },
               alt: { type: "string", description: "What the animation shows, 10 to 250 characters" },
               steps: {
@@ -6930,15 +6942,24 @@ export function buildTools(api) {
                 items: {
                   type: "object",
                   properties: {
-                    type: { type: "string", enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut"] },
+                    type: {
+                      type: "string",
+                      enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut", "frame", "carry", "zoom"],
+                    },
                     block: {
                       type: "string",
-                      enum: ["top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar"],
+                      enum: [
+                        "top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar",
+                        "cell", "timeline_item", "calendar_event",
+                      ],
                     },
                     id: { type: "string" },
                     target: { type: "string" },
                     text: { type: "string" },
-                    value: { type: "integer", minimum: 0, maximum: 100 },
+                    value: { type: "integer", minimum: 0, maximum: 100, description: "chart_bar 0 to 100; calendar_event weekday 1 to 5" },
+                    face: { type: "integer", minimum: 1, maximum: 5, description: "One of the Makerble avatars" },
+                    frame: { type: "string", enum: ["register", "profile", "table", "web_page", "calendar", "compare"] },
+                    to: { type: "string", description: "For carry: the id of the block it lands on after the next cut" },
                   },
                   required: ["type"],
                 },
