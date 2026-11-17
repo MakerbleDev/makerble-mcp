@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 303 Makerble MCP tool definitions.
+ * All 307 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -2206,6 +2206,82 @@ export function buildTools(api) {
       },
       handler: ({ project_story_category_id, force_interval }) =>
         patch(`/project_story_categories/${project_story_category_id}`, { force_interval }),
+    },
+
+    {
+      name: "makerble_remove_survey_from_project",
+      description:
+        "Remove a Survey from a Project: delete its Survey Campaign (Project Story Category), as Remove from project " +
+        "does in the Actions menu of a Survey Campaign page. The Survey itself stays in the organisation's library and " +
+        "can be added to the Project again; the Progress Board created automatically for that Survey on that Project " +
+        "(\"<Survey> on <Project>\") is deleted too.\n" +
+        "It is refused (422, with the reason in error) while anything in the Project depends on the campaign: survey " +
+        "responses (Stories) recorded with it in that Project, saved draft responses, Events in the Project that use it, " +
+        "Survey Invitations sent for it, or it being the Project's default survey. The campaign can then only be " +
+        "deactivated, which this tool doesn't do.\n" +
+        "Who may do it: a Project Editor (Manager) of the Project or an Organisation Editor (Admin); others get 403.\n" +
+        "Workflow: find the campaign with makerble_list_survey_campaigns (project_id and story_category_id identify it), " +
+        "confirm with the user which Survey and Project, then call this. Returns {id, project_id, story_category_id, removed}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id }) => del(`/project_story_categories/${project_story_category_id}`),
+    },
+
+    {
+      name: "makerble_list_progress_boards",
+      description:
+        "List the Progress Boards the user sees on the Manage Progress Boards page: boards they made, are a Board Admin " +
+        "or Colleague of, or were granted. Each has archived (archived boards are hidden from the board's members until " +
+        "reopened), automated_by / automated_by_id (\"Project\" for the boards generated for each Survey on a Project, " +
+        "\"<Survey> on <Project>\"), and can_archive / can_delete: whether this user may archive or reopen it (its Board " +
+        "Admins and the person who made it) and delete it (Board Admins who are Organisation Editors).\n" +
+        "status filters by open, archived or all (the default). Use it to find progress_board_ids for " +
+        "makerble_manage_progress_boards.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["open", "archived", "all"], description: "Which boards to list. Default all." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/progress_boards", p),
+    },
+
+    {
+      name: "makerble_manage_progress_boards",
+      description:
+        "Archive, reopen or delete several Progress Boards at once, as the Archive, Reopen and Delete buttons do for the " +
+        "boards ticked in the Rows view of the Manage Progress Boards page. Archiving (what users may call closing) hides " +
+        "a board until it is reopened, and keeps it archived if its Project is later reopened. Delete is permanent and " +
+        "cannot be undone.\n" +
+        "Each board is changed only if the user may: archive and reopen need a Board Admin or the board's creator; delete " +
+        "needs a Board Admin who is an Organisation Editor. Boards they may not change, or can't see, are skipped and " +
+        "listed in skipped with the reason; the rest still change. At most 100 boards at a time.\n" +
+        "Workflow: find the boards with makerble_list_progress_boards (can_archive and can_delete say what is allowed), " +
+        "show the user the exact boards, and for delete warn that it cannot be undone and wait for them to confirm. " +
+        "Returns {action, updated_ids, skipped: [{id, name, reason}], message}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          bulk_action: { type: "string", enum: ["archive", "reopen", "delete"], description: "What to do to the boards." },
+          progress_board_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 100,
+            description: "The Progress Boards to change, at most 100.",
+          },
+        },
+        required: ["bulk_action", "progress_board_ids"],
+      },
+      handler: (body) => post("/progress_boards/bulk_action", body),
     },
 
     {
