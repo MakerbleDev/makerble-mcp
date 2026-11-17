@@ -2919,7 +2919,10 @@ export function buildTools(api) {
         "reason to skip it) and who is responsible (owner_description, responsible_user_ids). others_count is " +
         "how many other checklists are waiting; all_done is true when every action on the Contact's " +
         "checklists is done. Use it to tell a colleague what to do next for a Contact; to see every action, " +
-        "use makerble_get_contact_checklists. Only Contacts you can see are returned.",
+        "use makerble_get_contact_checklists. When the next step's action_type is 'invite_to_event' for a " +
+        "one-to-one appointment Event Format (Event Category), call makerble_suggest_staff_for_contact to see " +
+        "which colleagues could take the Contact on, then book with makerble_create_event as that tool " +
+        "describes; adding the Contact as a guest completes the step. Only Contacts you can see are returned.",
       inputSchema: {
         type: "object",
         properties: {
