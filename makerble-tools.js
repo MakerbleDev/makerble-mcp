@@ -6968,10 +6968,12 @@ export function buildTools(api) {
         "before it is saved), loop_seconds (4 to 20), alt (10 to 250 characters describing what the animation " +
         "shows, read by screen readers) and 1 to 24 steps played in order. Step types: appear (puts a block on " +
         "the stage: block is one of top_bar, sidebar_item, table_row, card, button, field, chip, avatar, " +
-        "chart_bar, cell (a tickable Register cell), timeline_item or calendar_event; optional id that later " +
+        "chart_bar, cell (a tickable Register cell), timeline_item, calendar_event or icon; optional id that later " +
         "steps target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
         "needs value 0 to 100 and a calendar_event value 1 (Monday) to 5 (Friday); an avatar, table_row, card or " +
-        "timeline_item may have face 1 to 5, one of the Makerble avatars, so people are faces, not initials), " +
+        "timeline_item may have face 1 to 5, one of the Makerble avatars, so people are faces, not initials; " +
+        "an icon block needs icon, one of pin, map, calendar, clock, document, chart, people, home, envelope, " +
+        "phone, star or heart, drawn in the module colour beside its text, for a concept's metaphor), " +
         "move_cursor, click, highlight and check (each with target, the id of a block on the stage), type " +
         "(target is a field, text is what is typed), swap (replaces the target's text with text), cut (clears " +
         "the stage for the next scene; earlier blocks can't be targeted after it), frame (must be a scene's " +
@@ -6983,7 +6985,8 @@ export function buildTools(api) {
         "booking) from one to the next, uses the same face for the same person in every scene, holds the payoff " +
         "with check and highlight rather than zoom (the frames read without it), and runs 10 to 12 seconds; " +
         "people who turn off motion see only its last scene. Use the feature's real button and page " +
-        "names in sentence case. Up to 8,000 characters of JSON.\n\n" +
+        "names in sentence case. A chip, card or row shows a tick box only if a check step ticks it, so " +
+        "chips work as plain labels. Up to 8,000 characters of JSON.\n\n" +
         "A broken rule returns 422 with every message in errors: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
         "ahead.",
@@ -7032,7 +7035,7 @@ export function buildTools(api) {
                       type: "string",
                       enum: [
                         "top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar",
-                        "cell", "timeline_item", "calendar_event",
+                        "cell", "timeline_item", "calendar_event", "icon",
                       ],
                     },
                     id: { type: "string" },
@@ -7040,6 +7043,11 @@ export function buildTools(api) {
                     text: { type: "string" },
                     value: { type: "integer", minimum: 0, maximum: 100, description: "chart_bar 0 to 100; calendar_event weekday 1 to 5" },
                     face: { type: "integer", minimum: 1, maximum: 5, description: "One of the Makerble avatars" },
+                    icon: {
+                      type: "string",
+                      enum: ["pin", "map", "calendar", "clock", "document", "chart", "people", "home", "envelope", "phone", "star", "heart"],
+                      description: "For an icon block (required there, and only there): the icon it shows",
+                    },
                     frame: { type: "string", enum: ["register", "profile", "table", "web_page", "calendar", "compare"] },
                     to: { type: "string", description: "For carry: the id of the block it lands on after the next cut" },
                   },
