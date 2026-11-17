@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 301 Makerble MCP tool definitions.
+ * All 303 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6720,6 +6720,88 @@ export function buildTools(api) {
         required: ["user_id", "organisation_id"],
       },
       handler: ({ user_id, organisation_id, ...caps }) => patch(`/users/${user_id}/capacity?charity_id=${organisation_id}`, caps),
+    },
+
+    {
+      name: "makerble_get_colleague_free_slots",
+      description:
+        "Find when a colleague (User) is free for an appointment of an Event Format (event category) in one " +
+        "Organisation (Charity) (CP-9147). A start time is free when the appointment, padded by the Event Format's " +
+        "preparation and debrief times, fits inside the colleague's availability on the Staff Availability page " +
+        "(respecting its Event Format and Project restrictions), overlaps none of their unavailability (leave, " +
+        "sickness, training; see makerble_list_unavailability) and none of their Event Worker assignments (each padded " +
+        "by its own Event Format's preparation and debrief times), and is on a day and in a week below their caps " +
+        "(see makerble_get_colleague_capacity). A colleague at their limit of one-to-one Contacts has no free " +
+        "one-to-one slots at all. Starts fall on the quarter hour, in the Organisation's time zone. The Event Format " +
+        "needs a Default length (422 without one; see makerble_get_event_format).\n\n" +
+        "By default it returns single free slots from today for 8 weeks. Pass weekly_sessions to plan a recurring " +
+        "appointment: each weekly time (e.g. Mondays 10:00) is returned once, from the first date on which every one " +
+        "of the sessions is free. Any member of the Organisation can see a colleague's slot times; the capacity block " +
+        "(caps, ongoing one-to-one Contacts, at_one_to_one_limit) is null unless the signed-in user sees the colleague " +
+        "on Staff Availability. 404 for an Organisation the user isn't in, or a colleague, Event Format or Project not " +
+        "in it. Paged: { page, page_size, page_count, total_count, data: [{ starts_at, ends_at, date, weekday, " +
+        "start_time, end_time, summary, sessions? }] }, plus the window, time_zone and the Event Format's length, " +
+        "preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          event_format_id: { type: "number", description: "The Event Format (event category) ID, from makerble_list_event_formats" },
+          project_id: { type: "number", description: "Optional. The Project the appointment is for: availability restricted to other Projects is left out" },
+          from: { type: "string", description: "Optional. First date, YYYY-MM-DD. Default today" },
+          to: { type: "string", description: "Optional. Last date, YYYY-MM-DD, at most 26 weeks after from. Default 8 weeks after from" },
+          weekly_sessions: { type: "number", description: "Optional. Return weekly series of this many sessions (1 to 52) instead of single slots" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Results per page (default 10, max 200)" },
+        },
+        required: ["user_id", "organisation_id", "event_format_id"],
+      },
+      handler: ({ user_id, organisation_id, event_format_id, ...params }) =>
+        get(`/users/${user_id}/free_slots`, { charity_id: organisation_id, event_category_id: event_format_id, ...params }),
+    },
+
+    {
+      name: "makerble_suggest_staff_for_contact",
+      description:
+        "Suggest which colleagues (users) could take on a Contact (Beneficiary) for one-to-one appointments of an " +
+        "Event Format (Event Category), ranked by Specialisms (Skills) and earliest free weekly slot. Use before " +
+        "booking a recurring appointment with makerble_create_event (CP-9147).\n\n" +
+        "Workflow: (1) find the Contact (makerble_list_contacts); (2) find the Project they are in " +
+        "(makerble_list_projects); (3) find a one-to-one Event Format there (makerble_list_project_event_formats, then " +
+        "makerble_get_event_format: appointment_type must be one_to_one, else 422); (4) call this tool; (5) show the " +
+        "user the suggestions with their reasons and, once they choose, create the recurring event with " +
+        "makerble_create_event, the colleague as an Event Worker and the Contact as a guest, starting at the " +
+        "suggestion's first_slot.starts_at with a weekly recurring_schedule.\n\n" +
+        "Candidates are the Project's colleagues. A colleague with a free series of 6 weekly sessions starting in the " +
+        "next 8 weeks (see makerble_get_colleague_free_slots) is a suggestion; one without is in fully_booked, with " +
+        "free_from, the date they free up if it is within 16 weeks. Suggestions are ranked by: having every Essential " +
+        "need as a Specialism (colleagues missing one still appear, lower down); then the number of Desirable needs " +
+        "matched; then the earliest series inside the Contact's Weekly availability (or any series, when that isn't " +
+        "recorded: contact_availability_note says so); then the fewest ongoing one-to-one Contacts relative to their " +
+        "cap. Each suggestion gives its reasons: specialisms_summary (e.g. \"Eating disorders ✓ (essential) · Music ✗ " +
+        "(desirable)\"), first_slot.summary (e.g. \"Mondays 10:00–11:00 from 24 Nov\"), inside_contact_availability, " +
+        "and load.summary (e.g. \"9 of 12 one-to-one Contacts\"). Each fully booked colleague has a summary such as " +
+        "\"Sarah Jones: fully booked until 8 Dec\". So you can tell the user, for example, \"Sarah would be ideal but " +
+        "is full until 8 Dec; Claire can start next week\".\n\n" +
+        "The signed-in user must be able to see the Contact's profile (404 otherwise) and the Project's events, as an " +
+        "Organisation Admin (Charity Editor) or a Project Editor (403 otherwise). load and at_one_to_one_limit are null " +
+        "for colleagues the user doesn't see on Staff Availability. 422 if the Contact isn't in the Project. " +
+        "Returns { beneficiary_id, project_id, event_category_id, sessions, weeks, contact_availability_note, " +
+        "suggestions: [{ rank, user, has_all_essential, specialisms, specialisms_summary, load, first_slot, " +
+        "inside_contact_availability }], fully_booked: [{ user, has_all_essential, specialisms, specialisms_summary, " +
+        "load, free_from, summary, at_one_to_one_limit }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_id: { type: "number", description: "The Contact (Beneficiary) ID" },
+          project_id: { type: "number", description: "The Project (in the Contact's Organisation) the appointments are for; the Contact must be in it" },
+          event_format_id: { type: "number", description: "A one-to-one Event Format (event category) ID with a Default length" },
+        },
+        required: ["contact_id", "project_id", "event_format_id"],
+      },
+      handler: ({ contact_id, project_id, event_format_id }) =>
+        get(`/beneficiaries/${contact_id}/staff_suggestions`, { project_id, event_category_id: event_format_id }),
     },
 
     {
