@@ -6893,8 +6893,9 @@ export function buildTools(api) {
         "is the id of a block that appears after the next cut: at that cut the carried block stays in flight, " +
         "then flies onto the to block, the only way anything outlives a cut) and zoom (scales in on target for " +
         "two beats, then back out). A Journey has two or three framed scenes, carries its hero (the tick, the " +
-        "booking) from one to the next, uses the same face for the same person in every scene, and runs 10 to " +
-        "12 seconds; people who turn off motion see only its last scene. Use the feature's real button and page " +
+        "booking) from one to the next, uses the same face for the same person in every scene, holds the payoff " +
+        "with check and highlight rather than zoom (the frames read without it), and runs 10 to 12 seconds; " +
+        "people who turn off motion see only its last scene. Use the feature's real button and page " +
         "names in sentence case. Up to 8,000 characters of JSON.\n\n" +
         "A broken rule returns 422 with every message in errors: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
