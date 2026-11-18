@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 309 Makerble MCP tool definitions.
+ * All 311 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6231,6 +6231,11 @@ export function buildTools(api) {
         "key of the page's Intro (guidance panel), such as contacts, events, checklists, surveys, tasks or " +
         "custom_tables; pages without an Intro can't be chosen. An unknown key is refused with 422, listing the " +
         "keys available. Send page_keys [] to show it on any page again (the default).\n\n" +
+        "Button (Makerble's own only): for a feature announcement, set button_deep_link to the feature's page from " +
+        "makerble_list_deep_links (usually its manage page, e.g. checklists, or its create page, e.g. create_contact) " +
+        "and give button_label a label that says where it goes, e.g. \"Explore Checklists\". The button then closes the " +
+        "popup and opens that page in the person's own organisation; for someone who can't open it, it only closes the " +
+        "popup. Send null to clear it. The response's button_click_count says how many people clicked through.\n\n" +
         "Feature tour (Makerble's own only): feature_tour_id links a feature tour (from makerble_list_feature_tours). " +
         "While that tour is live, the popup's button says \"Take the tour\" instead of button_label and starts the " +
         "tour on its first page. Send null to clear it.",
@@ -6319,6 +6324,12 @@ export function buildTools(api) {
               "Makerble's own only. The pages it shows on, by each page's Intro key, e.g. [\"contacts\"] for Manage " +
               "Contacts. Empty or left out when creating: any page. Sent, it replaces the list.",
           },
+          button_deep_link: {
+            type: ["string", "null"],
+            description:
+              "Makerble's own only. The deep link the button opens (a name from makerble_list_deep_links); null for a " +
+              "button that only closes the popup",
+          },
           feature_tour_id: {
             type: ["number", "null"],
             description: "Makerble's own only. The feature tour its button starts with \"Take the tour\" while the tour is live; null to clear",
@@ -6329,6 +6340,22 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_deep_links",
+      description:
+        "List Makerble's deep links: the pages a link can open in the signed-in person's own organisation, such as " +
+        "Manage Checklists (checklists) or Create a contact (create_contact). Each has its name, a readable label in " +
+        "on-screen words, its group (Contacts, Events, Surveys, ...) and the role the person needs: user (anyone signed " +
+        "in), member (an Editor, Reporter or Observer of the organisation or one of its Workspaces) or editor (an Editor " +
+        "of the organisation). A record link opens one record, such as the first Contact the person can see.\n\n" +
+        "When to use: to choose where an Announcement's button goes (button_deep_link in makerble_save_announcement), " +
+        "usually the feature's manage page, or its create page. The same names work as " +
+        "https://www.makerble.com/deeplink/<name> in the User Guide. The list only changes with a release. Only System " +
+        "Access users (Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/deep_links"),
     },
 
     {
@@ -8245,6 +8272,37 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...params }) => get(`/impact_frameworks/${id}/additions`, params),
+    },
+
+    {
+      name: "makerble_list_missing_framework_metrics",
+      description:
+        "Lists the metrics of an Impact Framework (a Template, the organisation's theory of change) that a project's or an " +
+        "album's Results Canvas can't show, because they aren't used on the project, or aren't used on one or more of the " +
+        "album's (Bundle's) open projects. When the Results Canvas is viewed through an Impact Framework (its Metrics dropdown), " +
+        "it only shows the framework's metrics that are already on the project, so use this to explain why a framework metric " +
+        "is missing from the canvas, or to find what to add after metrics were added to the framework. " +
+        "A metric here is an Activity or Attendance tracker (metric_type 'Change') or an Outcome (metric_type 'Outcome'); " +
+        "an Outcome brings its Indicators with it. Give project_id or album_id. The project must be one the user can open, " +
+        "the album one they can view, and the framework one the canvas's Metrics dropdown offers them (their organisation's " +
+        "or their own); anything else answers 404. " +
+        "Returns {impact_framework: {id, name}, project_id, album_id, page, page_size, page_count, total_count, data: [{metric_type, " +
+        "metric_id, name, stage, stage_id, projects: [{id, name, can_add}]}]}, in the framework's column order, where projects are " +
+        "the ones lacking the metric and can_add says whether the user may add it there. " +
+        "Workflow to add them: for each metric and each project with can_add true, call makerble_add_metric_to with " +
+        "metric_type 'change' or 'outcome', metric_id, destination 'projects' and target_id the project's id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template)" },
+          project_id: { type: "number", description: "The project whose Results Canvas to check" },
+          album_id: { type: "number", description: "The album (Bundle) whose Results Canvas to check, instead of a project" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/impact_frameworks/${id}/missing_metrics`, params),
     },
 
     {
