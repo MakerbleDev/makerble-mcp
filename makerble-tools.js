@@ -6197,6 +6197,11 @@ export function buildTools(api) {
         "Visual: for a rename, set visual_type to name_change and give 1 to 3 name_changes " +
         "[{old_name, new_name}], played as an animation in that order. For a video, set visual_type to vimeo " +
         "and vimeo_url (https://vimeo.com/<id>, or https://vimeo.com/<id>/<hash> for an unlisted video). " +
+        "For a picture of the feature, such as a screenshot or illustration, set visual_type to image, give image " +
+        "as {filename, data} with the file's contents in base64 (a PNG, JPG, GIF or WebP file of up to 5 MB), and " +
+        "image_alt saying what the picture shows for screen reader users (required, up to 250 characters). The " +
+        "popup shows it whole, never cropped. On update, leave image out to keep the saved one; changing " +
+        "visual_type away from image removes it. The response's image_url links to the saved image. " +
         "Otherwise use none. The name change animation is for Makerble's own only. learn_more_url is optional: " +
         "for Makerble's own it must be a page in the Makerble User Guide " +
         "(https://makerble.atlassian.net/wiki/spaces/MCPD/...); for a place's it can be any https page.\n\n" +
@@ -6234,7 +6239,7 @@ export function buildTools(api) {
           scope_id: { type: "number", description: "When creating, with scope_type: the Organisation, Workspace or Team ID" },
           title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
           body: { type: "string", description: "Message, up to 280 characters" },
-          visual_type: { type: "string", enum: ["name_change", "vimeo", "none"] },
+          visual_type: { type: "string", enum: ["name_change", "vimeo", "image", "none"] },
           name_changes: {
             type: "array",
             description: "For name_change: 1 to 3 renames, in the order they play",
@@ -6245,6 +6250,21 @@ export function buildTools(api) {
             },
           },
           vimeo_url: { type: "string", description: "For vimeo: the Vimeo link" },
+          image: {
+            type: "object",
+            description:
+              "For image: the picture, as {filename, data} with data the file's contents in base64. A PNG, JPG, GIF " +
+              "or WebP file of up to 5 MB. Leave out on update to keep the saved image.",
+            properties: {
+              filename: { type: "string", description: "The file's name, e.g. duplicate-survey.png" },
+              data: { type: "string", description: "The file's contents in base64" },
+            },
+            required: ["filename", "data"],
+          },
+          image_alt: {
+            type: "string",
+            description: "For image, required: what the picture shows, read out by screen readers. Up to 250 characters.",
+          },
           learn_more_url: {
             type: "string",
             description: "Optional. A Makerble User Guide page for Makerble's own; any https page for a place's",
