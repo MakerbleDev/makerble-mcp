@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 312 Makerble MCP tool definitions.
+ * All 315 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -626,6 +626,65 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/projects/${id}/targets`, body),
+    },
+
+    {
+      name: "makerble_list_toolkits",
+      description:
+        "List Toolkits (Collections in the API): ready-made sets of Surveys, Contact Forms (Bio Forms), Impact " +
+        "Frameworks, metrics and tips on Explore Toolkits that an organisation can add to its Projects in one go. " +
+        "Returns each Toolkit's id, name, toolkit_number (e.g. \"T14\"), strapline, whether Makerble has approved it, " +
+        "its thumbnail and cover image URLs, whether each image is darkened (darken_thumbnail_image, darken_cover_image) " +
+        "and its page url. A user with Marketing or Admin system access also sees listed Toolkits awaiting approval. " +
+        "Paginated; use last_synced_datetime for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Toolkits changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/toolkits", p),
+    },
+
+    {
+      name: "makerble_get_toolkit",
+      description:
+        "Get one Toolkit (Collection) by id: its name, toolkit_number, strapline, description, approval, thumbnail " +
+        "and cover image URLs and darkening settings, and the url of its page. A Toolkit the user can't see returns not found.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Toolkit's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/toolkits/${id}`),
+    },
+
+    {
+      name: "makerble_update_toolkit",
+      description:
+        "Set a Toolkit's (Collection's) number and image darkening, as the Create/Edit Collection page does. " +
+        "toolkit_number is a short label such as \"T14\", shown first on Site Overview > Manage Toolkits. " +
+        "darken_thumbnail_image puts a dark translucent layer over its card's image on Explore Toolkits; " +
+        "darken_cover_image does the same for the cover image at the top of the Toolkit's page, which helps white " +
+        "text on a bright photo. Only the fields sent change. Needs a user who can edit the Toolkit (its owner, an " +
+        "editor of its organisation, or Marketing or Admin system access). Replacing the images themselves is done " +
+        "in Makerble (Manage Toolkits > Replace) or with a multipart PATCH /api/v2/toolkits/{id}/image; this tool " +
+        "can't upload files.\n" +
+        "Before changing anything, show the user the Toolkit's current values (makerble_get_toolkit) and what you " +
+        "will change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Toolkit's id." },
+          toolkit_number: { type: ["string", "null"], description: "The Toolkit's number, e.g. T14; null clears it." },
+          darken_thumbnail_image: { type: "boolean", description: "Darken the thumbnail on Explore Toolkits." },
+          darken_cover_image: { type: "boolean", description: "Darken the cover image on the Toolkit's page." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/toolkits/${id}`, body),
     },
 
     {
