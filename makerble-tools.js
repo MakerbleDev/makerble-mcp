@@ -6194,7 +6194,14 @@ export function buildTools(api) {
         "changed, e.g. \"Surveys now have a Duplicate button\". body (the message, up to 280 characters) says what " +
         "the person needs to do, which is often nothing, e.g. \"Nothing has moved. Only the names have changed.\" " +
         "Use Makerble's on-screen words (Contacts, Surveys, Workspaces), never database names.\n\n" +
-        "Visual: for a rename, set visual_type to name_change and give 1 to 3 name_changes " +
+        "Visual: for a feature with an Intro animation, use visual_type intro_animation with intro_key set to the " +
+        "key of the feature's Intro (guidance panel), e.g. checklists. This is the default for a feature: the popup " +
+        "plays the Intro's storyboard as it is when shown, so the two stay in step (the Intro must have an animation; " +
+        "if it later loses it, the popup shows no visual). Only when the Intro's animation doesn't fit, for example " +
+        "when just one part of a feature is new, use visual_type storyboard with a storyboard of the announcement's " +
+        "own, in the same format and rules as an Intro's ({archetype, loop_seconds, alt, steps}); one that breaks the " +
+        "rules is refused with 422 naming the problem. Both animations are for Makerble's own only. " +
+        "For a rename, set visual_type to name_change and give 1 to 3 name_changes " +
         "[{old_name, new_name}], played as an animation in that order. For a video, set visual_type to vimeo " +
         "and vimeo_url (https://vimeo.com/<id>, or https://vimeo.com/<id>/<hash> for an unlisted video). " +
         "For a picture of the feature, such as a screenshot or illustration, set visual_type to image, give image " +
@@ -6239,7 +6246,7 @@ export function buildTools(api) {
           scope_id: { type: "number", description: "When creating, with scope_type: the Organisation, Workspace or Team ID" },
           title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
           body: { type: "string", description: "Message, up to 280 characters" },
-          visual_type: { type: "string", enum: ["name_change", "vimeo", "image", "none"] },
+          visual_type: { type: "string", enum: ["name_change", "vimeo", "image", "intro_animation", "storyboard", "none"] },
           name_changes: {
             type: "array",
             description: "For name_change: 1 to 3 renames, in the order they play",
@@ -6260,6 +6267,16 @@ export function buildTools(api) {
               data: { type: "string", description: "The file's contents in base64" },
             },
             required: ["filename", "data"],
+          },
+          intro_key: {
+            type: "string",
+            description: "For intro_animation (Makerble's own only): the key of the Intro whose animation it plays, e.g. checklists",
+          },
+          storyboard: {
+            type: "object",
+            description:
+              "For storyboard (Makerble's own only): the announcement's own animation, {archetype, loop_seconds, alt, " +
+              "steps}, with the same rules as an Intro's storyboard. Use only when the Intro's animation doesn't fit.",
           },
           image_alt: {
             type: "string",
