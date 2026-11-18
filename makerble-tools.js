@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 311 Makerble MCP tool definitions.
+ * All 312 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -762,6 +762,35 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/albums/${id}/targets`),
+    },
+
+    {
+      name: "makerble_get_album_project_contributions",
+      description:
+        "See how much each Project in an Album (Portfolio; Bundle in the API) contributed to the Album's results, as the " +
+        "Album page's Project Contributions views show. For each Activity or Outcome metric (Change or Indicator) on the " +
+        "Album it returns the progress across the Album (total), the Album's target and the percentage reached, then for " +
+        "each open Project its sub-total and contribution_percentage (its share of the total). Projects are listed in " +
+        "natural order of name with the colour set on their Edit Project page. timeframe: all_time (default; also gives " +
+        "each Project's own all-time target, or target_unavailable when that Project sets the metric's targets by " +
+        "deadline), period (between two of the Album's Target Deadlines; empty when the Album has no deadline targets) " +
+        "or year_to_date (one year from the Album's Year Start). The response lists the periods or years in timeframes; pass " +
+        "one's end_date to see it, otherwise the current one is shown. Use it to answer 'which project delivered most of " +
+        "X?' or to compare projects' contributions to an Album's targets. Metrics are paged (per_page up to 200). " +
+        "Find Album ids with makerble_list_albums.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          timeframe: { type: "string", enum: ["all_time", "period", "year_to_date"], description: "Default all_time." },
+          end_date: { type: "string", description: "YYYY-MM-DD: the last day of a period or year listed in timeframes." },
+          page: { type: "number", description: "Page of metrics, from 1." },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, timeframe, end_date, page, per_page }) =>
+        get(`/albums/${id}/project_contributions`, { timeframe, end_date, page, per_page }),
     },
 
     {
