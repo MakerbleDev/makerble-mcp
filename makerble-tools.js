@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 307 Makerble MCP tool definitions.
+ * All 309 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -8185,6 +8185,66 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: (p) => post(`/impact_frameworks/${p.id}/copy`, {}),
+    },
+
+    {
+      name: "makerble_add_impact_framework",
+      description:
+        "Adds an Impact Framework's (a Template's) metrics to Projects and to other Impact Frameworks, as the " +
+        "'Add to projects' page and the 'Add metrics from another project or framework' box on Edit metrics do. " +
+        "Use it when the user wants a framework's metrics (Activity and Attendance trackers (Changes), Outcomes and " +
+        "the trackers placed on it) on a Project, or merged into another framework. Adding to a Project adds the " +
+        "metrics to that Project's own Theory of Change (its default framework); adding to a framework " +
+        "(framework_ids) adds them to that framework. The framework itself is not copied: each metric goes into " +
+        "the same stage, a metric already there in that stage is skipped, and Makerble records that the framework " +
+        "was added, by whom and when (see makerble_list_impact_framework_additions). Adding the same framework again " +
+        "only adds metrics it has gained since. The user must be able to edit each Project's or framework's metrics; " +
+        "a Project or framework they can't edit, or that doesn't exist, is listed in refused and the rest are still " +
+        "added. Give project_ids, framework_ids or both. Returns data: impact_framework_id, added (each with " +
+        "receiving_framework_id and project_id, null for a framework that isn't a Project's) and refused (each with " +
+        "project_id or framework_id and error: forbidden, not-found or same_framework).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template) whose metrics to add" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to add the metrics to" },
+          framework_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Other Impact Frameworks (Templates) to add the metrics to",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_ids, framework_ids }) =>
+        post(`/impact_frameworks/${id}/additions`, { project_ids, framework_ids }),
+    },
+
+    {
+      name: "makerble_list_impact_framework_additions",
+      description:
+        "Lists where an Impact Framework (a Template) has been added: the Projects and other Impact Frameworks its " +
+        "metrics were added to, by whom and when. Use it to answer 'which projects use this framework?', or before " +
+        "changing a framework, to see which Projects and frameworks the change might need copying to. Only " +
+        "Projects and frameworks of the user's organisations, and frameworks the user made, are listed. Returns " +
+        "the {page, page_size, page_count, total_count, data} envelope; each item has id, impact_framework_id, " +
+        "receiving_framework {id, name}, project {id, name} (null when the receiving framework isn't a Project's " +
+        "Theory of Change), added_by {id, name} (null for additions made before Makerble recorded who added them), " +
+        "added_at and updated_at.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template)" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Results per page (default 10, max 200)" },
+          last_synced_datetime: {
+            type: "string",
+            description: "ISO 8601 datetime; only additions changed after it are listed",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/impact_frameworks/${id}/additions`, params),
     },
 
     {
