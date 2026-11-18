@@ -8215,6 +8215,37 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_list_missing_framework_metrics",
+      description:
+        "Lists the metrics of an Impact Framework (a Template, the organisation's theory of change) that a project's or an " +
+        "album's Results Canvas can't show, because they aren't used on the project, or aren't used on one or more of the " +
+        "album's (Bundle's) open projects. When the Results Canvas is viewed through an Impact Framework (its Metrics dropdown), " +
+        "it only shows the framework's metrics that are already on the project, so use this to explain why a framework metric " +
+        "is missing from the canvas, or to find what to add after metrics were added to the framework. " +
+        "A metric here is an Activity or Attendance tracker (metric_type 'Change') or an Outcome (metric_type 'Outcome'); " +
+        "an Outcome brings its Indicators with it. Give project_id or album_id. The project must be one the user can open, " +
+        "the album one they can view, and the framework one the canvas's Metrics dropdown offers them (their organisation's " +
+        "or their own); anything else answers 404. " +
+        "Returns {impact_framework: {id, name}, project_id, album_id, page, page_size, page_count, total_count, data: [{metric_type, " +
+        "metric_id, name, stage, stage_id, projects: [{id, name, can_add}]}]}, in the framework's column order, where projects are " +
+        "the ones lacking the metric and can_add says whether the user may add it there. " +
+        "Workflow to add them: for each metric and each project with can_add true, call makerble_add_metric_to with " +
+        "metric_type 'change' or 'outcome', metric_id, destination 'projects' and target_id the project's id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template)" },
+          project_id: { type: "number", description: "The project whose Results Canvas to check" },
+          album_id: { type: "number", description: "The album (Bundle) whose Results Canvas to check, instead of a project" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/impact_frameworks/${id}/missing_metrics`, params),
+    },
+
+    {
       name: "makerble_search_impact_store",
       description:
         "Search the Makerble ImpactStore (the Explore pages) for a ready-made, well-tested Survey (Story " +
