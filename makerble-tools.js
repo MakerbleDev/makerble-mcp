@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 307 Makerble MCP tool definitions.
+ * All 308 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6329,6 +6329,22 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_deep_links",
+      description:
+        "List Makerble's deep links: the pages a link can open in the signed-in person's own organisation, such as " +
+        "Manage Checklists (checklists) or Create a contact (create_contact). Each has its name, a readable label in " +
+        "on-screen words, its group (Contacts, Events, Surveys, ...) and the role the person needs: user (anyone signed " +
+        "in), member (an Editor, Reporter or Observer of the organisation or one of its Workspaces) or editor (an Editor " +
+        "of the organisation). A record link opens one record, such as the first Contact the person can see.\n\n" +
+        "When to use: to choose where an Announcement's button goes (button_deep_link in makerble_save_announcement), " +
+        "usually the feature's manage page, or its create page. The same names work as " +
+        "https://www.makerble.com/deeplink/<name> in the User Guide. The list only changes with a release. Only System " +
+        "Access users (Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/deep_links"),
     },
 
     {
