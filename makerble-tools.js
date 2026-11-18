@@ -6231,6 +6231,11 @@ export function buildTools(api) {
         "key of the page's Intro (guidance panel), such as contacts, events, checklists, surveys, tasks or " +
         "custom_tables; pages without an Intro can't be chosen. An unknown key is refused with 422, listing the " +
         "keys available. Send page_keys [] to show it on any page again (the default).\n\n" +
+        "Button (Makerble's own only): for a feature announcement, set button_deep_link to the feature's page from " +
+        "makerble_list_deep_links (usually its manage page, e.g. checklists, or its create page, e.g. create_contact) " +
+        "and give button_label a label that says where it goes, e.g. \"Explore Checklists\". The button then closes the " +
+        "popup and opens that page in the person's own organisation; for someone who can't open it, it only closes the " +
+        "popup. Send null to clear it. The response's button_click_count says how many people clicked through.\n\n" +
         "Feature tour (Makerble's own only): feature_tour_id links a feature tour (from makerble_list_feature_tours). " +
         "While that tour is live, the popup's button says \"Take the tour\" instead of button_label and starts the " +
         "tour on its first page. Send null to clear it.",
@@ -6318,6 +6323,12 @@ export function buildTools(api) {
             description:
               "Makerble's own only. The pages it shows on, by each page's Intro key, e.g. [\"contacts\"] for Manage " +
               "Contacts. Empty or left out when creating: any page. Sent, it replaces the list.",
+          },
+          button_deep_link: {
+            type: ["string", "null"],
+            description:
+              "Makerble's own only. The deep link the button opens (a name from makerble_list_deep_links); null for a " +
+              "button that only closes the popup",
           },
           feature_tour_id: {
             type: ["number", "null"],
