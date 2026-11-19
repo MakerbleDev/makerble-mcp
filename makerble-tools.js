@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 321 Makerble MCP tool definitions.
+ * All 322 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6242,8 +6242,9 @@ export function buildTools(api) {
         "Team leader that Team's. Someone who can make announcements nowhere gets 403. Give scope_type and " +
         "scope_id to list one place's. Returns each one's scope_type, scope_id, title (headline), body (message), " +
         "visual_type (name_change, vimeo or none), name_changes, audience, starts_on, ends_on, status (draft or " +
-        "scheduled), current_status (draft, scheduled, live or ended), seen_count (people who have closed it) " +
-        "and learn_more_click_count.",
+        "scheduled), current_status (draft, scheduled, live or ended), seen_count (people who have seen it), " +
+        "seen_counts_by_source ({popup, whats_new}: how many first saw it in the popup and how many by opening it " +
+        "in Wishlist › What's new) and learn_more_click_count.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6265,8 +6266,9 @@ export function buildTools(api) {
       name: "makerble_get_announcement",
       description:
         "Get one Announcement (a popup: Makerble's own, or an Organisation's, Workspace's or Team's, see " +
-        "scope_type and scope_id) by id, with how many people have seen it (seen_count) and clicked its " +
-        "\"Learn more\" link (learn_more_click_count). System Access users can get any; anyone else only one " +
+        "scope_type and scope_id) by id, with how many people have seen it (seen_count; seen_counts_by_source " +
+        "splits it into {popup, whats_new}: first seen in the popup, or by opening it in Wishlist › What's new) " +
+        "and clicked its \"Learn more\" link (learn_more_click_count). System Access users can get any; anyone else only one " +
         "for a place where they are an Organisation Admin, Workspace editor or Team leader, otherwise 403.",
       inputSchema: {
         type: "object",
@@ -6508,6 +6510,35 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => patch(`/announcements/${id}`, { schedule_on_next_free_days: true }),
+    },
+
+    {
+      name: "makerble_list_whats_new",
+      description:
+        "List the signed-in user's Wishlist › What's new (the gift icon): the \"What's new in Makerble\" " +
+        "Announcements that have gone live for them, newest first, with whether they have seen each one. Use it " +
+        "when someone asks what's new in Makerble, what they have missed, or about a recent feature. Only " +
+        "Makerble's own announcements for an audience the user is in are listed, never an Organisation's, " +
+        "Workspace's or Team's. Listing them doesn't mark them seen; the user still gets an unseen one in the " +
+        "popup. Each has id, title (headline), body (message), starts_on, section (new_since_joined: it started " +
+        "on or after the day the user's account was made; before_joined), visual_type, image_url, vimeo_url, " +
+        "learn_more_url (a Makerble User Guide page), includes_tour and feature_tour_id (its button starts that " +
+        "feature tour), asked_for (it answered one of the user's own requests in Wishlist › Your wishlist), " +
+        "seen and seen_at.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section: {
+            type: "string",
+            enum: ["new_since_joined", "before_joined"],
+            description: "Only this section. Leave out for both, newest first",
+          },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/whats_new", p),
     },
 
     {
