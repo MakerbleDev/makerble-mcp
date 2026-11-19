@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 317 Makerble MCP tool definitions.
+ * All 318 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6711,7 +6711,8 @@ export function buildTools(api) {
         "who already use Makerble, unlike a Welcome Tour, which is a new colleague's first tour. It belongs to no " +
         "Organisation: Makerble staff write it once. A live tour with a page_key is offered by \"Take the tour\" on " +
         "that page's Intro (the Show/Hide Guidance panel at the top of a Manage page, e.g. page_key contacts); each " +
-        "Intro has at most one live tour. auto_prompt offers it once, the first time someone opens its page. Each " +
+        "Intro has at most one live tour. status is draft, amends_needed (a draft that came back from review) or " +
+        "live; only a live tour is shown to anyone. auto_prompt offers it once, the first time someone opens its page. Each " +
         "stop is one of the stops Welcome Tours use (stop_key) and shows Makerble's default_title and default_body " +
         "unless it has its own title or body. Makerble staff (System Access) only; anyone else gets 403. Returns " +
         "each tour with its stops in order.",
@@ -6793,6 +6794,25 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_feature_tour_funnel",
+      description:
+        "See how people get on with a feature tour (CP-9255): the same numbers as its Funnel page in Site Overview › " +
+        "Feature Tours. Returns totals (started: everyone who has taken it; completed; in_progress; ended_early) and, " +
+        "for each stop in order, how many people reached it, completed it, skipped it themselves (skipped_by_user) or " +
+        "had it skipped because they couldn't use it (skipped_by_system), counting each person once per stop and " +
+        "event. Stop counts start on counts_since, the day they were first recorded (null before anyone has taken a " +
+        "step); the totals cover everyone. Use it after a tour goes live to find the stop where people drop out or " +
+        "where many are skipped by the system (a stop that needs data or a permission most people lack). Makerble " +
+        "staff (System Access) only; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID, from makerble_list_feature_tours" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_tours/${id}/funnel`),
+    },
+
+    {
       name: "makerble_save_feature_tour",
       description:
         "Create or update a feature tour, the short tour that introduces one feature to people already using " +
@@ -6800,7 +6820,9 @@ export function buildTools(api) {
         "Without id it creates one: key (unique, lowercase words joined by underscores, e.g. contacts_filters) and " +
         "name are needed, and it starts as a draft nobody sees. With id it changes only the fields sent. page_key is " +
         "the page whose Intro offers it with \"Take the tour\" (e.g. contacts, events; null for none, so it starts " +
-        "only from an announcement). auto_prompt offers it once on someone's first visit to that page. Each stop's " +
+        "only from an announcement; to choose the tour from the Intro's side, use feature_tour_id in " +
+        "makerble_update_guidance_panel). status is draft or amends_needed (nobody sees it; amends_needed marks a " +
+        "draft that came back from review) or live. auto_prompt offers it once on someone's first visit to that page. Each stop's " +
         "stop_key is the key of one of the stops Makerble knows, the same stops Welcome Tours use: call " +
         "makerble_list_tour_stops for them all, grouped by feature, with the page each opens, whether it waits for " +
         "Next or a click, its default wording and who it is shown to. A tour about one feature usually takes every " +
@@ -6816,7 +6838,7 @@ export function buildTools(api) {
           id: { type: "number", description: "The feature tour to update. Leave out to create one." },
           key: { type: "string", description: "Unique, lowercase words joined by underscores" },
           name: { type: "string" },
-          status: { type: "string", enum: ["draft", "live"] },
+          status: { type: "string", enum: ["draft", "amends_needed", "live"] },
           page_key: { type: ["string", "null"], description: "The key of the page whose Intro offers the tour, e.g. contacts; null for none" },
           auto_prompt: { type: "boolean", description: "Offer the tour once, the first time someone opens its page" },
           stops: {
@@ -7201,7 +7223,9 @@ export function buildTools(api) {
         "makerble_get_guidance_panel and makerble_update_guidance_panel), page_name, module (the sidebar " +
         "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, storyboard " +
         "(the animation drawn when there is no video, or null), visual (what shows beside the text now: vimeo, " +
-        "storyboard, animation, image or none), updated_at and updated_by. Only " +
+        "storyboard, animation, image or none), feature_tour_id and feature_tour_name (the feature tour its " +
+        "\"Take the tour\" offers: the live one, otherwise the one most recently updated; null for none), " +
+        "updated_at and updated_by. Only " +
         "Makerble staff with System Access can use the Guidance Panel tools; anyone else gets 403.",
       inputSchema: {
         type: "object",
@@ -7233,7 +7257,7 @@ export function buildTools(api) {
     {
       name: "makerble_update_guidance_panel",
       description:
-        "Change a Guidance Panel's wording, video or animation storyboard: the Show/Hide Guidance introduction " +
+        "Change a Guidance Panel's wording, video, animation storyboard or feature tour: the Show/Hide Guidance introduction " +
         "(shown as the page's \"Intro\") at the top of a " +
         "Manage page. The page shows the change from its next load, and the change is kept as a version " +
         "attributed to the user. Send only the fields to change; points replaces the whole list in the order " +
@@ -7278,7 +7302,12 @@ export function buildTools(api) {
         "people who turn off motion see only its last scene. Use the feature's real button and page " +
         "names in sentence case. A chip, card or row shows a tick box only if a check step ticks it, so " +
         "chips work as plain labels. Up to 8,000 characters of JSON.\n\n" +
-        "A broken rule returns 422 with every message in errors: " +
+        "feature_tour_id chooses the feature tour (from makerble_list_feature_tours) that the Intro's \"Take the " +
+        "tour\" offers, or null for none. It points that tour's page_key at this Intro and unlinks any other " +
+        "tour that pointed here; the response's notices names it (e.g. \"Checklists is no longer offered " +
+        "here.\"). Only a live tour is shown. It is refused when the chosen tour is live and another live tour " +
+        "is already on this Intro: send null first to take that one off, with the user's agreement.\n\n" +
+        "A broken rule returns 422 with every message in errors, and nothing is changed: " +
         "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
         "ahead.",
       inputSchema: {
@@ -7347,6 +7376,10 @@ export function buildTools(api) {
               },
             },
             required: ["archetype", "loop_seconds", "alt", "steps"],
+          },
+          feature_tour_id: {
+            type: ["number", "null"],
+            description: "The feature tour this Intro offers with \"Take the tour\", from makerble_list_feature_tours; null for none",
           },
         },
         required: ["key"],
