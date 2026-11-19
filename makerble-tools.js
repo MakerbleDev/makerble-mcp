@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 318 Makerble MCP tool definitions.
+ * All 321 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6339,7 +6339,12 @@ export function buildTools(api) {
         "popup. Send null to clear it. The response's button_click_count says how many people clicked through.\n\n" +
         "Feature tour (Makerble's own only): feature_tour_id links a feature tour (from makerble_list_feature_tours). " +
         "While that tour is live, the popup's button says \"Take the tour\" instead of button_label and starts the " +
-        "tour on its first page. Send null to clear it.",
+        "tour on its first page. Send null to clear it.\n\n" +
+        "Feature launch (Makerble's own only): feature_launch_id says which feature launch (from " +
+        "makerble_list_feature_launches) the announcement is for. Wherever the announcement leaves body, " +
+        "learn_more_url, button_deep_link or feature_tour_id empty, the popup and What's new use the launch's " +
+        "short_description, user_guide_url, deep_link and feature_tour_id, so body can be left empty while the " +
+        "launch has a short_description. Send null to clear it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6351,7 +6356,7 @@ export function buildTools(api) {
           },
           scope_id: { type: "number", description: "When creating, with scope_type: the Organisation, Workspace or Team ID" },
           title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
-          body: { type: "string", description: "Message, up to 280 characters" },
+          body: { type: ["string", "null"], description: "Message, up to 280 characters. May be empty for an announcement whose feature launch has a short_description" },
           visual_type: { type: "string", enum: ["name_change", "vimeo", "image", "intro_animation", "storyboard", "none"] },
           name_changes: {
             type: "array",
@@ -6434,6 +6439,10 @@ export function buildTools(api) {
           feature_tour_id: {
             type: ["number", "null"],
             description: "Makerble's own only. The feature tour its button starts with \"Take the tour\" while the tour is live; null to clear",
+          },
+          feature_launch_id: {
+            type: ["number", "null"],
+            description: "Makerble's own only. The feature launch it announces; its message, links and tour fill any left empty here. null to clear",
           },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
@@ -6876,6 +6885,98 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/feature_tours/${id}`),
+    },
+
+    // ── Feature launches (CP-9271) ───────────────────────────────────────────
+    {
+      name: "makerble_list_feature_launches",
+      description:
+        "List feature launches (CP-9271): one record per Makerble feature holding its launch content, kept by " +
+        "Makerble staff in Site Overview › Feature launches. Each has the feature's name as people see it in " +
+        "Makerble (e.g. Registers), its tier (minor, standard or major), the short_description its announcements " +
+        "show, a longer email_description for the feature launch emails, its links (user_guide_url, blog_url, " +
+        "deep_link, feature_tour_id, intro_key), its email visual (gif, still_frame, image or none) and which of " +
+        "its links the email shows (email_primary_link as the main button, email_text_links as up to two text " +
+        "links), its Jira keys, released_on and the ids of the announcements for it. Use search to find a launch " +
+        "by name before creating one, so a feature never gets two. Makerble staff (System Access) only; anyone " +
+        "else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          search: { type: "string", description: "Only launches whose name contains this text, ignoring case" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only feature launches changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/feature_launches", p),
+    },
+
+    {
+      name: "makerble_get_feature_launch",
+      description:
+        "Get one feature launch by id: its name, tier, short and email descriptions, links, email visual (with the " +
+        "uploaded image's, GIF's and still frame's addresses once there are any), email links, Jira keys, " +
+        "released_on and the ids of the announcements for it. Makerble staff only.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature launch ID, from makerble_list_feature_launches" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_launches/${id}`),
+    },
+
+    {
+      name: "makerble_save_feature_launch",
+      description:
+        "Create or update a feature launch, the record that holds a Makerble feature's launch content for its " +
+        "announcements and the feature launch emails. Makerble staff (System Access) only.\n\n" +
+        "Without id it creates one: name is needed and must be unique, ignoring case. With id it changes only the " +
+        "fields sent; send null or an empty string to clear one, and jira_keys or email_text_links replace the " +
+        "whole list. Write descriptions in the words people see in Makerble (Contacts, Surveys, organisation), in " +
+        "sentence case. short_description is the announcement message (up to 280 characters). email_description " +
+        "is 2 to 4 sentences, up to 600 characters: what it is, why it matters and how to start. user_guide_url " +
+        "must be a Makerble User Guide page (https://makerble.atlassian.net/wiki/spaces/MCPD/...), blog_url any " +
+        "https address, and deep_link a name from makerble_list_deep_links. email_visual is gif or still_frame " +
+        "(made from the feature's animation), image (send email_image as { filename, data } with the data in " +
+        "base64: a PNG, JPG, GIF or WebP up to 5 MB) or none, and every visual but none needs email_visual_alt. " +
+        "email_primary_link and each of email_text_links is deep_link, tour, user_guide or blog, and the launch " +
+        "must have that link; text links are up to two, not repeating the main button.\n\n" +
+        "Workflow: search makerble_list_feature_launches by name first and update the launch if it exists. To link " +
+        "an announcement to it, set feature_launch_id with makerble_save_announcement. When a blog post is " +
+        "published, set blog_url and add blog to email_text_links if there is room.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The feature launch to update. Leave out to create one." },
+          name: { type: "string", description: "The feature's name as people see it in Makerble, up to 80 characters; unique" },
+          tier: { type: "string", enum: ["minor", "standard", "major"] },
+          short_description: { type: ["string", "null"], description: "The announcement message, up to 280 characters" },
+          email_description: { type: ["string", "null"], description: "2 to 4 sentences, up to 600 characters" },
+          user_guide_url: { type: ["string", "null"], description: "A page in the Makerble User Guide" },
+          blog_url: { type: ["string", "null"], description: "The blog post, an https address" },
+          deep_link: { type: ["string", "null"], description: "A deep link name, from makerble_list_deep_links" },
+          feature_tour_id: { type: ["number", "null"], description: "The feature tour, from makerble_list_feature_tours" },
+          intro_key: { type: ["string", "null"], description: "The key of the feature's Intro, from makerble_list_guidance_panels" },
+          email_visual: { type: "string", enum: ["gif", "still_frame", "image", "none"] },
+          email_visual_alt: { type: ["string", "null"], description: "What the visual shows, up to 250 characters" },
+          email_image: {
+            type: "object",
+            description: "For an image visual: the file as base64",
+            properties: { filename: { type: "string" }, data: { type: "string", description: "The file's contents in base64" } },
+            required: ["filename", "data"],
+          },
+          email_primary_link: { type: ["string", "null"], enum: ["deep_link", "tour", "user_guide", "blog", null] },
+          email_text_links: {
+            type: "array",
+            maxItems: 2,
+            items: { type: "string", enum: ["deep_link", "tour", "user_guide", "blog"] },
+          },
+          jira_keys: { type: "array", items: { type: "string" }, description: "Jira keys such as CP-9271" },
+          released_on: { type: ["string", "null"], description: "The day it reached production (YYYY-MM-DD)" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/feature_launches/${id}`, body) : post("/feature_launches", body)),
     },
 
     {
