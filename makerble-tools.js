@@ -3440,10 +3440,14 @@ export function buildTools(api) {
         "for them at an event on the same date, e.g. all 4 meals on every class day = from '100', to '100'), " +
         "distance_travelled (Distance Travelled Direction: {trackers: [{indicator_id, directions: " +
         "['improved'|'no_change'|'worsened'|'reached_top']}], match: 'any'|'all'|'at_least', match_count, " +
-        "same_project}; compares each Contact's first and latest answer to each Choice Tracker, reached_top = " +
+        "same_project, story_category_ids, responses_between}; compares each Contact's first and latest answer to each Choice Tracker, reached_top = " +
         "latest answer is the best on the scale; match says how many trackers a Contact must meet, default any, " +
         "e.g. improved in at least 2 of 3 goals = match 'at_least', match_count 2; with denominator " +
-        "'enough_data' the % is out of Contacts with two responses on that many trackers), " +
+        "'enough_data' the % is out of Contacts with two responses on that many trackers; optional " +
+        "story_category_ids (Survey ids) compares only answers given in those Surveys, e.g. when teachers and " +
+        "parents fill in different versions of the same survey; optional responses_between " +
+        "('dd/mm/yyyy - dd/mm/yyyy', either end may be blank) compares only answers dated in that range, " +
+        "narrowing a Cohort Tracker's reporting period), " +
         "indicator_comparisons ({indicator_id: " +
         "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
         "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
