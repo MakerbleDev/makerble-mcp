@@ -6516,7 +6516,8 @@ export function buildTools(api) {
       name: "makerble_list_whats_new",
       description:
         "List the signed-in user's Wishlist › What's new (the gift icon): the \"What's new in Makerble\" " +
-        "Announcements that have gone live for them, newest first, with whether they have seen each one. Use it " +
+        "Announcements that have gone live for them, and scheduled ones still to start that they can read early, " +
+        "newest first by start date, with whether they have seen each one. Use it " +
         "when someone asks what's new in Makerble, what they have missed, or about a recent feature. Only " +
         "Makerble's own announcements for an audience the user is in are listed, never an Organisation's, " +
         "Workspace's or Team's. Listing them doesn't mark them seen; the user still gets an unseen one in the " +
