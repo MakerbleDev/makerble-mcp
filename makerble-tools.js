@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 321 Makerble MCP tool definitions.
+ * All 322 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6977,6 +6977,41 @@ export function buildTools(api) {
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/feature_launches/${id}`, body) : post("/feature_launches", body)),
+    },
+
+    {
+      name: "makerble_preview_feature_launch_email",
+      description:
+        "See the feature launch email (the email that tells people about new Makerble features) for up to 10 " +
+        "feature launches, as one person would get it, or send yourself a test of it. Makerble staff (System " +
+        "Access) only.\n\n" +
+        "Each feature launch shows its name, email visual, email description, a main button and up to two text " +
+        "links. Links into Makerble (a deep link such as \"Open Registers\", and Take the tour) show only for a " +
+        "user whose account can open them; everyone else gets the User Guide and blog links. So send user_email to " +
+        "see it as that Makerble user gets it, or leave it out to see it as someone without a Makerble account.\n\n" +
+        "Returns the subject, who it would go to, and the html and plain-text versions. With send_test: true it " +
+        "instead emails it to you, and only you, with a subject starting [Test], and returns where it went.\n\n" +
+        "Workflow: find the launches with makerble_list_feature_launches, preview first to check the links each " +
+        "person gets, then send a test.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          feature_launch_ids: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: { type: "number" },
+            description: "The feature launches to show, in this order, from makerble_list_feature_launches",
+          },
+          user_email: { type: "string", description: "See it as this Makerble user gets it. Leave out for someone without an account" },
+          intro: { type: "string", description: "An opening paragraph, shown before the feature launches" },
+          subject: { type: "string", description: "The subject. Leave out to name the features" },
+          send_test: { type: "boolean", description: "true to email it to yourself instead of returning it" },
+        },
+        required: ["feature_launch_ids"],
+      },
+      handler: ({ send_test, ...body }) =>
+        post(send_test ? "/feature_launches/email_test" : "/feature_launches/email_preview", body),
     },
 
     {
