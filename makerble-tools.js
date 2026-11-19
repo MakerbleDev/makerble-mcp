@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 317 Makerble MCP tool definitions.
+ * All 318 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6791,6 +6791,25 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/feature_tours/${id}`),
+    },
+
+    {
+      name: "makerble_get_feature_tour_funnel",
+      description:
+        "See how people get on with a feature tour (CP-9255): the same numbers as its Funnel page in Site Overview › " +
+        "Feature Tours. Returns totals (started: everyone who has taken it; completed; in_progress; ended_early) and, " +
+        "for each stop in order, how many people reached it, completed it, skipped it themselves (skipped_by_user) or " +
+        "had it skipped because they couldn't use it (skipped_by_system), counting each person once per stop and " +
+        "event. Stop counts start on counts_since, the day they were first recorded (null before anyone has taken a " +
+        "step); the totals cover everyone. Use it after a tour goes live to find the stop where people drop out or " +
+        "where many are skipped by the system (a stop that needs data or a permission most people lack). Makerble " +
+        "staff (System Access) only; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID, from makerble_list_feature_tours" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_tours/${id}/funnel`),
     },
 
     {
