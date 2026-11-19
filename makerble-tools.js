@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 316 Makerble MCP tool definitions.
+ * All 317 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6739,8 +6739,8 @@ export function buildTools(api) {
         "see\"); action and action_label (whether it waits for Next or for a click); default_title and default_body " +
         "(Makerble's wording, shown unless the tour's stop has its own); empty (the wording shown instead to someone " +
         "who can open the page but has nothing on it yet, or null if the stop is skipped for them); and shown_to " +
-        "(who sees it, e.g. \"Only for Organisation Editors\"). A stop the person can't use is skipped when the tour " +
-        "runs.\n\n" +
+        "(who sees it, e.g. \"Only for Organisation Editors\"); and feature_tour_count and welcome_tour_count (how many " +
+        "tours use it). A stop the person can't use is skipped when the tour runs.\n\n" +
         "Send group_name to list one feature's stops, e.g. Registers. The list changes only when Makerble releases " +
         "new stops. Makerble staff (System Access) only; anyone else gets 403.",
       inputSchema: {
@@ -6752,6 +6752,30 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/tour_stops", p),
+    },
+
+    {
+      name: "makerble_update_tour_stop",
+      description:
+        "Change Makerble's default title and text for one tour stop (CP-9252), as Site Overview › Tour Stops does. " +
+        "A tour stop is one step of a Welcome Tour or feature tour, focused on one part of one Makerble page. Every " +
+        "tour stop that has no wording of its own shows the new default straight away, in every tour that uses " +
+        "it, so check feature_tour_count and welcome_tour_count from makerble_list_tour_stops and confirm with the " +
+        "user first.\n\n" +
+        "Only the fields sent change. Sending a field empty, or the same as Makerble's original wording, goes back " +
+        "to the original. Returns the stop as makerble_list_tour_stops lists it. Marketing and Admin users " +
+        "(Makerble staff) only; Support users and anyone else get 403. To change the wording in one tour only, set " +
+        "that stop's title or body with makerble_save_feature_tour or makerble_save_tour instead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "The stop's key, from makerble_list_tour_stops, e.g. contacts_table" },
+          default_title: { type: "string", description: "Up to 120 characters; empty goes back to Makerble's original" },
+          default_body: { type: "string", description: "Up to 600 characters; empty goes back to Makerble's original" },
+        },
+        required: ["key"],
+      },
+      handler: ({ key, ...body }) => patch(`/tour_stops/${encodeURIComponent(key)}`, body),
     },
 
     {
