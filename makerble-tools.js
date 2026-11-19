@@ -634,7 +634,8 @@ export function buildTools(api) {
         "List Toolkits (Collections in the API): ready-made sets of Surveys, Contact Forms (Bio Forms), Impact " +
         "Frameworks, metrics and tips on Explore Toolkits that an organisation can add to its Projects in one go. " +
         "Returns each Toolkit's id, name, toolkit_number (e.g. \"T14\"), strapline, whether Makerble has approved it, " +
-        "its thumbnail and cover image URLs, whether each image is darkened (darken_thumbnail_image, darken_cover_image) " +
+        "its thumbnail and cover image URLs, the cover image's alt text (cover_image_alt), whether each image is " +
+        "darkened (darken_thumbnail_image, darken_cover_image) " +
         "and its page url. A user with Marketing or Admin system access also sees listed Toolkits awaiting approval. " +
         "Paginated; use last_synced_datetime for incremental sync.",
       inputSchema: {
@@ -652,7 +653,7 @@ export function buildTools(api) {
       name: "makerble_get_toolkit",
       description:
         "Get one Toolkit (Collection) by id: its name, toolkit_number, strapline, description, approval, thumbnail " +
-        "and cover image URLs and darkening settings, and the url of its page. A Toolkit the user can't see returns not found.",
+        "and cover image URLs, the cover image's alt text, darkening settings, and the url of its page. A Toolkit the user can't see returns not found.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number", description: "The Toolkit's id." } },
@@ -664,11 +665,14 @@ export function buildTools(api) {
     {
       name: "makerble_update_toolkit",
       description:
-        "Set a Toolkit's (Collection's) number and image darkening, as the Create/Edit Collection page does. " +
+        "Set a Toolkit's (Collection's) number, cover image alt text and image darkening, as the Create/Edit " +
+        "Collection page does. " +
         "toolkit_number is a short label such as \"T14\", shown first on Site Overview > Manage Toolkits. " +
         "darken_thumbnail_image puts a dark translucent layer over its card's image on Explore Toolkits; " +
         "darken_cover_image does the same for the cover image at the top of the Toolkit's page, which helps white " +
-        "text on a bright photo. Only the fields sent change. Needs a user who can edit the Toolkit (its owner, an " +
+        "text on a bright photo. cover_image_alt is the text a screen reader reads out for the cover image (up to 255 " +
+        "characters): describe what the photo shows, or send an empty string if it is only decoration. " +
+        "Only the fields sent change. Needs a user who can edit the Toolkit (its owner, an " +
         "editor of its organisation, or Marketing or Admin system access). Replacing the images themselves is done " +
         "in Makerble (Manage Toolkits > Replace) or with a multipart PATCH /api/v2/toolkits/{id}/image; this tool " +
         "can't upload files.\n" +
@@ -681,6 +685,11 @@ export function buildTools(api) {
           toolkit_number: { type: ["string", "null"], description: "The Toolkit's number, e.g. T14; null clears it." },
           darken_thumbnail_image: { type: "boolean", description: "Darken the thumbnail on Explore Toolkits." },
           darken_cover_image: { type: "boolean", description: "Darken the cover image on the Toolkit's page." },
+          cover_image_alt: {
+            type: ["string", "null"],
+            maxLength: 255,
+            description: "Alt text for the cover image, read out by screen readers; empty or null marks it as decoration.",
+          },
         },
         required: ["id"],
       },
