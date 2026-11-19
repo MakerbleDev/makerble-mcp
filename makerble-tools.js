@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 315 Makerble MCP tool definitions.
+ * All 317 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6650,10 +6650,9 @@ export function buildTools(api) {
         "organisation_id and no id.\n\n" +
         "Makerble staff (System Access) can change everything: without id it creates a tour (name and " +
         "organisation_id needed; it starts as a draft nobody sees), with id it changes only the fields sent. " +
-        "Stops use these stop_key values: navbar_spaces (Spaces in the top navbar, click), navbar_user (your name " +
-        "in the top navbar), focus_table (Focus), contacts_table, contacts_search, contacts_filters (click), " +
-        "events_table (Manage Events, click an event), event_guests (the event page's guests, click the ⋯ menu). " +
-        "A stop with _destroy: true is removed. Each Team, and the default, can have one live tour.\n\n" +
+        "Each stop's stop_key is the key of one of the stops Makerble knows: call makerble_list_tour_stops to see " +
+        "them all, grouped by feature (Contacts, Events, Checklists, Registers, Reports and more), with the page " +
+        "each opens and its default wording. A stop with _destroy: true is removed. Each Team, and the default, can have one live tour.\n\n" +
         "Workflow: get the tour first, change what the user asked for, and save. Make a tour live only once the " +
         "user agrees, because live tours are offered to people straight away.",
       inputSchema: {
@@ -6728,6 +6727,58 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_list_tour_stops",
+      description:
+        "List the stops Makerble knows (CP-9252): the building blocks of every Welcome Tour and feature tour. Each " +
+        "stop focuses on one part of one Makerble page, such as the Filters button on Contacts (Beneficiaries in " +
+        "the API). Use a stop's key as the stop_key of a stop in makerble_save_feature_tour or makerble_save_tour.\n\n" +
+        "Stops come grouped by feature (group_name: Essentials, Contacts, Events, Checklists, Results Canvas, " +
+        "Snapshot, Reports, Registers, Event Catalogues, Personal Portals, Media Gallery and more; Other for a stop " +
+        "with no group), in the order a tour should visit them. For each stop it returns: key; label (which part of " +
+        "which page); page (the page it opens, e.g. \"Contacts (contacts)\" or \"The first Checklist the person can " +
+        "see\"); action and action_label (whether it waits for Next or for a click); default_title and default_body " +
+        "(Makerble's wording, shown unless the tour's stop has its own); empty (the wording shown instead to someone " +
+        "who can open the page but has nothing on it yet, or null if the stop is skipped for them); and shown_to " +
+        "(who sees it, e.g. \"Only for Organisation Editors\"); and feature_tour_count and welcome_tour_count (how many " +
+        "tours use it). A stop the person can't use is skipped when the tour runs.\n\n" +
+        "Send group_name to list one feature's stops, e.g. Registers. The list changes only when Makerble releases " +
+        "new stops. Makerble staff (System Access) only; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          group_name: { type: "string", description: "Only the stops in this feature group, e.g. Registers" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200; there are fewer than 50 stops, so 200 lists them all at once" },
+        },
+      },
+      handler: (p) => get("/tour_stops", p),
+    },
+
+    {
+      name: "makerble_update_tour_stop",
+      description:
+        "Change Makerble's default title and text for one tour stop (CP-9252), as Site Overview › Tour Stops does. " +
+        "A tour stop is one step of a Welcome Tour or feature tour, focused on one part of one Makerble page. Every " +
+        "tour stop that has no wording of its own shows the new default straight away, in every tour that uses " +
+        "it, so check feature_tour_count and welcome_tour_count from makerble_list_tour_stops and confirm with the " +
+        "user first.\n\n" +
+        "Only the fields sent change. Sending a field empty, or the same as Makerble's original wording, goes back " +
+        "to the original. Returns the stop as makerble_list_tour_stops lists it. Marketing and Admin users " +
+        "(Makerble staff) only; Support users and anyone else get 403. To change the wording in one tour only, set " +
+        "that stop's title or body with makerble_save_feature_tour or makerble_save_tour instead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "The stop's key, from makerble_list_tour_stops, e.g. contacts_table" },
+          default_title: { type: "string", description: "Up to 120 characters; empty goes back to Makerble's original" },
+          default_body: { type: "string", description: "Up to 600 characters; empty goes back to Makerble's original" },
+        },
+        required: ["key"],
+      },
+      handler: ({ key, ...body }) => patch(`/tour_stops/${encodeURIComponent(key)}`, body),
+    },
+
+    {
       name: "makerble_get_feature_tour",
       description:
         "Get one feature tour by id, with its key, name, status, page_key (the Intro that offers it), auto_prompt " +
@@ -6749,13 +6800,16 @@ export function buildTools(api) {
         "Without id it creates one: key (unique, lowercase words joined by underscores, e.g. contacts_filters) and " +
         "name are needed, and it starts as a draft nobody sees. With id it changes only the fields sent. page_key is " +
         "the page whose Intro offers it with \"Take the tour\" (e.g. contacts, events; null for none, so it starts " +
-        "only from an announcement). auto_prompt offers it once on someone's first visit to that page. Stops use " +
-        "the same stop_key values as Welcome Tours: navbar_spaces, navbar_user, focus_table, contacts_table, " +
-        "contacts_search, contacts_filters, events_table, event_guests. Leave a stop's title or body empty to show " +
+        "only from an announcement). auto_prompt offers it once on someone's first visit to that page. Each stop's " +
+        "stop_key is the key of one of the stops Makerble knows, the same stops Welcome Tours use: call " +
+        "makerble_list_tour_stops for them all, grouped by feature, with the page each opens, whether it waits for " +
+        "Next or a click, its default wording and who it is shown to. A tour about one feature usually takes every " +
+        "stop in that feature's group, in the order listed. Leave a stop's title or body empty to show " +
         "Makerble's default. A stop with id changes it, a stop without id adds one, and _destroy: true removes it. " +
         "A tour can't be live without a stop, and only one live tour can use each page_key.\n\n" +
-        "Workflow: list or get the tour first, change what the user asked for, and save. Make a tour live only once " +
-        "the user agrees, because a live tour is offered to people straight away.",
+        "Workflow: list or get the tour first, call makerble_list_tour_stops (with group_name for one feature) to " +
+        "choose its stops, change what the user asked for, and save. Make a tour live only once the user agrees, " +
+        "because a live tour is offered to people straight away.",
       inputSchema: {
         type: "object",
         properties: {
