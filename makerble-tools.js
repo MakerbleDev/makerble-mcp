@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 322 Makerble MCP tool definitions.
+ * All 324 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -996,6 +996,44 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/project_results", p),
+    },
+
+    {
+      name: "makerble_get_distance_travelled",
+      description:
+        "Get distance travelled on Choice trackers (Indicators of Scale type that have a success direction): for each " +
+        "tracker, how many Contacts (Beneficiaries) improved, stayed the same (no_change) or worsened between their " +
+        "first and latest answer. Use this for change-over-time evidence such as '68% of young people reported " +
+        "improved confidence', instead of comparing answers yourself. The figures follow the same rules as the " +
+        "Progress Board's Success Direction Summary and the distance travelled Contact Filter: answers are ordered by " +
+        "their Story's date, one answer per Story, and answers saved with no Contact tagged are left out. " +
+        "\nsuccess_direction_meaning says which answer is the best. Contacts with only one answer in the dates are " +
+        "not judged: they are counted in not_judged, and every percent is of judged_contacts only, so say so when you " +
+        "quote one. contacts_answered is everyone who answered at least once. answers is a before/after table: for " +
+        "each answer, how many judged Contacts gave it first and how many gave it last, suitable for a chart. " +
+        "Trackers with no success direction are left out; when you choose them with tracker_ids, skipped_trackers says " +
+        "which and why. " +
+        "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
+        "(2) Optionally makerble_get_project_results with tracker_types ['choice'] to find Choice tracker IDs. " +
+        "(3) Call this tool with start_date / end_date for the period (omit both for all time). " +
+        "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
+        "Returns page, page_size, page_count, total_count, start_date, end_date, project_ids and data (the trackers).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: { type: "array", items: { type: "number" }, description: "Project IDs. Defaults to every Project you can view" },
+          tracker_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Choice tracker (Indicator) IDs. Defaults to every Choice tracker with a success direction on the Projects",
+          },
+          start_date: { type: "string", description: "First Story date to include, YYYY-MM-DD" },
+          end_date: { type: "string", description: "Last Story date to include, YYYY-MM-DD" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Trackers per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/distance_travelled", p),
     },
 
     // ── Users ─────────────────────────────────────────────────────────────────
