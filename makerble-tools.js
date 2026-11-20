@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 324 Makerble MCP tool definitions.
+ * All 325 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1034,6 +1034,48 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/distance_travelled", p),
+    },
+
+    {
+      name: "makerble_get_sessions_and_attendance",
+      description:
+        "Get delivery figures from Scheduling: how many Events (sessions) Projects ran, the hours delivered and how " +
+        "well they were attended, calculated by Makerble with the same rules as the Event Attendance page. Use this " +
+        "for 'how many sessions did we run?', 'how many hours did we deliver?' and 'what was attendance like?' " +
+        "instead of counting Events or Stories yourself. " +
+        "\nEvents count when their start falls between start_date and end_date. totals has: events_scheduled (every " +
+        "Event in the dates), events_held (those that have already started), hours_delivered (start to end of the " +
+        "Events held), invited_contacts (distinct Contacts (Beneficiaries) added to the Events as guests), " +
+        "attending_contacts (distinct Contacts with attendance recorded on an Event's attendance form, invited or not) " +
+        "and attendance_rates: one entry per Engagement tracker (Change of Participation type) on the Events' " +
+        "attendance forms. Its average_attendance_rate is the average, over the Contacts invited, of each Contact's " +
+        "attendance records divided by the Events they were invited to. It counts records, not distinct Events, so it " +
+        "can be above 100% when an Event has duplicate attendance Stories. It is null when nobody was invited. " +
+        "Deleted Contacts are left out. Makerble does not record cancelled Events. " +
+        "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
+        "(2) Call this tool with start_date / end_date for the period (omit both for all time). " +
+        "(3) group_by 'month' for a trend (every month in the dates, with zero rows for months with no Events), " +
+        "'project' to compare Projects, or 'event_format' to compare Event formats (Event Categories); data then " +
+        "holds one row per group, each with the same figures as totals. " +
+        "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
+        "Returns start_date, end_date, project_ids, group_by, totals, and page, page_size, page_count, total_count " +
+        "and data (the groups; empty without group_by).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: { type: "array", items: { type: "number" }, description: "Project IDs. Defaults to every Project you can view" },
+          start_date: { type: "string", description: "First Event start date to include, YYYY-MM-DD" },
+          end_date: { type: "string", description: "Last Event start date to include, YYYY-MM-DD" },
+          group_by: {
+            type: "string",
+            enum: ["project", "event_format", "month"],
+            description: "Split the figures into groups. Default: totals only",
+          },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Groups per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/sessions_and_attendance", p),
     },
 
     // ── Users ─────────────────────────────────────────────────────────────────
