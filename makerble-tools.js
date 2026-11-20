@@ -1048,9 +1048,10 @@ export function buildTools(api) {
         "Events held), invited_contacts (distinct Contacts (Beneficiaries) added to the Events as guests), " +
         "attending_contacts (distinct Contacts with attendance recorded on an Event's attendance form, invited or not) " +
         "and attendance_rates: one entry per Engagement tracker (Change of Participation type) on the Events' " +
-        "attendance forms. Its average_attendance_rate is the average, over the Contacts invited, of each Contact's " +
-        "attendance records divided by the Events they were invited to. It counts records, not distinct Events, so it " +
-        "can be above 100% when an Event has duplicate attendance Stories. It is null when nobody was invited. " +
+        "attendance forms. Its attendance_rate is attendances (attendance records) divided by invitations (each time a " +
+        "Contact was added to an Event), as the Event Attendance page's 'Total across all guests' row shows it. It " +
+        "counts records, not distinct Events, so it can be above 100% when an Event has duplicate attendance Stories. " +
+        "It is null when nobody was invited. " +
         "Deleted Contacts are left out. Makerble does not record cancelled Events. " +
         "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
         "(2) Call this tool with start_date / end_date for the period (omit both for all time). " +
