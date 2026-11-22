@@ -6615,6 +6615,13 @@ export function buildTools(api) {
             enum: ["new_since_joined", "before_joined"],
             description: "Only this section. Leave out for both, newest first",
           },
+          filter: {
+            type: "string",
+            enum: ["unread", "read"],
+            description:
+              "unread: only the ones the user hasn't opened yet (What's new › Unread), e.g. to tell them what they've " +
+              "missed. read: only the ones they have opened (What's new › Read). Leave out for both",
+          },
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
