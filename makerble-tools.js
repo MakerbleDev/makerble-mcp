@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 339 Makerble MCP tool definitions.
+ * All 341 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6132,7 +6132,8 @@ export function buildTools(api) {
         "Each item returns id, name, is_default (one of the formats every organisation starts with), " +
         "charity_id, events_count (events using it), projects_count (projects it is added to), " +
         "can_delete and delete_blocked_reason (why it can't be deleted yet, or null). Use it to find the " +
-        "id for makerble_delete_event_format and to tell the user beforehand whether deletion will work. " +
+        "id for makerble_get_event_format, makerble_update_event_format and makerble_delete_event_format, and to tell " +
+        "the user beforehand whether deletion will work. " +
         "Paginated: returns { page, page_size, page_count, total_count, data }.",
       inputSchema: {
         type: "object",
@@ -6183,6 +6184,8 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) the Event Format belongs to" },
           name: { type: "string", description: "Name, e.g. 'Therapy session' or 'Drop-in'" },
           guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          survey_kiosk_enabled: { type: "boolean", description: "Self Check-in at its events" },
+          attendance_form_id: { type: "number", description: "The Survey (Story Category) used to record attendance at its events" },
           appointment_type: {
             type: ["string", "null"],
             enum: ["one_to_one", "group", null],
@@ -6213,6 +6216,8 @@ export function buildTools(api) {
           id: { type: "number", description: "The Event Format (event_category) id, from makerble_list_event_formats" },
           name: { type: "string" },
           guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          survey_kiosk_enabled: { type: "boolean", description: "Self Check-in at its events" },
+          attendance_form_id: { type: "number", description: "The Survey (Story Category) used to record attendance at its events" },
           appointment_type: {
             type: ["string", "null"],
             enum: ["one_to_one", "group", null],
@@ -6249,6 +6254,41 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
+    },
+
+    {
+      name: "makerble_add_event_format_to_project",
+      description:
+        "Add an Event Format (Event Category) to a Project, so the Project's events can use it. This also turns events " +
+        "on for the Project. Only an Organisation Admin of the format's organisation can, and only for that " +
+        "organisation's Projects. Adding one that is already added does nothing. Returns { event_category_id, " +
+        "project_id, status } with status added or already_added.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, project_id }) => post(`/event_categories/${id}/projects`, { project_id }),
+    },
+
+    {
+      name: "makerble_remove_event_format_from_project",
+      description:
+        "Take an Event Format (Event Category) off a Project, so new events in the Project can't use it. Events that " +
+        "already use it keep it. Only an Organisation Admin of the format's organisation can. Returns { event_category_id, " +
+        "project_id, status: removed }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, project_id }) => del(`/event_categories/${id}/projects/${project_id}`),
     },
 
     // ── Calendar Feeds ────────────────────────────────────────────────────────
