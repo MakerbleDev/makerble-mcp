@@ -1,9 +1,10 @@
 /**
  * server.js — Makerble MCP HTTP Server
  *
- * Authentication — three sources checked in order of priority:
- *   1. Request headers:  X-Makerble-Email + X-Makerble-Token  (programmatic / Claude Code)
- *   2. Query parameters: ?email=...&token=...                  (personal URL from /connect page)
+ * Authentication — sources checked in order of priority:
+ *   1. Request headers:  X-Makerble-Key, or X-Makerble-Email + X-Makerble-Token  (programmatic / Claude Code)
+ *   2. Query parameters: ?key=mk_live_...   (personal link from Makerble's User Settings, then AI assistants)
+ *                        ?email=...&token=... (personal URL from /connect page)
  *   3. Environment vars: MAKERBLE_EMAIL + MAKERBLE_TOKEN       (single-org fallback / local dev)
  *
  * Environment (which Makerble deployment to talk to) — same resolution pattern:
@@ -15,9 +16,9 @@
  *   GET  /          — health check
  *   GET  /connect   — self-service web UI for non-technical users to get their personal MCP URL
  *   POST /auth      — JSON endpoint called by the /connect page (email+password → token+URL)
- *   POST /mcp       — Streamable HTTP transport (MCP spec 2025-03-26)
- *   GET  /sse       — Legacy SSE stream (MCP spec 2024-11-05)
- *   POST /messages  — Legacy SSE message endpoint
+ *   POST /mcp       — Streamable HTTP transport (MCP spec 2025-03-26), stateless
+ *   GET  /sse       — retired legacy SSE transport; returns 410 Gone pointing to /mcp
+ *   POST /messages  — retired legacy SSE transport; returns 410 Gone pointing to /mcp
  *
  * Environment variables (Vercel dashboard):
  *   MAKERBLE_BASE_URL — optional, overrides the "production" entry in ENV_CONFIG below
@@ -25,12 +26,9 @@
  *   MAKERBLE_TOKEN    — optional org-wide fallback token
  */
 
-import { randomUUID } from "node:crypto";
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { makeApiClient, buildTools, registerTools } from "./makerble-tools.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -69,6 +67,13 @@ const DEFAULT_ENV = "production";
 // Called per-request so each user's credentials are isolated.
 
 function resolveCredentials(req) {
+  // 0. An AI assistant key (CP-9182), from a personal link made in Makerble. Its use is billed to the
+  //    organisation chosen for it.
+  const key = req.headers["x-makerble-key"] || req.query.key;
+  if (key && key.toString().startsWith("mk_live_")) {
+    return { key: key.toString(), source: req.headers["x-makerble-key"] ? "headers" : "query" };
+  }
+
   // 1. Headers (programmatic clients / Claude Code)
   const headerEmail = req.headers["x-makerble-email"];
   const headerToken = req.headers["x-makerble-token"];
@@ -91,6 +96,50 @@ function resolveCredentials(req) {
   return null;
 }
 
+// ─── AI assistant link (CP-9182) ──────────────────────────────────────────────
+// Makes the person's AI assistant link through API v2, billed to the organisation they choose. With one
+// organisation it is chosen for them; with several the /connect page asks which (choose_organisation); with
+// none there is nothing to bill, so they're told. A Makerble environment that doesn't have the endpoint yet
+// answers 404, and the old email and token link is made instead (key: null) until it does.
+
+async function makeAssistantLink(env, email, token, charityId) {
+  const headers = {
+    "X-User-Email": email,
+    "X-User-Token": token,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  const status = await fetch(`${env.baseUrl}/ai_assistant_link`, { headers });
+  if (status.status === 404) return { key: null };
+  if (!status.ok) return failure(502, "Makerble couldn't make your link just now. Please try again in a moment.");
+
+  const { organisations = [] } = await status.json();
+  if (organisations.length === 0) {
+    return failure(403, "You'll be able to connect an AI assistant once you're part of an organisation on Makerble.");
+  }
+
+  const chosen = charityId
+    ? organisations.find((o) => String(o.id) === String(charityId))
+    : organisations.length === 1 && organisations[0];
+  if (!chosen) {
+    return { error: true, status: 409, body: { choose_organisation: true, organisations } };
+  }
+
+  const created = await fetch(`${env.baseUrl}/ai_assistant_link`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ charity_id: chosen.id }),
+  });
+  if (!created.ok) return failure(502, "Makerble couldn't make your link just now. Please try again in a moment.");
+
+  const { url } = await created.json();
+  return { key: new URL(url).searchParams.get("key"), organisationName: chosen.name };
+}
+
+function failure(status, error) {
+  return { error: true, status, body: { error } };
+}
+
 // ─── Environment resolution ───────────────────────────────────────────────────
 // Same header → query → default pattern as credentials. Unknown values fall
 // back to production rather than erroring, so a typo can't silently break a link.
@@ -108,8 +157,8 @@ function resolveEnvironment(req) {
 // scoped to that user/session — two users can be pointed at different deployments
 // at the same time.
 
-function createMcpServer(email, token, baseUrl) {
-  const api    = makeApiClient(baseUrl, email, token);
+function createMcpServer(creds, baseUrl) {
+  const api    = makeApiClient(baseUrl, creds.email, creds.token, creds.key);
   const tools  = buildTools(api);
   const server = new Server(
     { name: "makerble-mcp", version: "1.0.0" },
@@ -131,9 +180,6 @@ app.set("trust proxy", 1);
 
 app.use(express.json());
 
-// Session store: sessionId → { transport, email, token }
-const sessions = {};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Health check
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,8 +192,6 @@ app.get("/", (_req, res) => {
     endpoints: {
       connect:        "GET  /connect  — get your personal MCP URL (no technical knowledge needed)",
       streamableHttp: "POST /mcp      — MCP Streamable HTTP transport",
-      sseStream:      "GET  /sse      — MCP legacy SSE transport",
-      sseMessages:    "POST /messages — MCP legacy SSE messages",
     },
     auth: "Pass credentials via headers (X-Makerble-Email / X-Makerble-Token), " +
           "query params (?email=&token=), or set MAKERBLE_EMAIL / MAKERBLE_TOKEN env vars.",
@@ -253,6 +297,18 @@ app.get("/connect", (_req, res) => {
     }
 
     input:focus { border-color: #0d6efd; background: #fff; }
+
+    select {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid #767676;
+      border-radius: 8px;
+      font-size: 15px;
+      margin-bottom: 6px;
+      background: #fafbfc;
+    }
+
+    .hint { margin: 0 0 18px; font-size: 13px; color: #5d6883; }
 
     button {
       width: 100%;
@@ -524,6 +580,11 @@ app.get("/connect", (_req, res) => {
         Sign in with your Makerble account to get a personal link that lets
         Claude, ChatGPT, and other AI assistants access your Makerble data.
       </p>
+      <p class="subtitle">
+        Already signed in to Makerble? Get your link from
+        <a id="settingsLink" href="https://makerble.com/ai_assistant_link">User Settings, then AI assistants</a>,
+        where you also choose which organisation its use is billed to.
+      </p>
 
       <div class="env-tabs" id="envTabs">
         <div class="env-tab active" data-env="production">Production</div>
@@ -546,6 +607,12 @@ app.get("/connect", (_req, res) => {
         </button>
       </div>
 
+      <div id="organisationBox" hidden>
+        <label for="organisation">Organisation to bill for its use</label>
+        <select id="organisation"></select>
+        <p class="hint">Your assistant's use counts as API usage for this organisation.</p>
+      </div>
+
       <button id="connectBtn" onclick="connect()">Get my personal link</button>
       <div class="error" id="errorBox"></div>
     </div>
@@ -553,6 +620,7 @@ app.get("/connect", (_req, res) => {
     <div class="result" id="resultSection">
       <h2>✓ Your personal MCP link is ready</h2>
       <div class="env-badge" id="envBadge"></div>
+      <p class="hint" id="billedTo" hidden></p>
       <p>Copy the link below and paste it into your AI assistant. That's it — no further setup needed.</p>
 
       <div class="url-box">
@@ -631,6 +699,7 @@ app.get("/connect", (_req, res) => {
   <script>
     let currentUrl = "";
     let selectedEnv = "production";
+    const SETTINGS_URLS = ${JSON.stringify(Object.fromEntries(Object.entries(ENV_CONFIG).map(([key, env]) => [key, env.baseUrl.replace(/\/api\/v2$/, "/ai_assistant_link")])))};
 
     document.getElementById("envTabs").addEventListener("click", (e) => {
       const tab = e.target.closest(".env-tab");
@@ -638,6 +707,8 @@ app.get("/connect", (_req, res) => {
       document.querySelectorAll(".env-tab").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       selectedEnv = tab.dataset.env;
+      document.getElementById("settingsLink").href = SETTINGS_URLS[selectedEnv];
+      document.getElementById("organisationBox").hidden = true;
     });
 
     function togglePassword() {
@@ -675,9 +746,14 @@ app.get("/connect", (_req, res) => {
         const res  = await fetch("/auth", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, env: selectedEnv }),
+          body: JSON.stringify({ email, password, env: selectedEnv, charity_id: chosenOrganisation() }),
         });
         const data = await res.json();
+
+        if (data.choose_organisation) {
+          showOrganisations(data.organisations);
+          return;
+        }
 
         if (!res.ok) {
           showError(data.error || "Sign-in failed. Please check your email and password.");
@@ -691,6 +767,12 @@ app.get("/connect", (_req, res) => {
         badge.textContent = data.env_label + " environment";
         badge.classList.toggle("non-prod", data.env !== "production");
 
+        const billedTo = document.getElementById("billedTo");
+        billedTo.hidden = !data.organisation_name;
+        billedTo.textContent = data.organisation_name
+          ? "Its use counts as API usage for " + data.organisation_name + ". Any earlier personal link has stopped working."
+          : "";
+
         document.getElementById("formSection").style.display  = "none";
         document.getElementById("resultSection").style.display = "block";
 
@@ -700,6 +782,19 @@ app.get("/connect", (_req, res) => {
         btn.disabled = false;
         btn.textContent = "Get my personal link";
       }
+    }
+
+    // Someone in several organisations chooses which one their assistant's use is billed to (CP-9182).
+    function chosenOrganisation() {
+      const box = document.getElementById("organisationBox");
+      return box.hidden ? undefined : document.getElementById("organisation").value;
+    }
+
+    function showOrganisations(organisations) {
+      const select = document.getElementById("organisation");
+      select.replaceChildren(...organisations.map((o) => new Option(o.name, o.id)));
+      document.getElementById("organisationBox").hidden = false;
+      select.focus();
     }
 
     function showError(msg) {
@@ -750,73 +845,12 @@ app.get("/connect", (_req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /debug-signin — TEMPORARY diagnostic route. Calls the sign-in endpoint for a
-// given environment and returns the raw response (status, headers, body) so we
-// can see exactly what Makerble is sending back, instead of just our own
-// generic "invalid email or password" message. Delete this route once done.
-//
-// Usage: GET /debug-signin?env=production&email=...&password=...
-// ─────────────────────────────────────────────────────────────────────────────
-
-app.get("/debug-signin", async (req, res) => {
-  const { env: rawEnv, email, password } = req.query;
-
-  if (!email || !password) {
-    return res.status(400).json({
-      error: "Provide ?email=...&password=...&env=production (env defaults to production).",
-    });
-  }
-
-  const envKey = ENV_CONFIG[rawEnv] ? rawEnv : DEFAULT_ENV;
-  const env    = ENV_CONFIG[envKey];
-  const signInUrl = `${env.baseUrl}/users/sign_in`;
-
-  try {
-    const body = new URLSearchParams({
-      "user[email]":    email,
-      "user[password]": password,
-    });
-
-    const response = await fetch(signInUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-      redirect: "manual", // don't silently follow redirects — we want to see them
-    });
-
-    const rawText = await response.text();
-    let parsedJson = null;
-    try { parsedJson = JSON.parse(rawText); } catch { /* not JSON */ }
-
-    return res.json({
-      tested_url: signInUrl,
-      env: envKey,
-      status: response.status,
-      statusText: response.statusText,
-      redirected: response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400),
-      location_header: response.headers.get("location") || null,
-      content_type: response.headers.get("content-type") || null,
-      body_parsed_as_json: parsedJson,
-      body_raw_snippet: rawText.slice(0, 1000),
-    });
-
-  } catch (err) {
-    return res.status(500).json({
-      tested_url: signInUrl,
-      env: envKey,
-      error: "Fetch itself failed (DNS, TLS, or network error), not a Makerble response.",
-      details: err.message,
-    });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // /auth — called by the /connect page
 // Accepts { email, password }, calls Makerble sign-in, returns personal MCP URL
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.post("/auth", async (req, res) => {
-  const { email, password, env: rawEnv } = req.body || {};
+  const { email, password, env: rawEnv, charity_id: charityId } = req.body || {};
 
   if (!email || !password) {
     return res.status(400).json({ error: "email and password are required." });
@@ -838,13 +872,20 @@ app.post("/auth", async (req, res) => {
 
     const data = await response.json();
 
+    // Someone who hasn't accepted their Makerble invitation has no password of their own yet (CP-9182).
+    if (data.error === "invitation-pending") {
+      return res.status(401).json({
+        error: "You haven't set your Makerble password yet. Open the invitation email we sent you to set one, " +
+               "or use Forgot your password? on the Makerble sign in page to get a new invitation link.",
+      });
+    }
+
     if (!response.ok || !data.authentication_token) {
       return res.status(401).json({
         error: `Invalid email or password for ${env.label}. Please check your details and try again.`,
       });
     }
 
-    // Build the personal MCP URL with credentials + environment as query params.
     // We use the request host so this works on any deployment (Vercel, localhost, custom domain).
     // Protocol: trust the (now-trusted) req.protocol, but fall back to https unless
     // we're clearly on localhost — belt-and-braces against ever generating an
@@ -852,12 +893,21 @@ app.post("/auth", async (req, res) => {
     const isLocalhost = /^(localhost|127\.0\.0\.1)/.test(req.get("host") || "");
     const protocol = isLocalhost ? req.protocol : "https";
     const host   = `${protocol}://${req.get("host")}`;
-    const mcpUrl = `${host}/mcp?email=${encodeURIComponent(email)}` +
-                   `&token=${encodeURIComponent(data.authentication_token)}` +
-                   `&env=${envKey}`;
+
+    // The link carries an AI assistant key whose use counts as API usage for an organisation the person
+    // chooses (CP-9182), the same link as Makerble's User Settings, then AI assistants.
+    const link = await makeAssistantLink(env, email, data.authentication_token, charityId);
+    if (link.error) return res.status(link.status).json(link.body);
+
+    const mcpUrl = link.key
+      ? `${host}/mcp?key=${encodeURIComponent(link.key)}&env=${envKey}`
+      : `${host}/mcp?email=${encodeURIComponent(email)}` +
+        `&token=${encodeURIComponent(data.authentication_token)}` +
+        `&env=${envKey}`;
 
     return res.json({
       mcp_url:  mcpUrl,
+      organisation_name: link.organisationName || null,
       user_id:  data.user_id,
       env:      envKey,
       env_label: env.label,
@@ -890,43 +940,37 @@ app.all("/mcp", async (req, res) => {
     });
   }
 
-  try {
-    const sessionId = req.headers["mcp-session-id"];
-
-    // Existing session — reuse transport (environment was fixed at session start)
-    if (sessionId && sessions[sessionId]) {
-      const session = sessions[sessionId];
-      if (!(session.transport instanceof StreamableHTTPServerTransport)) {
-        return res.status(400).json({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Session uses a different transport protocol" },
-          id: null,
-        });
-      }
-      return await session.transport.handleRequest(req, res, req.body);
-    }
-
-    // New session — must be an initialise request
-    if (!sessionId && req.method === "POST" && isInitializeRequest(req.body)) {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (sid) => {
-          sessions[sid] = { transport, email: creds.email, token: creds.token, env: env.key };
-        },
-      });
-      transport.onclose = () => {
-        const sid = transport.sessionId;
-        if (sid && sessions[sid]) delete sessions[sid];
-      };
-      await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
-      return await transport.handleRequest(req, res, req.body);
-    }
-
-    return res.status(400).json({
+  // Stateless mode. This runs on Vercel, where consecutive requests are served
+  // by different short-lived instances, so an in-memory session map (the old
+  // `sessions[sessionId]` lookup) misses on almost every call after
+  // `initialize` and the client gets "Bad request: no valid session ID".
+  // Credentials and environment arrive on every request (headers or the
+  // personal-link query string), so nothing needs to persist between calls:
+  // each POST gets a fresh Server + transport, and no Mcp-Session-Id is
+  // issued. A stale Mcp-Session-Id cached by a client is ignored rather than
+  // rejected, so old connections recover without a disconnect/reconnect.
+  if (req.method !== "POST") {
+    // No server-initiated SSE stream and no session to DELETE in stateless mode.
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({
       jsonrpc: "2.0",
-      error: { code: -32000, message: "Bad request: no valid session ID" },
+      error: { code: -32000, message: "Method not allowed. Use POST for MCP requests." },
       id: null,
     });
+  }
+
+  try {
+    const server    = createMcpServer(creds, env.baseUrl);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    res.on("close", () => {
+      transport.close().catch(() => {});
+      server.close().catch(() => {});
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
 
   } catch (err) {
     console.error("Error on /mcp:", err);
@@ -941,32 +985,30 @@ app.all("/mcp", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy SSE transport  (MCP 2024-11-05)
+// Legacy SSE transport  (MCP 2024-11-05) — retired
 // ─────────────────────────────────────────────────────────────────────────────
+// The old SSE transport can't work on Vercel: replies travel down the stream
+// opened by GET /sse, so every POST /messages must reach the same instance,
+// and Vercel spreads requests across short-lived instances and caps how long
+// a function may run. The spec has deprecated it in favour of Streamable
+// HTTP, and /connect only hands out /mcp links, so these routes now return
+// 410 Gone with a pointer to /mcp.
 
-app.get("/sse", async (req, res) => {
-  const creds = resolveCredentials(req);
-  const env   = resolveEnvironment(req);
+function sseRetired(_req, res) {
+  res.status(410).json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "The legacy SSE transport (/sse, /messages) has been retired. " +
+               "Use the Streamable HTTP endpoint at /mcp instead — visit /connect " +
+               "to get your personal /mcp link.",
+    },
+    id: null,
+  });
+}
 
-  if (!creds) {
-    return res.status(401).send("Unauthorised: no Makerble credentials. Visit /connect for your personal link.");
-  }
-
-  const transport = new SSEServerTransport("/messages", res);
-  sessions[transport.sessionId] = { transport, email: creds.email, token: creds.token, env: env.key };
-  res.on("close", () => { delete sessions[transport.sessionId]; });
-  await createMcpServer(creds.email, creds.token, env.baseUrl).connect(transport);
-});
-
-app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const session   = sessions[sessionId];
-
-  if (!session || !(session.transport instanceof SSEServerTransport)) {
-    return res.status(400).json({ error: "No SSE session found for sessionId" });
-  }
-  await session.transport.handlePostMessage(req, res, req.body);
-});
+app.all("/sse", sseRetired);
+app.all("/messages", sseRetired);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Start
@@ -976,8 +1018,7 @@ if (process.env.NODE_ENV !== "test") {
   app.listen(PORT, () => {
     console.log(`\nMakerble MCP Server running on port ${PORT}`);
     console.log(`  Connect page:     http://localhost:${PORT}/connect`);
-    console.log(`  Streamable HTTP:  http://localhost:${PORT}/mcp`);
-    console.log(`  Legacy SSE:       http://localhost:${PORT}/sse\n`);
+    console.log(`  Streamable HTTP:  http://localhost:${PORT}/mcp\n`);
   });
 }
 
