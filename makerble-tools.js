@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 325 Makerble MCP tool definitions.
+ * All 327 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1582,8 +1582,9 @@ export function buildTools(api) {
         "project_ids are the projects named in a filter's criteria; it can be added to a project's toolbar only for " +
         "one of those, and only when can_add_shortcut is true. To add one, call makerble_get_saved_filter for its " +
         "views and projects, then makerble_add_saved_filter_shortcut. " +
+        "can_edit is true when you can change or delete it with makerble_save_filter or makerble_delete_saved_filter. " +
         "Returns { page, page_size, page_count, total_count, data: [{ id, name, type, organisation_id, shared, " +
-        "project_ids, can_add_shortcut, created_at, updated_at }] }, by name.",
+        "project_ids, can_add_shortcut, can_edit, who_can_edit, editor_ids, created_at, updated_at }] }, by name.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1603,7 +1604,8 @@ export function buildTools(api) {
         "the views of its app a shortcut can open (e.g. Contacts > Overview, Events > Calendar, or one of your Custom " +
         "tables), each { key, label, group }, and shortcut_projects, the projects you may add it to, each { id, name }. " +
         "shortcut_projects is empty when can_add_shortcut is false. Pass a key and a project id to " +
-        "makerble_add_saved_filter_shortcut.",
+        "makerble_add_saved_filter_shortcut. Also returns criteria, the filter settings in the shape the page's " +
+        "filters send them; read it before changing them with makerble_save_filter.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1634,6 +1636,58 @@ export function buildTools(api) {
         required: ["id", "project_id", "view_key"],
       },
       handler: ({ id, ...body }) => post(`/saved_filters/${id}/shortcuts`, body),
+    },
+
+    {
+      name: "makerble_save_filter",
+      description:
+        "Save a set of filter criteria for Contacts (Beneficiaries), Events or Cases as a Saved Filter (FilterHistory), " +
+        "as the Save the filter button on those pages does, or change one. People can then apply it in one click from " +
+        "the page's Saved Filters list, or add it to a project's toolbar with makerble_add_saved_filter_shortcut. " +
+        "Without id it creates a filter: name and type are required, and organisation_id too if you belong to more " +
+        "than one organisation (charity). With id it changes only the fields you send; type and organisation_id can't " +
+        "change, and you need can_edit (makerble_list_saved_filters). " +
+        "criteria are the page's filter settings, e.g. for cases { project_ids: [\"42\"], owner_ids: [\"7\"], " +
+        "date_created_from: \"01/01/2026 - 31/03/2026\", close_cases: false }. Copy the shape from an existing " +
+        "filter's criteria (makerble_get_saved_filter); sending criteria replaces them all. Items later deleted are " +
+        "ignored when the filter is applied. " +
+        "By default only you can use it (shared false) and only you can edit it. Everyone in editor_ids must be in the " +
+        "filter's organisation. Returns the Saved Filter as makerble_get_saved_filter does; if something is wrong, the " +
+        "error lists every problem.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "A Saved Filter to change. Leave out to create one." },
+          name: { type: "string", description: "What people see in the Saved Filters list." },
+          type: { type: "string", enum: ["contacts", "events", "cases"], description: "What it filters. Creating only." },
+          organisation_id: { type: "number", description: "The organisation (charity) it belongs to. Creating only; needed if you are in several." },
+          criteria: { type: "object", description: "The filter settings, in the shape the page's filters send them." },
+          shared: { type: "boolean", description: "true to let colleagues use it; false for only you." },
+          who_can_edit: {
+            type: "string",
+            enum: ["individuals", "organisation_admins"],
+            description: "individuals: the people in editor_ids. organisation_admins: the organisation's Organisation Admins. The owner can always edit it.",
+          },
+          editor_ids: { type: "array", items: { type: "number" }, description: "User ids who can edit it, when who_can_edit is individuals. Defaults to you." },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/saved_filters/${id}`, body) : post("/saved_filters", body)),
+    },
+
+    {
+      name: "makerble_delete_saved_filter",
+      description:
+        "Delete a Saved Filter (FilterHistory) for Contacts, Events or Cases, and any shortcuts to it on project " +
+        "toolbars, as Delete in its edit popup does. You need can_edit (makerble_list_saved_filters). Returns nothing " +
+        "on success.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Saved Filter's id, from makerble_list_saved_filters." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/saved_filters/${id}`),
     },
 
     {
