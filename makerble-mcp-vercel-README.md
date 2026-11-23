@@ -1,8 +1,8 @@
 # Makerble MCP Server — Vercel Deployment
 
-Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **146 tools** covering the full Makerble API.
+Connects Claude, ChatGPT, and other AI assistants directly to Makerble. Exposes **349 tools** covering the full Makerble API.
 
-Non-technical users get their personal link from **`/connect`** — no curl, no config files, no tokens to hunt down.
+Non-technical users get their personal link from Makerble itself (**User Settings, then AI assistants**), where they choose which organisation its use is billed to, or from **`/connect`** — no curl, no config files, no tokens to hunt down.
 
 ---
 
@@ -11,7 +11,7 @@ Non-technical users get their personal link from **`/connect`** — no curl, no 
 | File | Purpose |
 |---|---|
 | `server.js` | Express HTTP server — routing, auth, /connect page |
-| `makerble-tools.js` | All 146 Makerble API tool definitions |
+| `makerble-tools.js` | All 349 Makerble API tool definitions |
 | `package.json` | Dependencies |
 | `vercel.json` | Vercel routing config |
 | `.gitignore` | Keeps secrets and node_modules out of git |
@@ -98,12 +98,13 @@ Currently requires a developer. Share the `/connect` page link with the IT team.
 
 ## Authentication — how it works
 
-Three credential sources are checked in order:
+Credential sources are checked in order:
 
 | Priority | Source | Used by |
 |---|---|---|
-| 1 | `X-Makerble-Email` + `X-Makerble-Token` headers | Claude Code, programmatic clients |
-| 2 | `?email=...&token=...` query params | Personal URLs from `/connect` page |
+| 1 | `X-Makerble-Key`, or `X-Makerble-Email` + `X-Makerble-Token` headers | Claude Code, programmatic clients |
+| 2 | `?key=mk_live_...` query param | Personal links from Makerble's User Settings, then AI assistants (CP-9182). Sent to the API as `Authorization: Bearer`, and its use counts as API usage for the organisation chosen for it |
+| 2 | `?email=...&token=...` query params | Older personal URLs from `/connect`. `/connect` now makes `?key=` links, billed to an organisation the person chooses, and makes these only for a Makerble environment that doesn't yet have `/api/v2/ai_assistant_link` |
 | 3 | `MAKERBLE_EMAIL` + `MAKERBLE_TOKEN` env vars | Single-org fallback / local dev |
 
 Credentials are never stored on the server. The token lives in the user's personal URL only.
