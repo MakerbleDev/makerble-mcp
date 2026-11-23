@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 138 Makerble MCP tool definitions.
+ * All 341 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -13,9 +13,12 @@ import {
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 
-export function makeApiClient(baseUrl, email, token) {
+// apiKey is an AI assistant key (mk_live_…) from a personal link made in Makerble's User Settings, then AI
+// assistants (CP-9182). It is sent as Authorization: Bearer instead of the email and token, and its use counts as
+// API usage for the organisation chosen for it.
+export function makeApiClient(baseUrl, email, token, apiKey = null) {
   async function request(method, path, body = null, params = null) {
-    if (!email || !token) {
+    if (!apiKey && (!email || !token)) {
       throw new McpError(
         ErrorCode.InvalidRequest,
         "MAKERBLE_EMAIL and MAKERBLE_TOKEN environment variables must be set."
@@ -43,8 +46,7 @@ export function makeApiClient(baseUrl, email, token) {
     }
 
     const headers = {
-      "X-User-Email": email,
-      "X-User-Token": token,
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : { "X-User-Email": email, "X-User-Token": token }),
       // Lets Makerble attribute Access Log views to the MCP server rather than the API.
       "X-Makerble-Client": "makerble-mcp",
       "Content-Type": "application/json",
@@ -61,7 +63,13 @@ export function makeApiClient(baseUrl, email, token) {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!res.ok) {
-      const msg = data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
+      // A 409 from a create endpoint lists the items to reuse instead (CP-8888);
+      // a 422 for a duplicate names the one to reuse in existing_id (CP-9004).
+      const msg = data?.duplicates
+        ? { error: data.error, duplicates: data.duplicates }
+        : data?.existing_id
+          ? { errors: data.errors, existing_id: data.existing_id }
+          : data?.error || data?.errors || `HTTP ${res.status} ${res.statusText}`;
       throw new McpError(ErrorCode.InternalError, `Makerble API error: ${JSON.stringify(msg)}`);
     }
     return data;
@@ -71,7 +79,8 @@ export function makeApiClient(baseUrl, email, token) {
     get: (path, params) => request("GET", path, null, params),
     post: (path, body) => request("POST", path, body),
     patch: (path, body) => request("PATCH", path, body),
-    del: (path) => request("DELETE", path),
+    put: (path, body) => request("PUT", path, body),
+    del: (path, body) => request("DELETE", path, body),
     postBearer: async (path, body, bearerToken) => {
       const url = `${baseUrl}${path}`;
       const res = await fetch(url, {
@@ -117,9 +126,106 @@ const WEBHOOK_EVENTS = [
   "import.completed",
 ];
 
+// A Calendar Feed's filters, as the Event Filters the Calendar Feeds page saves (Event.filter_events).
+function feedFilters({ project_ids, event_category_ids, user_ids, beneficiary_ids }) {
+  const filters = { project_ids, event_category_ids, user_ids, beneficiary_ids };
+  return Object.fromEntries(Object.entries(filters).filter(([, v]) => Array.isArray(v) && v.length));
+}
+
 export function buildTools(api) {
-  const { get, post, patch, del, postBearer, signIn } = api;
+  const { get, post, patch, put, del, postBearer, signIn } = api;
   const query = (p) => { const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined)); return qs.toString() ? `?${qs}` : ""; };
+  // One question of a Survey, as makerble_create_survey and makerble_update_survey take it.
+  const surveyQuestion = {
+    type: "object",
+    properties: {
+      metric_id: { type: "number", description: "Reuse this Metric (Indicator)" },
+      field_id: { type: "number", description: "Reuse this Field (Custom Field)" },
+      activity_tracker_id: { type: "number", description: "Reuse this Activity tracker (Change)" },
+      new_metric: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          metric_type: { type: "string", enum: ["scale", "value", "binary"] },
+          default_question: { type: "string", description: "The question as people see it, e.g. 'How confident do you feel?'" },
+          list_id: { type: "number", description: "Scale only: an existing List (Ratio Set) of answers" },
+          list: {
+            type: "object",
+            description: "Scale only: a new List instead of list_id",
+            properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+            required: ["name", "choices"],
+          },
+          outcome_id: { type: "number", description: "The Outcome (from makerble_search_library, or makerble_create_outcome) that this Metric measures" },
+          unit_id: { type: "number", description: "Value only: the Unit, e.g. hours (optional)" },
+          success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
+          description: { type: "string" },
+          points: {
+            type: "object",
+            description: "Scale only, for a scored Survey: whole-number points for every answer on its List, e.g. {\"Never\": 0, \"Often\": 2}",
+            additionalProperties: { type: "integer" },
+          },
+        },
+        required: ["name", "metric_type", "default_question", "outcome_id"],
+      },
+      new_field: {
+        type: "object",
+        properties: {
+          field_name: { type: "string" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone"] },
+          section_text: { type: "string", description: "section_title only: the text under the heading" },
+          private: { type: "boolean" },
+        },
+        required: ["field_name", "field_data_type"],
+      },
+      is_mandatory: { type: "boolean" },
+      choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Scale Metrics: how many answers may be picked (default single_choice)" },
+      choice_value: { type: "number", description: "With limited_choice: how many" },
+      external_description: { type: "string", description: "Help text shown to the person answering" },
+      by_interval: {
+        type: "array",
+        description: "Needs intervals: how this question is reworded or hidden in them (Adjust When)",
+        items: {
+          type: "object",
+          properties: {
+            interval: { type: "string", description: "One of intervals; leave out for every Interval" },
+            respondent: {
+              type: "string",
+              enum: ["participant", "colleague", "observer", "public"],
+              description: "Who answers: participant (the Contact), colleague, observer (a 360° observer) or public (anyone with the universal link); leave out for everyone",
+            },
+            question: { type: "string", description: "The wording there, e.g. 'How confident do you feel now, after the course?'" },
+            hide: { type: "boolean", description: "true to hide the question there instead of rewording it" },
+          },
+        },
+      },
+      only_in_intervals: {
+        type: "array",
+        items: { type: "string" },
+        description: "Needs intervals: show this question only in these, e.g. ['Endpoint']",
+      },
+      display_if: {
+        type: "object",
+        description: "Display If: show this question only when an earlier scale question is answered with one of answers",
+        properties: {
+          question: { type: "number", description: "The earlier question's number, e.g. 2" },
+          answers: { type: "array", items: { type: "string" }, description: "Answers from its List, e.g. ['No']" },
+        },
+        required: ["question", "answers"],
+      },
+      skip_to: {
+        type: "array",
+        description: "Skip To, on a scale question: for these answers, jump forward to a later question that isn't mandatory",
+        items: {
+          type: "object",
+          properties: {
+            answers: { type: "array", items: { type: "string" }, description: "Answers from this question's List, e.g. ['No']" },
+            question: { type: "number", description: "The later question's number to jump to" },
+          },
+          required: ["answers", "question"],
+        },
+      },
+    },
+  };
   const metricDestinationPath = (metricType, metricId, destination, targetId, context) =>
     `/metrics/${metricType}/${metricId}/destinations/${destination}${targetId ? `/${targetId}` : ""}${query(context)}`;
 
@@ -145,13 +251,48 @@ export function buildTools(api) {
     {
       name: "makerble_get_organisation",
       description:
-        "Get a single Organisation (Charity) by ID. Organisations own Projects.",
+        "Get a single Organisation (Charity) by ID. Organisations own Projects. Returns {id, name, " +
+        "default_project_story_privacy (the Story Privacy Level each new project starts with), created_at, updated_at}.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
         required: ["id"],
       },
       handler: ({ id }) => get(`/charities/${id}`),
+    },
+
+    {
+      name: "makerble_update_organisation",
+      description:
+        "Change an Organisation's (Charity's) settings from Charity Preferences: the " +
+        "\"Default story level privacy setting on each project\": the Story Privacy Level each NEW project " +
+        "in the Organisation starts with (who can see the Survey Responses / Stories posted in it). " +
+        "Existing projects keep their own level; to change one project's level use makerble_update_project_settings. " +
+        "Levels: only_project_colleagues (Project colleagues only), only_charity_colleagues (Organisation colleagues only), " +
+        "charity_plus_network (Network & organisation colleagues only), everyone (Everyone). " +
+        "Use makerble_get_organisation to see the current level (default_project_story_privacy). " +
+        "Only an Organisation Admin (Charity Editor) can do this; anyone else gets forbidden. " +
+        "Also participant_pass_sign_in_enabled ('Enable contacts to sign in using a participant pass'): when false, " +
+        "a Contact's profile hides the Participating As tab unless the Contact is already linked to a user. " +
+        "Send only the settings to change. " +
+        "Returns the Organisation {id, name, default_project_story_privacy, participant_pass_sign_in_enabled, created_at, updated_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Organisation (Charity) ID." },
+          default_project_story_privacy: {
+            type: "string",
+            enum: ["only_project_colleagues", "only_charity_colleagues", "charity_plus_network", "everyone"],
+            description: "The Story Privacy Level each new project starts with.",
+          },
+          participant_pass_sign_in_enabled: {
+            type: "boolean",
+            description: "Enable contacts to sign in using a participant pass.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
     },
 
     // ── Projects ──────────────────────────────────────────────────────────────
@@ -173,13 +314,618 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_project",
-      description: "Get a single Project by ID.",
+      description:
+        "Get a single Project by ID. beneficiary_states lists the Contact statuses (Beneficiary States, e.g. " +
+        "Enrolled, Waiting List) switched on for the Project: use their ids as beneficiary_state_id in " +
+        "makerble_add_contacts_to_project.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
         required: ["id"],
       },
       handler: ({ id }) => get(`/projects/${id}`),
+    },
+
+    {
+      name: "makerble_get_project_form",
+      description:
+        "Get what the Create Project form offers in an organisation, before creating or editing a Project with " +
+        "makerble_create_project or makerble_update_project. Returns the Project Types (each with its solutions) and " +
+        "the organisation's Project Categories. Each category lists its form fields in order: standard fields with " +
+        "the parameter that sets them (e.g. project[help_statement] for Short Description, project[reporter_ids] for " +
+        "Changemakers), custom questions with the field_id their answer goes under in custom_fields, and dropdowns " +
+        "with the field_id their choices go under in sub_ratios (use makerble_list_answer_choices for the choices). " +
+        "is_mandatory marks the fields the form requires. Get the organisation id from makerble_list_charities.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) to create the Project in." },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/projects/form", { charity_id }),
+    },
+
+    {
+      name: "makerble_create_project",
+      description:
+        "Create a Project in an organisation, as the Create Project page does, with the same permissions: the user must " +
+        "be allowed to create projects there (an Organisation Admin, or a colleague with project creation switched on). " +
+        "The user becomes the Project's Manager unless editor_ids is given. Any Project Automation the new Project " +
+        "matches is applied. Returns the Project.\n" +
+        "Workflow: (1) Look before you make: call makerble_list_projects and check the organisation doesn't already " +
+        "have this Project; suggest using or editing an existing one instead of a near-duplicate. " +
+        "(2) makerble_get_project_form → project_type_id, project_category_id and the category's fields. " +
+        "(3) makerble_create_project with the fields the category's form asks for. " +
+        "(4) Set its Project Preferences and targets separately once those tools exist.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation (Charity) to create the Project in." },
+          name: { type: "string", description: "The Project's name." },
+          project_type_id: { type: "number", description: "From makerble_get_project_form. Required." },
+          solution_group_id: { type: "number", description: "One of the chosen Project Type's solutions, from makerble_get_project_form." },
+          project_category_id: { type: "number", description: "One of the organisation's Project Categories. Defaults to its default category." },
+          help_statement: { type: "string", description: "Short Description." },
+          help_description: { type: "string", description: "Long Description." },
+          location: { type: "string" },
+          editor_ids: { type: "array", items: { type: "number" }, description: "Managers (Project Editors) by user id." },
+          reporter_ids: { type: "array", items: { type: "number" }, description: "Changemakers (Project Reporters) by user id." },
+          observer_ids: { type: "array", items: { type: "number" }, description: "Analysts (Project Observers) by user id." },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Surveys (Story Categories) to use in the Project, on top of the Project Category's own." },
+          privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+            description: "Who can see the Project. only_certain_individual uses individual_list.",
+          },
+          individual_list: { type: "array", items: { type: "number" }, description: "User ids the Project is shared with, for only_certain_individual." },
+          custom_fields: { type: "object", description: "Answers to the category's custom questions: { \"<field_id>\": value }." },
+          sub_ratios: { type: "object", description: "Choices in the category's dropdowns: { \"<field_id>\": [choice ids] }." },
+        },
+        required: ["charity_id", "name", "project_type_id"],
+      },
+      handler: ({ charity_id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
+        post("/projects", { charity_id, project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_update_project",
+      description:
+        "Edit a Project's details, as the Edit Project page does, with the same permissions (a Manager of the Project or " +
+        "an Organisation Admin; a Changemaker can't). Only what you send changes. A colleague list you send replaces " +
+        "that role's colleagues; one you leave out is kept. story_category_ids adds Surveys (Story Categories) to the " +
+        "Project and never removes or stops any. Returns the Project.\n" +
+        "Before changing anything, show the user the Project's current values (makerble_get_project) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          name: { type: "string" },
+          project_type_id: { type: "number" },
+          solution_group_id: { type: "number" },
+          project_category_id: { type: "number", description: "One of the organisation's Project Categories." },
+          help_statement: { type: "string", description: "Short Description." },
+          help_description: { type: "string", description: "Long Description." },
+          location: { type: "string" },
+          editor_ids: { type: "array", items: { type: "number" }, description: "Replaces the Managers (Project Editors)." },
+          reporter_ids: { type: "array", items: { type: "number" }, description: "Replaces the Changemakers (Project Reporters)." },
+          observer_ids: { type: "array", items: { type: "number" }, description: "Replaces the Analysts (Project Observers)." },
+          story_category_ids: { type: "array", items: { type: "number" }, description: "Surveys to add to the Project." },
+          privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+          },
+          individual_list: { type: "array", items: { type: "number" } },
+          custom_fields: { type: "object", description: "Answers to the category's custom questions: { \"<field_id>\": value }." },
+          sub_ratios: { type: "object", description: "Choices in the category's dropdowns: { \"<field_id>\": [choice ids] }." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, story_category_ids, privacy, individual_list, custom_fields, sub_ratios, ...project }) =>
+        patch(`/projects/${id}`, { project, story_category_ids, privacy, individual_list, custom_fields, sub_ratios }),
+    },
+
+    {
+      name: "makerble_set_projects_status",
+      description:
+        "Close or reopen several Projects at once, as Close projects / Reopen projects do for the projects ticked in the " +
+        "Rows view of the My Projects page. A closed Project can't get new updates (Stories) or Contacts and its updates " +
+        "can't be edited until it is reopened; closed Projects are listed on the organisation's Closed Projects page. Each " +
+        "Project is closed or reopened as from its own settings menu, so its team is told.\n" +
+        "Closing a Project also archives the Progress Boards generated for it (\"<Survey> on <Project>\"), and reopening it " +
+        "reopens those boards; a board someone archived by hand stays archived.\n" +
+        "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
+        "If any listed Project is one the user may not change, nothing changes and the reply names those Projects.\n" +
+        "close only changes listed Projects that are open, and reopen only those that are closed.\n" +
+        "Closing a Project that an active Signup Page uses would break that Signup Page, so close needs signup_pages: " +
+        "\"deactivate\" deactivates those Signup Pages and then closes the Project; \"skip\" leaves those Projects open and " +
+        "closes the rest. Ask the user which they want.\n" +
+        "Workflow: find the Projects with makerble_list_projects (is_closed shows each one's status), show the user which " +
+        "Projects you will close or reopen, and only go ahead when they agree. The change runs in the background: this " +
+        "returns straight away and the user is emailed when it has finished. Check the result afterwards with " +
+        "makerble_get_project (is_closed).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status_action: { type: "string", enum: ["close", "reopen"], description: "Whether to close or reopen the Projects." },
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 200,
+            description: "The Projects to change, at most 200.",
+          },
+          signup_pages: {
+            type: "string",
+            enum: ["deactivate", "skip"],
+            description: "Required with close. What to do with Projects that an active Signup Page uses.",
+          },
+        },
+        required: ["status_action", "project_ids"],
+      },
+      handler: (body) => post("/projects/bulk_status_change", body),
+    },
+
+    {
+      name: "makerble_delete_projects",
+      description:
+        "Permanently delete several closed Projects at once, as Delete projects does for the projects ticked in the Rows " +
+        "view of the My Projects page. Deletion is permanent and cannot be undone. Each Project is deleted as with the " +
+        "Delete project button on the organisation's Closed Projects page: its team is emailed, it is listed under Deleted " +
+        "Projects there, and its automations are turned off.\n" +
+        "Only closed Projects are deleted: open Projects in the list are kept and returned in kept_project_ids. To delete " +
+        "an open Project, close it first with makerble_set_projects_status. A list with no closed Project is refused.\n" +
+        "Who may do it: an Organisation Admin of the Project's organisation, or a Manager (Project Editor) of the Project. " +
+        "If any listed Project is one the user may not delete, nothing is deleted and the reply names those Projects.\n" +
+        "Workflow: find the Projects with makerble_list_projects (is_closed shows which are closed), show the user the " +
+        "exact Projects that will be deleted, warn that it cannot be undone, and only go ahead when they confirm. The " +
+        "deletion runs in the background: this returns straight away with project_ids (to be deleted) and kept_project_ids.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 200,
+            description: "The Projects to delete, at most 200. Only the closed ones are deleted.",
+          },
+        },
+        required: ["project_ids"],
+      },
+      handler: (body) => post("/projects/bulk_deletion", body),
+    },
+
+    {
+      name: "makerble_get_project_settings",
+      description:
+        "Get a Project's Project Preferences, as its Project Preferences page shows them: which bio forms (Contact " +
+        "Forms) create and edit Contacts (contact_form_ids, edit_contact_form_ids), which Contact statuses are " +
+        "switched on (beneficiary_state_ids: Waiting List, Enrolled, Alumni, Declined) with each status's form and " +
+        "baseline Surveys, editorial control (which bio forms each role may edit), Events (is_creation_of_events_required, " +
+        "event_creator_ids, event_category_ids for Event Formats, display_register_for_event_series), Cases (is_creation_of_new_cases_enabled, " +
+        "case_creator_ids, custom_field_category_id for the Case Form), Timesheets, the default privacy of new Stories, " +
+        "and the Mailchimp list. Requires a Project Manager or Organisation Admin. Use it before " +
+        "makerble_update_project_settings to show the user the current values.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Project's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/projects/${id}/preferences`),
+    },
+
+    {
+      name: "makerble_update_project_settings",
+      description:
+        "Change a Project's Project Preferences, as its Project Preferences page does, with the same permissions " +
+        "(a Project Manager or Organisation Admin; a Changemaker can't). Send only the settings to change, using the " +
+        "names makerble_get_project_settings returns; a list you send replaces that list ([] empties it). Forms, " +
+        "Case Forms, Event Formats and Surveys must be the Project's organisation's. Examples: switch on the " +
+        "Waiting List and Enrolled statuses with beneficiary_state_ids; choose a bio form with contact_form_ids; " +
+        "switch on Events with is_creation_of_events_required: true. Returns the Project Preferences.\n" +
+        "Before changing anything, show the user the current values (makerble_get_project_settings) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          beneficiary_state_ids: { type: "array", items: { type: "number" }, description: "Contact statuses switched on." },
+          contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms used to create Contacts." },
+          edit_contact_form_ids: { type: "array", items: { type: "number" }, description: "Bio forms that can be added to a Contact's bio." },
+          is_creation_of_events_required: { type: "boolean", description: "Enable Events." },
+          display_register_for_event_series: {
+            type: "boolean",
+            description: "Display a register for each event series (a Register page per recurring Event). Switching it on also " +
+              "switches on edit_story_on_event_attendance; switching Events on switches it on.",
+          },
+          event_creator_ids: { type: "array", items: { type: "number" }, description: "Users who may create Events besides Project Managers." },
+          event_category_ids: { type: "array", items: { type: "number" }, description: "The Project's Event Formats." },
+          is_creation_of_new_cases_enabled: { type: "boolean", description: "Enable Cases." },
+          case_creator_ids: { type: "array", items: { type: "number" }, description: "Changemakers and Analysts who may create Cases." },
+          custom_field_category_id: { type: ["number", "null"], description: "The Case Form for the Project's Cases." },
+          is_creation_of_timesheets_required: { type: "boolean", description: "Enable Timesheets." },
+          default_story_privacy: {
+            type: "string",
+            enum: ["only_charity_colleagues", "only_project_colleagues", "only_certain_individual", "charity_plus_network", "everyone"],
+            description: "Who sees a new Story by default. only_certain_individual uses individual_list.",
+          },
+          individual_list: { type: "array", items: { type: "number" } },
+          default_results_template_id: { type: ["number", "null"], description: "The Impact Framework the Results Canvas shows by default; null for All metrics." },
+        },
+        required: ["id"],
+        additionalProperties: true,
+      },
+      handler: ({ id, ...body }) => patch(`/projects/${id}/preferences`, body),
+    },
+
+    {
+      name: "makerble_get_project_targets",
+      description:
+        "Get a Project's targets, as its Set Targets page shows them: year_start_date (the day its target year " +
+        "starts), the one-off target on each Activity (Change) and Outcome (Indicator) metric on the Project (metrics), " +
+        "on each Cohort, Workflow and Formula Tracker and filtered version (trackers), and its deadline targets " +
+        "(deadlines). Requires rights to edit the Project's targets. Use before makerble_set_project_targets.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Project's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/projects/${id}/targets`),
+    },
+
+    {
+      name: "makerble_set_project_targets",
+      description:
+        "Set a Project's targets, as its Set Targets page does. Only metrics and trackers already on the Project (see " +
+        "makerble_get_project_targets) can be given a target; to add a metric use makerble_add_metric_to, and to add a " +
+        "tracker makerble_add_cohort_tracker_to_project, makerble_add_workflow_tracker_to_project or " +
+        "makerble_add_formula_tracker_to_project. Anything not on " +
+        "the Project is refused and nothing is saved. " +
+        "deadlines, when sent, replaces all the Project's deadline targets; send [] to clear them. Returns the targets.\n" +
+        "Before changing anything, show the user the current targets and what you will change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Project's id." },
+          year_start_date: { type: "string", description: "The day the Project's target year starts, YYYY-MM-DD." },
+          metrics: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string", enum: ["Change", "Indicator"] },
+                metric_id: { type: "number" },
+                target: { type: "number", description: "A whole number, 0 or more." },
+              },
+              required: ["metric_type", "metric_id", "target"],
+            },
+          },
+          trackers: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tracker_type: { type: "string", enum: ["CohortTracker", "WorkflowTracker", "FormulaTracker", "FilteredMetric"] },
+                tracker_id: { type: "number" },
+                target: { type: "number" },
+              },
+              required: ["tracker_type", "tracker_id", "target"],
+            },
+          },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets: what to reach by a date. Replaces them all.",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string" },
+                metric_id: { type: "number" },
+                date: { type: "string", description: "YYYY-MM-DD." },
+                number: { type: "number" },
+              },
+              required: ["metric_type", "metric_id", "date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/projects/${id}/targets`, body),
+    },
+
+    {
+      name: "makerble_list_toolkits",
+      description:
+        "List Toolkits (Collections in the API): ready-made sets of Surveys, Contact Forms (Bio Forms), Impact " +
+        "Frameworks, metrics and tips on Explore Toolkits that an organisation can add to its Projects in one go. " +
+        "Returns each Toolkit's id, name, toolkit_number (e.g. \"T14\"), strapline, whether Makerble has approved it, " +
+        "its thumbnail and cover image URLs, the cover image's alt text (cover_image_alt), whether each image is " +
+        "darkened (darken_thumbnail_image, darken_cover_image) " +
+        "and its page url. A user with Marketing or Admin system access also sees listed Toolkits awaiting approval. " +
+        "Paginated; use last_synced_datetime for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Toolkits changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/toolkits", p),
+    },
+
+    {
+      name: "makerble_get_toolkit",
+      description:
+        "Get one Toolkit (Collection) by id: its name, toolkit_number, strapline, description, approval, thumbnail " +
+        "and cover image URLs, the cover image's alt text, darkening settings, and the url of its page. A Toolkit the user can't see returns not found.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Toolkit's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/toolkits/${id}`),
+    },
+
+    {
+      name: "makerble_update_toolkit",
+      description:
+        "Set a Toolkit's (Collection's) number, cover image alt text and image darkening, as the Create/Edit " +
+        "Collection page does. " +
+        "toolkit_number is a short label such as \"T14\", shown first on Site Overview > Manage Toolkits. " +
+        "darken_thumbnail_image puts a dark translucent layer over its card's image on Explore Toolkits; " +
+        "darken_cover_image does the same for the cover image at the top of the Toolkit's page, which helps white " +
+        "text on a bright photo. cover_image_alt is the text a screen reader reads out for the cover image (up to 255 " +
+        "characters): describe what the photo shows, or send an empty string if it is only decoration. " +
+        "Only the fields sent change. Needs a user who can edit the Toolkit (its owner, an " +
+        "editor of its organisation, or Marketing or Admin system access). Replacing the images themselves is done " +
+        "in Makerble (Manage Toolkits > Replace) or with a multipart PATCH /api/v2/toolkits/{id}/image; this tool " +
+        "can't upload files.\n" +
+        "Before changing anything, show the user the Toolkit's current values (makerble_get_toolkit) and what you " +
+        "will change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Toolkit's id." },
+          toolkit_number: { type: ["string", "null"], description: "The Toolkit's number, e.g. T14; null clears it." },
+          darken_thumbnail_image: { type: "boolean", description: "Darken the thumbnail on Explore Toolkits." },
+          darken_cover_image: { type: "boolean", description: "Darken the cover image on the Toolkit's page." },
+          cover_image_alt: {
+            type: ["string", "null"],
+            maxLength: 255,
+            description: "Alt text for the cover image, read out by screen readers; empty or null marks it as decoration.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/toolkits/${id}`, body),
+    },
+
+    {
+      name: "makerble_list_albums",
+      description:
+        "List the Albums (Portfolios; Bundles in the API) the user can work with: those they made, manage or are an " +
+        "Album Analyst of, and their organisations' Albums. An Album groups Projects so their results can be seen " +
+        "together. Returns each Album's id, name, owner (owner_type Charity for an organisation's Album, User for a " +
+        "personal one), managers, Album Analysts, project_ids and target type. Paginated; use last_synced_datetime " +
+        "for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Albums changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/albums", p),
+    },
+
+    {
+      name: "makerble_get_album",
+      description:
+        "Get one Album (Portfolio) by id: its settings, managers (manager_ids), Album Analysts (analyst_ids), " +
+        "project_ids, and pending_project_ids (Projects from another organisation invited to join, until their " +
+        "managers accept). An Album the user can't see returns not found.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Album's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/albums/${id}`),
+    },
+
+    {
+      name: "makerble_create_album",
+      description:
+        "Make an Album (Portfolio), as the Make an Album form does. Its owner is an organisation the user is an " +
+        "editor of (owner_type Charity with owner_id) or the user themself (owner_type User, a personal Album). The " +
+        "user becomes its manager. Projects in project_ids join straight away when they belong to the organisation " +
+        "or the user; another organisation's Project is invited instead and shows in pending_project_ids. Returns the Album.\n" +
+        "Workflow: (1) Look before you make: call makerble_list_albums and check the organisation doesn't already " +
+        "have this Album; suggest using or editing an existing one instead of a near-duplicate. " +
+        "(2) makerble_list_projects for the Project ids. (3) makerble_create_album. " +
+        "(4) makerble_update_album for its description, managers and Album Analysts, and makerble_set_album_targets for its targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The Album's name." },
+          owner_type: { type: "string", enum: ["Charity", "User"], description: "Charity for an organisation's Album, User for a personal one." },
+          owner_id: { type: "number", description: "The organisation (Charity) id when owner_type is Charity." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to put in the Album." },
+        },
+        required: ["name", "owner_type"],
+      },
+      handler: (body) => post("/albums", body),
+    },
+
+    {
+      name: "makerble_update_album",
+      description:
+        "Change an Album's (Portfolio's) settings, as its Edit Album and Album Edit pages do. Only the Album's managers " +
+        "may. Only what you send changes. manager_ids and analyst_ids replace the Album's managers and Album Analysts " +
+        "(the Album's maker always stays a manager). To add or remove Projects use makerble_add_projects_to_album and " +
+        "makerble_remove_projects_from_album. Returns the Album.\n" +
+        "Before changing anything, show the user the Album's current values (makerble_get_album) and what you will " +
+        "change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          name: { type: "string" },
+          description: { type: "string" },
+          owner_type: { type: "string", enum: ["Charity", "User"] },
+          owner_id: { type: "number", description: "The organisation (Charity) id when owner_type is Charity." },
+          manager_ids: { type: "array", items: { type: "number" }, description: "Replaces the Album's managers, by user id." },
+          analyst_ids: { type: "array", items: { type: "number" }, description: "Replaces the Album Analysts, by user id. [] removes them all." },
+          automatically_create_survey_progress_board: { type: "boolean", description: "Give each Survey on the Album's Projects a progress board." },
+          default_results_template_id: {
+            type: ["number", "null"],
+            description: "The Impact Framework the Album's Progress Panel opens on (one of the organisation's); null for All metrics.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/albums/${id}`, body),
+    },
+
+    {
+      name: "makerble_add_projects_to_album",
+      description:
+        "Add Projects to an Album (Portfolio), keeping the ones already in it. Only the Album's managers may. A Project " +
+        "from another organisation is invited instead and shows in pending_project_ids until its managers accept. " +
+        "Returns the Album.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to add." },
+        },
+        required: ["id", "project_ids"],
+      },
+      handler: ({ id, project_ids }) => post(`/albums/${id}/projects`, { project_ids }),
+    },
+
+    {
+      name: "makerble_remove_projects_from_album",
+      description:
+        "Take Projects out of an Album (Portfolio). The Projects themselves don't change. Only the Album's managers may. " +
+        "Returns the Album. Confirm with the user before removing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to remove." },
+        },
+        required: ["id", "project_ids"],
+      },
+      handler: ({ id, project_ids }) => del(`/albums/${id}/projects`, { project_ids }),
+    },
+
+    {
+      name: "makerble_get_album_targets",
+      description:
+        "Get an Album's (Portfolio's) targets, as its Set Targets page shows them. target_type automatic_target means " +
+        "the Album adds up its Projects' targets from year_start_date; manual_target means it has its own: a one-off " +
+        "target on each Activity and Outcome metric on the Album (metrics: Change or Indicator), on each Cohort, " +
+        "Workflow and Formula Tracker and filtered version (trackers), and deadline targets (deadlines). Requires " +
+        "rights to edit the Album's targets. Use before makerble_set_album_targets to show the user the current values.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Album's id." } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/albums/${id}/targets`),
+    },
+
+    {
+      name: "makerble_get_album_project_contributions",
+      description:
+        "See how much each Project in an Album (Portfolio; Bundle in the API) contributed to the Album's results, as the " +
+        "Album page's Project Contributions views show. For each Activity or Outcome metric (Change or Indicator) on the " +
+        "Album it returns the progress across the Album (total), the Album's target and the percentage reached, then for " +
+        "each open Project its sub-total and contribution_percentage (its share of the total). Projects are listed in " +
+        "natural order of name with the colour set on their Edit Project page. timeframe: all_time (default; also gives " +
+        "each Project's own all-time target, or target_unavailable when that Project sets the metric's targets by " +
+        "deadline), period (between two of the Album's Target Deadlines; empty when the Album has no deadline targets) " +
+        "or year_to_date (one year from the Album's Year Start). The response lists the periods or years in timeframes; pass " +
+        "one's end_date to see it, otherwise the current one is shown. Use it to answer 'which project delivered most of " +
+        "X?' or to compare projects' contributions to an Album's targets. Metrics are paged (per_page up to 200). " +
+        "Find Album ids with makerble_list_albums.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          timeframe: { type: "string", enum: ["all_time", "period", "year_to_date"], description: "Default all_time." },
+          end_date: { type: "string", description: "YYYY-MM-DD: the last day of a period or year listed in timeframes." },
+          page: { type: "number", description: "Page of metrics, from 1." },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, timeframe, end_date, page, per_page }) =>
+        get(`/albums/${id}/project_contributions`, { timeframe, end_date, page, per_page }),
+    },
+
+    {
+      name: "makerble_set_album_targets",
+      description:
+        "Set an Album's (Portfolio's) targets, as its Set Targets page does. Only metrics and trackers already on the " +
+        "Album (see makerble_get_album_targets) can be given a target; anything else is refused and nothing is saved. " +
+        "Metric, tracker and deadline targets are only saved while the Album uses manual targets (target_type " +
+        "manual_target). deadlines, when sent, replaces all the Album's deadline targets; send [] to clear them. " +
+        "Returns the targets.\n" +
+        "Before changing anything, show the user the current targets and what you will change, and only go ahead when they agree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Album's id." },
+          target_type: { type: "string", enum: ["manual_target", "automatic_target"] },
+          year_start_date: { type: "string", description: "The day the Album's target year starts, YYYY-MM-DD." },
+          metrics: {
+            type: "array",
+            description: "One-off targets on the Album's Activity (Change) and Outcome (Indicator) metrics.",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string", enum: ["Change", "Indicator"] },
+                metric_id: { type: "number" },
+                target: { type: "number", description: "A whole number, 0 or more." },
+              },
+              required: ["metric_type", "metric_id", "target"],
+            },
+          },
+          trackers: {
+            type: "array",
+            description: "One-off targets on the Album's trackers.",
+            items: {
+              type: "object",
+              properties: {
+                tracker_type: { type: "string", enum: ["CohortTracker", "WorkflowTracker", "FormulaTracker", "FilteredMetric"] },
+                tracker_id: { type: "number" },
+                target: { type: "number", description: "A whole number, 0 or more; a percentage (0-100) for a percentage tracker." },
+              },
+              required: ["tracker_type", "tracker_id", "target"],
+            },
+          },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets: what to reach by a date, for a metric or tracker on the Album. Replaces them all.",
+            items: {
+              type: "object",
+              properties: {
+                metric_type: { type: "string", description: "Change, Indicator, CohortTracker, WorkflowTracker, FormulaTracker or FilteredMetric." },
+                metric_id: { type: "number" },
+                date: { type: "string", description: "YYYY-MM-DD." },
+                number: { type: "number" },
+              },
+              required: ["metric_type", "metric_id", "date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/albums/${id}/targets`, body),
     },
 
     {
@@ -258,6 +1004,87 @@ export function buildTools(api) {
       handler: (p) => get("/project_results", p),
     },
 
+    {
+      name: "makerble_get_distance_travelled",
+      description:
+        "Get distance travelled on Choice trackers (Indicators of Scale type that have a success direction): for each " +
+        "tracker, how many Contacts (Beneficiaries) improved, stayed the same (no_change) or worsened between their " +
+        "first and latest answer. Use this for change-over-time evidence such as '68% of young people reported " +
+        "improved confidence', instead of comparing answers yourself. The figures follow the same rules as the " +
+        "Progress Board's Success Direction Summary and the distance travelled Contact Filter: answers are ordered by " +
+        "their Story's date, one answer per Story, and answers saved with no Contact tagged are left out. " +
+        "\nsuccess_direction_meaning says which answer is the best. Contacts with only one answer in the dates are " +
+        "not judged: they are counted in not_judged, and every percent is of judged_contacts only, so say so when you " +
+        "quote one. contacts_answered is everyone who answered at least once. answers is a before/after table: for " +
+        "each answer, how many judged Contacts gave it first and how many gave it last, suitable for a chart. " +
+        "Trackers with no success direction are left out; when you choose them with tracker_ids, skipped_trackers says " +
+        "which and why. " +
+        "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
+        "(2) Optionally makerble_get_project_results with tracker_types ['choice'] to find Choice tracker IDs. " +
+        "(3) Call this tool with start_date / end_date for the period (omit both for all time). " +
+        "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
+        "Returns page, page_size, page_count, total_count, start_date, end_date, project_ids and data (the trackers).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: { type: "array", items: { type: "number" }, description: "Project IDs. Defaults to every Project you can view" },
+          tracker_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Choice tracker (Indicator) IDs. Defaults to every Choice tracker with a success direction on the Projects",
+          },
+          start_date: { type: "string", description: "First Story date to include, YYYY-MM-DD" },
+          end_date: { type: "string", description: "Last Story date to include, YYYY-MM-DD" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Trackers per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/distance_travelled", p),
+    },
+
+    {
+      name: "makerble_get_sessions_and_attendance",
+      description:
+        "Get delivery figures from Scheduling: how many Events (sessions) Projects ran, the hours delivered and how " +
+        "well they were attended, calculated by Makerble with the same rules as the Event Attendance page. Use this " +
+        "for 'how many sessions did we run?', 'how many hours did we deliver?' and 'what was attendance like?' " +
+        "instead of counting Events or Stories yourself. " +
+        "\nEvents count when their start falls between start_date and end_date. totals has: events_scheduled (every " +
+        "Event in the dates), events_held (those that have already started), hours_delivered (start to end of the " +
+        "Events held), invited_contacts (distinct Contacts (Beneficiaries) added to the Events as guests), " +
+        "attending_contacts (distinct Contacts with attendance recorded on an Event's attendance form, invited or not) " +
+        "and attendance_rates: one entry per Engagement tracker (Change of Participation type) on the Events' " +
+        "attendance forms. Its attendance_rate is attendances (attendance records) divided by invitations (each time a " +
+        "Contact was added to an Event), as the Event Attendance page's 'Total across all guests' row shows it. It " +
+        "counts records, not distinct Events, so it can be above 100% when an Event has duplicate attendance Stories. " +
+        "It is null when nobody was invited. " +
+        "Deleted Contacts are left out. Makerble does not record cancelled Events. " +
+        "\nWorkflow: (1) makerble_list_projects → project_ids (omit to cover every Project you can view). " +
+        "(2) Call this tool with start_date / end_date for the period (omit both for all time). " +
+        "(3) group_by 'month' for a trend (every month in the dates, with zero rows for months with no Events), " +
+        "'project' to compare Projects, or 'event_format' to compare Event formats (Event Categories); data then " +
+        "holds one row per group, each with the same figures as totals. " +
+        "Only Projects you can view (Editor, Reporter or Observer of the Project or its organisation) are included. " +
+        "Returns start_date, end_date, project_ids, group_by, totals, and page, page_size, page_count, total_count " +
+        "and data (the groups; empty without group_by).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_ids: { type: "array", items: { type: "number" }, description: "Project IDs. Defaults to every Project you can view" },
+          start_date: { type: "string", description: "First Event start date to include, YYYY-MM-DD" },
+          end_date: { type: "string", description: "Last Event start date to include, YYYY-MM-DD" },
+          group_by: {
+            type: "string",
+            enum: ["project", "event_format", "month"],
+            description: "Split the figures into groups. Default: totals only",
+          },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Groups per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/sessions_and_attendance", p),
+    },
+
     // ── Users ─────────────────────────────────────────────────────────────────
     {
       name: "makerble_list_users",
@@ -314,12 +1141,41 @@ export function buildTools(api) {
         }),
     },
 
+    {
+      name: "makerble_resend_invitation",
+      description:
+        "Send a new invitation email to a colleague (user) who was invited to an Organisation but hasn't yet " +
+        "set their password. Manage Colleagues shows them as 'Invited, not yet accepted'. Makerble never emails " +
+        "a password: the invitation has a link where they set their own, and the new link stops the earlier one " +
+        "working. Use it when someone says they lost or never got their invitation, or that its link has " +
+        "expired (links last 14 days). Only an Organisation Admin of an Organisation the person is a colleague " +
+        "in can do this. Find their user ID with makerble_list_users. Pass organisation_id to choose which " +
+        "Organisation the invitation is for; without it, the first one they share with you is used. An address " +
+        "can be sent at most 3 new links an hour. Returns {id, email, organisation_id, invitation_status: " +
+        "'sent', message}; it never returns the link or its token. Errors: 404 for someone outside your " +
+        "Organisations, 403 if you aren't an Organisation Admin there, 422 if they've already set their " +
+        "password, 429 after 3 sends in an hour.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The user ID of the person who was invited" },
+          organisation_id: {
+            type: "number",
+            description: "Optional. The Organisation (Charity) to invite them into",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => post(`/users/${id}/resend_invitation`, body),
+    },
+
     // ── Contacts (Beneficiaries) ───────────────────────────────────────────────
     {
       name: "makerble_list_contacts",
       description:
         "List all Contacts (Beneficiaries). Filter by charity_id or project_id. " +
-        "Response includes custom fields from the Contact Bio Form.",
+        "Response includes custom fields from the Contact Bio Form. " +
+        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -359,11 +1215,462 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_add_contacts_to_project",
+      description:
+        "Add existing Contacts (Beneficiaries) to a Project, optionally with a status (Beneficiary State, e.g. " +
+        "Enrolled or Waiting List). This is the same as 'Assign Contacts to projects' on the Contacts page in " +
+        "Makerble: each Contact added gets an entry on their activity timeline and the Project's team is notified. " +
+        "It does not create Contacts: use makerble_create_contact for a new person. " +
+        "\nWhen to use: before makerble_create_survey_links with beneficiary_ids, when the Contacts aren't in the " +
+        "Survey Campaign's Project yet (that call fails with 'not in the project' otherwise). Contacts created from " +
+        "an email address by makerble_create_survey_links join the organisation but not the Project. " +
+        "\nWorkflow: (1) makerble_get_project → beneficiary_states, if you want a status other than the default " +
+        "(Enrolled, or the Project's first status if Enrolled is switched off). (2) Call this tool. " +
+        "\nContacts already in the Project are left as they are: their status is not changed, and they are returned " +
+        "with already_in_project: true. At most 200 beneficiary_ids per call. Nothing is added if any Contact is " +
+        "refused. The Project must be open (not closed) and in the Contacts' organisation. " +
+        "Requires an Organisation Editor, Reporter or Observer, or a Project Editor (or Reporter, if the " +
+        "organisation allows it) of a Project the Contact is in. " +
+        "Returns { data: [{ id, project_id, beneficiary_id, beneficiary_state_id, already_in_project, created_at, " +
+        "updated_at }] }, one entry per Contact. Errors: 404 for a Project you can't see; 403 naming the Contacts " +
+        "you may not move; 422 with beneficiary_ids_not_found for ids that aren't Contacts of the Project's " +
+        "organisation, or for an unknown status, a closed Project, no ids or more than 200.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number", description: "The Project to add the Contacts to" },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs from the Project's organisation, at most 200",
+          },
+          beneficiary_state_id: {
+            type: "number",
+            description: "Optional Contact status (Beneficiary State) ID from makerble_get_project's beneficiary_states",
+          },
+        },
+        required: ["project_id", "beneficiary_ids"],
+      },
+      handler: (body) => post("/project_beneficiaries", body),
+    },
+
+    {
+      name: "makerble_move_contacts_through_projects",
+      description:
+        "Move many Contacts (Beneficiaries) through Projects at once: add them to a Project, change their status " +
+        "in it (Beneficiary State, e.g. Enrolled, Waiting List, Alumni, Declined), or remove them from it. This is " +
+        "'Move through projects' for the Contacts selected on the Manage Contacts page in Makerble. Each change is " +
+        "made as if the Contact were moved one at a time from their profile: it appears in their History and the " +
+        "Project's team is notified. " +
+        "\nChoose the Contacts in one of two ways: beneficiary_ids (at most 500), or everyone matching filter_data " +
+        "(the Manage Contacts filters, e.g. { project_ids: ['572'], beneficiary_state_ids: ['1'] }) minus " +
+        "excluded_ids; project_id is a shortcut for 'Contacts in this Project'. With neither, every Contact you can " +
+        "see in the organisation is chosen, so be specific. " +
+        "\nchanges lists one entry per Project: { project_id, state }, where state is a status id switched on for " +
+        "that Project (makerble_get_project → beneficiary_states) or 'remove'. " +
+        "\nWorkflow to move named Contacts: (1) makerble_list_contacts (or makerble_list_project_contacts) to find " +
+        "their ids; (2) makerble_get_project for the target Project's beneficiary_states; (3) call this tool. " +
+        "\nSkip rules: Contacts you only have Headline Only Access to are skipped (skip_counts.headline_only), and " +
+        "so are Contacts you may not move between Projects (skip_counts.not_allowed): Organisation Editors, Reporters " +
+        "and Observers may move any Contact, other users only Contacts they may edit. A Contact already in the chosen " +
+        "status, or not in a Project they'd be removed from, is left as they are. Projects must be open and in the " +
+        "organisation. " +
+        "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
+        "run in the background: the reply has status 'pending' and an id; call makerble_get_contacts_move_progress " +
+        "with that id until status is 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "Errors: 404 for an organisation you aren't in; 422 for no changes, a closed Project, a status the Project " +
+        "hasn't switched on, more than 500 beneficiary_ids, or a missing charity_id when you belong to several " +
+        "organisations.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: {
+            type: "number",
+            description: "The organisation whose Contacts to move. Optional if you belong to only one organisation.",
+          },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to move, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: {
+            type: "object",
+            description: "Manage Contacts filters choosing the Contacts, e.g. { project_ids: ['572'] }. Used when beneficiary_ids is left out.",
+          },
+          project_id: {
+            type: "number",
+            description: "Shortcut for filter_data: choose the Contacts in this Project",
+          },
+          excluded_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact IDs matching the filters to leave out",
+          },
+          changes: {
+            type: "array",
+            description: "One change per Project",
+            items: {
+              type: "object",
+              properties: {
+                project_id: { type: "number", description: "The Project" },
+                state: {
+                  type: "string",
+                  description: "A status (Beneficiary State) id switched on for the Project, e.g. '3', or 'remove'",
+                },
+              },
+              required: ["project_id", "state"],
+            },
+          },
+        },
+        required: ["changes"],
+      },
+      handler: (body) => post("/beneficiaries/bulk_project_moves", body),
+    },
+
+    {
+      name: "makerble_get_contacts_move_progress",
+      description:
+        "Check a move started with makerble_move_contacts_through_projects that is running in the background " +
+        "(more than 50 Contacts). Only the user who started it can see it. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }: " +
+        "status is 'pending', 'running', 'completed' or 'failed'; processed_count of total_count Contacts have been " +
+        "reached so far; summary is the finished message once it has finished. Wait a few seconds between calls.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The id makerble_move_contacts_through_projects returned" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/beneficiaries/bulk_project_moves/${id}`),
+    },
+
+    {
+      name: "makerble_label_contacts",
+      description:
+        "Add or remove a label on many Contacts (Beneficiaries) at once, or change their Type, as Add or remove " +
+        "does on the Manage Contacts page for the Contacts ticked there. label_kind says which: " +
+        "'group' for Groups (Contact Groups, e.g. \"Girls' football\"); 'flag' for Flags (Contact Flags, e.g. " +
+        "\"Safeguarding concern\"); 'audience' for Audiences (Contact Roles, e.g. Volunteers); 'skill_required' " +
+        "for what a Contact needs a specialist in (Specialisms (Skills), e.g. Eating disorders; API: Skills " +
+        "Required); 'type' for the Contact Type (Person, " +
+        "Organisation, Object, Animal). Each change is made as on one Contact's own screen. " +
+        "\nFor group, flag, audience and skill_required: add_ids are labels to give every chosen Contact and " +
+        "remove_ids labels to take off every one; give at least one, and never the same id in both. Find the ids " +
+        "with makerble_list_groups, makerble_list_flags, makerble_list_audiences or makerble_list_specialisms. A Contact " +
+        "who already has a label being added, or lacks one being removed, is left as they are. Audiences being " +
+        "added start on start_date (default today); removing an Audience ends it today rather than deleting it. " +
+        "\nFor type: beneficiary_type_id is the Type to change every chosen Contact to (makerble_list_contact_types). " +
+        "Bio fields that only show for one Type stay saved but are hidden. " +
+        "\nChoose the Contacts in one of two ways: beneficiary_ids (at most 500), or everyone matching filter_data " +
+        "(the Manage Contacts filters, e.g. { project_ids: ['572'] }) minus excluded_ids; project_id is a shortcut " +
+        "for 'Contacts in this Project'. With neither, every Contact you can see in the organisation is chosen, so " +
+        "be specific. " +
+        "\nWorkflow to put named Contacts in a Group: (1) makerble_list_groups to find the Group's id; " +
+        "(2) makerble_list_contacts to find the Contacts' ids; (3) call this tool with label_kind 'group'. " +
+        "\nSkip rules (counted in skip_counts): headline_only (you only have Headline Only Access); not_allowed " +
+        "(Groups and Type: you may not edit the Contact); raised_by_someone_else (only the person who raised a Flag " +
+        "may remove it); not_allowed_to_end (you may not end that Audience); not_allowed_to_remove (only " +
+        "Organisation Editors may remove a specialist need). A skipped Contact is left unchanged. For skill_required, " +
+        "needs are added as importance 'essential' unless you pass 'desirable', and only needs added by hand are " +
+        "added or removed: a need a Contact has from a form answer (see makerble_link_specialism_to_answers) stays. " +
+        "\nUp to 50 Contacts change straight away and the reply has status 'completed' and the counts. More than 50 " +
+        "run in the background: the reply has status 'pending' and an id; call makerble_get_bulk_action_progress " +
+        "with that id until status is 'completed' or 'failed'. " +
+        "Returns { id, status, total_count, processed_count, changed_count, skip_counts, background, summary }. " +
+        "Errors: 404 for an organisation you aren't in; 422 for nothing to change, an id that isn't one of the " +
+        "organisation's labels you may use, a bad start_date, more than 500 beneficiary_ids, or a missing " +
+        "charity_id when you belong to several organisations.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          label_kind: {
+            type: "string",
+            enum: ["group", "flag", "audience", "skill_required", "type"],
+            description: "Which kind of label: 'group' (Groups), 'flag' (Flags), 'audience' (Audiences), 'skill_required' (what Contacts need a specialist in) or 'type' (Contact Type)",
+          },
+          charity_id: {
+            type: "number",
+            description: "The organisation whose Contacts to change. Optional if you belong to only one organisation.",
+          },
+          add_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Labels to give every chosen Contact, e.g. Group ids from makerble_list_groups",
+          },
+          remove_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Labels to take off every chosen Contact",
+          },
+          importance: {
+            type: "string",
+            enum: ["essential", "desirable"],
+            description: "label_kind 'skill_required' only: how much the Contacts need the Specialisms being added. Default essential.",
+          },
+          start_date: {
+            type: "string",
+            description: "label_kind 'audience' only: when the Audiences being added start, e.g. '2026-11-01'. Default today.",
+          },
+          beneficiary_type_id: {
+            type: "number",
+            description: "label_kind 'type' only: the Contact Type to change every chosen Contact to",
+          },
+          beneficiary_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact (Beneficiary) IDs to change, at most 500. Leave out to use filter_data instead.",
+          },
+          filter_data: {
+            type: "object",
+            description: "Manage Contacts filters choosing the Contacts, e.g. { project_ids: ['572'] }. Used when beneficiary_ids is left out.",
+          },
+          project_id: {
+            type: "number",
+            description: "Shortcut for filter_data: choose the Contacts in this Project",
+          },
+          excluded_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Contact IDs matching the filters to leave out",
+          },
+        },
+        required: ["label_kind"],
+      },
+      handler: ({ label_kind, ...body }) => {
+        const paths = {
+          group: "/beneficiaries/bulk_groups",
+          flag: "/beneficiaries/bulk_flags",
+          audience: "/beneficiaries/bulk_audiences",
+          skill_required: "/beneficiaries/bulk_required_skills",
+          type: "/beneficiaries/bulk_type",
+        };
+        if (!paths[label_kind]) {
+          throw new McpError(ErrorCode.InvalidParams, `Unknown label_kind '${label_kind}'. Use one of: ${Object.keys(paths).join(", ")}.`);
+        }
+        return post(paths[label_kind], body);
+      },
+    },
+
+    {
+      name: "makerble_list_groups",
+      description:
+        "List an organisation's Groups (Contact Groups): the labels Contacts (Beneficiaries) are sorted into, e.g. " +
+        "\"Girls' football\". These are the Groups the Edit Contact page offers. Use an id with " +
+        "makerble_label_contacts (label_kind 'group'). Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, title, created_at, updated_at }] }, by title.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/groups", p),
+    },
+
+    {
+      name: "makerble_list_flags",
+      description:
+        "List the Flags (Contact Flags) you may raise on Contacts (Beneficiaries) in an organisation, e.g. " +
+        "\"Safeguarding concern\". A Flag restricted to Teams is listed only if you are in one of them. Use an id " +
+        "with makerble_label_contacts (label_kind 'flag'). " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, color, created_at, updated_at }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/flags", p),
+    },
+
+    {
+      name: "makerble_list_specialisms",
+      description:
+        "List an organisation's Specialisms (Skills), e.g. \"Eating disorders\". Colleagues (Users) have Specialisms, " +
+        "and Contacts (Beneficiaries) need a specialist in some of them (Skills Required), so Makerble can suggest the " +
+        "right colleague for a Contact. Use an id with makerble_label_contacts (label_kind 'skill_required') to record " +
+        "what Contacts need, with makerble_set_colleague_specialisms for what a colleague specialises in, or with " +
+        "makerble_link_specialism_to_answers. Each one lists linked_answers: the Contact form answers that make a " +
+        "Contact need it automatically. Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, created_at, updated_at, " +
+        "linked_answers: [{ ratio_set_id, sub_ratio_ids, importance }] }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/skills", p),
+    },
+
+    {
+      name: "makerble_set_colleague_specialisms",
+      description:
+        "Read or change a colleague's (User's) Specialisms (Skills) in one organisation, as the Specialisms box on " +
+        "their profile does. A colleague in several organisations has separate Specialisms in each. Pass add_skill_ids " +
+        "and/or remove_skill_ids to change them (ids from makerble_list_specialisms; another organisation's are " +
+        "ignored); pass neither to just read them. Any member of the organisation can read them; only the colleague " +
+        "themselves, a Team Leader of one of their Teams in that organisation, or an Organisation Editor can change " +
+        "them. The organisation must have Specialisms turned on. " +
+        "Workflow to record that a colleague specialises in something: (1) makerble_list_specialisms for its id; " +
+        "(2) makerble_list_users for the colleague's id; (3) this tool with add_skill_ids. " +
+        "Returns { user_id, charity_id, can_change, data: [{ id, name }] } after any change. " +
+        "Errors: 403 if you may not change them; 404 for an organisation you aren't in, a colleague who isn't in it, " +
+        "or Specialisms turned off.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague's User ID" },
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          add_skill_ids: { type: "array", items: { type: "number" }, description: "Specialisms to add" },
+          remove_skill_ids: { type: "array", items: { type: "number" }, description: "Specialisms to remove" },
+        },
+        required: ["user_id"],
+      },
+      handler: async ({ user_id, charity_id, add_skill_ids, remove_skill_ids }) => {
+        const path = `/users/${user_id}/specialisms`;
+        let result;
+        if (add_skill_ids?.length) result = await post(path, { charity_id, skill_ids: add_skill_ids });
+        if (remove_skill_ids?.length) result = await del(path, { charity_id, skill_ids: remove_skill_ids });
+        return result ?? get(path, { charity_id });
+      },
+    },
+
+    {
+      name: "makerble_link_specialism_to_answers",
+      description:
+        "Link a Specialism (Skill) to answers in the organisation's Contact forms, or unlink them, as \"Contacts who " +
+        "need this specialism\" on the Specialism's edit page does. Every Contact (Beneficiary) whose form records a " +
+        "linked answer then needs a specialist in it, Essential or Desirable as you say, and stops needing it when the " +
+        "answer changes, so staff don't have to record each Contact's needs by hand. Example: link \"Eating " +
+        "disorders\" to \"Presenting issue = Anorexia\". A question is a dropdown (Ratio Set) on one of the " +
+        "organisation's Contact forms (Beneficiary Categories) and its answers are Sub Ratios. " +
+        "Workflow: (1) makerble_list_specialisms for the Specialism's id; (2) find the question's ratio_set_id among " +
+        "the Contact form fields, and its answers' ids (sub_ratio_ids); (3) call this tool. To unlink, pass " +
+        "unlink: true with the sub_ratio_ids. Linking an answer that is already linked changes its importance. " +
+        "Contacts are updated in the background, which can take a few minutes for a large organisation; the user " +
+        "gets a Makerble notification when it's done. Only Organisation Editors can do this. " +
+        "Returns { id, name, linked_answers: [{ ratio_set_id, sub_ratio_ids, importance }] }. " +
+        "Errors: 403 if you aren't an Organisation Editor; 404 for another organisation's Specialism; 422 for a " +
+        "question that isn't on the organisation's Contact forms, no answers, or a bad importance.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          skill_id: { type: "number", description: "The Specialism (Skill)" },
+          ratio_set_id: { type: "number", description: "The dropdown question on a Contact form, e.g. Presenting issue. Needed to link." },
+          sub_ratio_ids: { type: "array", items: { type: "number" }, description: "Its answers to link or unlink, e.g. Anorexia" },
+          importance: { type: "string", enum: ["essential", "desirable"], description: "How much Contacts matched this way need it. Default essential." },
+          unlink: { type: "boolean", description: "true to unlink the sub_ratio_ids instead of linking them" },
+        },
+        required: ["skill_id", "sub_ratio_ids"],
+      },
+      handler: ({ skill_id, ratio_set_id, sub_ratio_ids, importance, unlink }) => {
+        const path = `/skills/${skill_id}/linked_answers`;
+        if (unlink) return del(path, { sub_ratio_ids });
+        return post(path, { ratio_set_id, sub_ratio_ids, importance });
+      },
+    },
+
+    {
+      name: "makerble_list_saved_filters",
+      description:
+        "List the Saved Filters (FilterHistory) for Contacts (Beneficiaries), Events and Cases that you can see: your " +
+        "own, and the ones colleagues have shared. These are the filters on a project's Workflow > Saved filters tab. " +
+        "project_ids are the projects named in a filter's criteria; it can be added to a project's toolbar only for " +
+        "one of those, and only when can_add_shortcut is true. To add one, call makerble_get_saved_filter for its " +
+        "views and projects, then makerble_add_saved_filter_shortcut. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, type, organisation_id, shared, " +
+        "project_ids, can_add_shortcut, created_at, updated_at }] }, by name.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["contacts", "events", "cases"], description: "Only Saved Filters of this kind." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/saved_filters", p),
+    },
+
+    {
+      name: "makerble_get_saved_filter",
+      description:
+        "Get one Saved Filter (FilterHistory) with what you need to add it to a project's toolbar: shortcut_views, " +
+        "the views of its app a shortcut can open (e.g. Contacts > Overview, Events > Calendar, or one of your Custom " +
+        "tables), each { key, label, group }, and shortcut_projects, the projects you may add it to, each { id, name }. " +
+        "shortcut_projects is empty when can_add_shortcut is false. Pass a key and a project id to " +
+        "makerble_add_saved_filter_shortcut.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Saved Filter's id, from makerble_list_saved_filters." },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/saved_filters/${id}`),
+    },
+
+    {
+      name: "makerble_add_saved_filter_shortcut",
+      description:
+        "Add a Saved Filter to a project's toolbar (Workflow) as a shortcut, as the Saved Filter's Add to workflow " +
+        "button does. Clicking the shortcut opens the chosen view with the filter applied. The shortcut goes first on " +
+        "the toolbar. Steps: 1) makerble_list_saved_filters to find the filter; 2) makerble_get_saved_filter for its " +
+        "shortcut_views and shortcut_projects; 3) this tool with one of each. You must be an Organisation Admin or an " +
+        "Editor of the project. Colleagues who can't see the Saved Filter don't see its shortcut. " +
+        "Returns { id, name, project_id, saved_filter_id, view_key, created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Saved Filter's id." },
+          project_id: { type: "number", description: "One of the Saved Filter's shortcut_projects." },
+          view_key: { type: "string", description: "One of the Saved Filter's shortcut_views keys, e.g. contacts_overview." },
+          name: { type: "string", description: "The shortcut's label on the toolbar. Defaults to the Saved Filter's name." },
+        },
+        required: ["id", "project_id", "view_key"],
+      },
+      handler: ({ id, ...body }) => post(`/saved_filters/${id}/shortcuts`, body),
+    },
+
+    {
+      name: "makerble_get_bulk_action_progress",
+      description:
+        "Check a change to many Contacts that is running in the background (more than 50 Contacts), e.g. one " +
+        "started with makerble_label_contacts. Only the user who started it can see it. " +
+        "Returns { id, action_name, status, total_count, processed_count, changed_count, skip_counts, background, " +
+        "summary }: status is 'pending', 'running', 'completed' or 'failed'; processed_count of total_count Contacts " +
+        "have been reached so far; summary is the finished message once it has finished. Wait a few seconds " +
+        "between calls.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The id the bulk change returned" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/beneficiaries/bulk_actions/${id}`),
+    },
+
+    {
       name: "makerble_get_contact",
       description:
         "Get a single Contact (Beneficiary) by ID, including all custom fields. " +
         "Opening a Contact this way is recorded in its Access Log (the audit trail of who viewed it), " +
-        "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts.",
+        "under your name and marked as via MCP, so use makerble_list_contacts when you only need to find or scan Contacts. " +
+        "Field Visibility (Settings → Field Visibility) can hide a field from you: such a custom field comes back with restricted: true and value: null, and a hidden built-in field (dob, mobile, email, address) comes back null and is named in restricted_fields. Restricted means you may not see the answer, not that it is blank; never guess it or ask the user to reveal it. " +
+        "weekly_availability is the Contact's Weekly availability: the most recently saved answer to any Weekly availability field on their Contact Forms, " +
+        "as times ([{day, from, to}], in the organisation's timezone) with source_form_id (the Contact Form it came from), source_field_id and answered_at, " +
+        "or null if they have none. Use it to suggest appointment times. When Field Visibility hides that field from you, times is null and restricted is true. " +
+        "required_skills is what the Contact needs a specialist in (Specialisms, API: Skills Required): [{id, skill_id, name, importance: 'essential'|'desirable', " +
+        "source: 'manual' (added by hand) | 'form_answer' (from an answer in their Contact form; goes when the answer changes)}]. One Specialism can appear twice, once from each source.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -387,6 +1694,11 @@ export function buildTools(api) {
         "Returns {page, page_size, page_count, total_count, record: {record_type, record_id, charity_id, name, deleted}, " +
         "data: [{id, event, action (Created/Edited/Destroyed), user_id, user_name (\"System\" for background jobs such as CSV imports), created_at}]}. " +
         "One Save can write several Versions a fraction of a second apart. " +
+        "To compare Versions side by side (the Version History page), pass include_fields: true: each Version then also has " +
+        "fields: [{key, label, value, state, changed}], one per field of the record, where value is the field's display value, " +
+        "state is \"value\", \"blank\" (the field existed but was empty), \"absent\" (the field didn't exist yet or had been " +
+        "removed, e.g. a survey question taken off the survey) or \"restricted\" (Field Visibility hides it from you; value is null), " +
+        "and changed is true when the value differs from the Version saved just before. " +
         "To see what the record looked like in a Version, call makerble_get_version with its id.",
       inputSchema: {
         type: "object",
@@ -400,6 +1712,10 @@ export function buildTools(api) {
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200." },
           last_sync_datetime: { type: "string", description: "Only Versions created after this ISO 8601 datetime." },
+          include_fields: {
+            type: "boolean",
+            description: "Add each Version's labelled fields, compared with the Version before (see description). Default false.",
+          },
         },
         required: ["record_type", "record_id"],
       },
@@ -492,7 +1808,11 @@ export function buildTools(api) {
         "For a Story, full_object is {schema_version, story (the Story's own fields), privacy_settings, contact_ids, " +
         "outcome_ids, label_ids, media, answers: [{kind, field_id, label, contact_id, sub_ratio_id, sub_ratio_label, value}]}, " +
         "so a survey question keeps the label it had then. " +
-        "Compare two Versions' full_object to see exactly what changed between them. " +
+        "Also returns fields: [{key, label, value, state, changed}], the record's fields labelled as the Version History page " +
+        "shows them: state is \"value\", \"blank\", \"absent\" (not a field of the record at that time) or \"restricted\", " +
+        "and changed is true when the value differs from the Version saved just before this one. " +
+        "Use fields to see what changed; use full_object for the raw snapshot. " +
+        "For a Contact, fields Field Visibility hides from you are null in full_object and named in restricted_fields. " +
         "Get Version IDs from makerble_list_versions. Same permissions as makerble_list_versions.",
       inputSchema: {
         type: "object",
@@ -507,7 +1827,9 @@ export function buildTools(api) {
       description:
         "Create a new Contact (Beneficiary). Required: name, owner_id. " +
         "Call makerble_list_contact_bio_form_fields first to get custom field IDs. " +
-        "Call makerble_list_contact_types to get beneficiary_type_id (1=Person, 2=Object, 3=Organisation, 4=Animal).",
+        "Call makerble_list_contact_types to get beneficiary_type_id (1=Person, 2=Object, 3=Organisation, 4=Animal). " +
+        "Setting a field Field Visibility hides from you is refused with 422 and errors naming the field: leave it out and tell the user someone who can see it must fill it in. " +
+        "A Weekly availability field (type weekly_availability) takes a list of days and times: [{\"day\": \"monday\", \"from\": \"15:30\", \"to\": \"18:00\"}], days monday to sunday, times HH:MM in 15-minute steps in the organisation's timezone, To after From. Overlapping times on a day are joined when saved. An answer it can't read is refused with 422 and errors saying why.",
       inputSchema: {
         type: "object",
         properties: {
@@ -522,7 +1844,7 @@ export function buildTools(api) {
           beneficiary_category_ids: { type: "array", items: { type: "number" } },
           custom_fields: {
             type: "object",
-            description: "Dictionary of custom_field_id (string key) to value",
+            description: "Dictionary of custom_field_id (string key) to value. A weekly_availability field's value is a list of {day, from, to}.",
           },
         },
         required: ["name", "owner_id"],
@@ -621,7 +1943,8 @@ export function buildTools(api) {
       name: "makerble_list_contact_bio_form_fields",
       description:
         "List custom field definitions for Contact Bio Forms. " +
-        "Filter by beneficiary_category_ids. Use field IDs when creating a contact.",
+        "Filter by beneficiary_category_ids. Use field IDs when creating a contact. " +
+        "field_data_type says what kind of answer a field takes. A Weekly availability field (type weekly_availability) takes a list of days and times: [{\"day\": \"monday\", \"from\": \"15:30\", \"to\": \"18:00\"}], days monday to sunday, times HH:MM in 15-minute steps in the organisation's timezone, To after From. Overlapping times on a day are joined when saved.",
       inputSchema: {
         type: "object",
         properties: {
@@ -942,7 +2265,10 @@ export function buildTools(api) {
       description:
         "Get a single Survey (Story Category) with full detail: current_fields (ordered questions with " +
         "field_class_name, outcome_id, indicator_type), scale_indicator_choices (choice config per indicator), " +
-        "and verdict_data (scoring bands). Always call this before creating a story.",
+        "and verdict_data (scoring bands), plus contact_mode: 'one_contact' (About One Contact: each response is " +
+        "about one person) or 'several_contacts' (Several Or No Contacts: staff record answers for a group, e.g. " +
+        "attendance), which is how the survey is shown when someone tries it on a toolkit page. Always call this " +
+        "before creating a story.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number" } },
@@ -970,9 +2296,51 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_survey_itemised_totals",
+      description:
+        "Compare one Survey's (Story Category's) results side by side across Projects or Albums (Bundles): its " +
+        "Itemised totals. Returns one table per tracker in the Survey, in question order, plus Verdict tables when " +
+        "the Survey has Verdicts on, with a row per Project (or per Album, adding up its Projects) that uses the " +
+        "Survey and that you may view. Table kinds: activity (Activity change: amount), engagement (Participation " +
+        "change: amount), achievement (Achievement tracker / binary indicator: Yes and Not ticked answers with " +
+        "percentages), choice (Choice tracker / scale indicator: answers per choice with percentages), numerical " +
+        "(Numerical tracker / value indicator: sum and mean average, with unit), verdicts, verdicts_across_intervals " +
+        "and change_in_verdicts_across_intervals (per Shared Interval / wave). An answer is one Contact's response " +
+        "in one Story. Each table has columns [{key, title}], optional column_groups and unit, and rows " +
+        "[{id, name, values, percentages?}] where values line up with columns. Paginated by table." +
+        "\nUse it when asked to compare a survey's results between projects or albums. Workflow: (1) makerble_list_surveys " +
+        "or makerble_get_survey → story_category_id. (2) Optionally makerble_list_projects or makerble_list_albums → " +
+        "project_ids or album_ids; leave both out for every Project you may view that uses the Survey. (3) Call this " +
+        "tool, optionally filtered by Date happened, Date posted (YYYY-MM-DD), label_ids, Contact group_ids, and scope " +
+        "('earliest' or 'latest' counts only each Contact's earliest or latest response).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          story_category_id: { type: "number", description: "The Survey (Story Category) id." },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to show, a row each. Leave out for all you may view." },
+          album_ids: { type: "array", items: { type: "number" }, description: "Albums (Bundles) to show, a row each adding up its Projects. Overrides project_ids." },
+          date_happened_from: { type: "string", description: "YYYY-MM-DD: only Stories that happened on or after this date." },
+          date_happened_to: { type: "string", description: "YYYY-MM-DD: only Stories that happened on or before this date." },
+          date_posted_from: { type: "string", description: "YYYY-MM-DD: only Stories posted on or after this date." },
+          date_posted_to: { type: "string", description: "YYYY-MM-DD: only Stories posted on or before this date." },
+          label_ids: { type: "array", items: { type: "number" }, description: "Only Stories with one of these Labels." },
+          group_ids: { type: "array", items: { type: "number" }, description: "Only answers from Contacts in one of these Contact Groups." },
+          scope: { type: "string", enum: ["all", "earliest", "latest"], description: "Which responses from each Contact count (default all)." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Tables per page (default 10, max 200)." },
+        },
+        required: ["story_category_id"],
+      },
+      handler: ({ story_category_id, ...p }) =>
+        get(`/story_categories/${story_category_id}/itemised_totals`, p),
+    },
+
+    {
       name: "makerble_list_survey_campaigns",
       description:
-        "List all Survey Campaigns (Project Story Categories) — Surveys deployed to specific Projects.",
+        "List all Survey Campaigns (Project Story Categories) — Surveys deployed to specific Projects. " +
+        "Each has force_interval ('Force colleagues to select an interval'): when true and the campaign has " +
+        "Waves, survey links, stories and automations for it must name a Wave (interval).",
       inputSchema: {
         type: "object",
         properties: {
@@ -1005,6 +2373,102 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_update_survey_campaign_settings",
+      description:
+        "Change a Survey Campaign's (Project Story Category's) settings, as its Settings page does. " +
+        "force_interval is 'Force colleagues to select an interval': when true and the campaign has intervals " +
+        "(Waves), every story, survey invitation, shared link and automation for it must name an interval. " +
+        "New Survey Campaigns start with it on. Needs Project Editor (Project Manager) or Organisation Editor " +
+        "access. Get project_story_category_id from makerble_list_survey_campaigns. Returns the updated campaign.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+          force_interval: { type: "boolean", description: "Force colleagues to select an interval" },
+        },
+        required: ["project_story_category_id", "force_interval"],
+      },
+      handler: ({ project_story_category_id, force_interval }) =>
+        patch(`/project_story_categories/${project_story_category_id}`, { force_interval }),
+    },
+
+    {
+      name: "makerble_remove_survey_from_project",
+      description:
+        "Remove a Survey from a Project: delete its Survey Campaign (Project Story Category), as Remove from project " +
+        "does in the Actions menu of a Survey Campaign page. The Survey itself stays in the organisation's library and " +
+        "can be added to the Project again; the Progress Board created automatically for that Survey on that Project " +
+        "(\"<Survey> on <Project>\") is deleted too.\n" +
+        "It is refused (422, with the reason in error) while anything in the Project depends on the campaign: survey " +
+        "responses (Stories) recorded with it in that Project, saved draft responses, Events in the Project that use it, " +
+        "Survey Invitations sent for it, or it being the Project's default survey. The campaign can then only be " +
+        "deactivated, which this tool doesn't do.\n" +
+        "Who may do it: a Project Editor (Manager) of the Project or an Organisation Editor (Admin); others get 403.\n" +
+        "Workflow: find the campaign with makerble_list_survey_campaigns (project_id and story_category_id identify it), " +
+        "confirm with the user which Survey and Project, then call this. Returns {id, project_id, story_category_id, removed}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
+        },
+        required: ["project_story_category_id"],
+      },
+      handler: ({ project_story_category_id }) => del(`/project_story_categories/${project_story_category_id}`),
+    },
+
+    {
+      name: "makerble_list_progress_boards",
+      description:
+        "List the Progress Boards the user sees on the Manage Progress Boards page: boards they made, are a Board Admin " +
+        "or Colleague of, or were granted. Each has archived (archived boards are hidden from the board's members until " +
+        "reopened), automated_by / automated_by_id (\"Project\" for the boards generated for each Survey on a Project, " +
+        "\"<Survey> on <Project>\"), and can_archive / can_delete: whether this user may archive or reopen it (its Board " +
+        "Admins and the person who made it) and delete it (Board Admins who are Organisation Editors).\n" +
+        "status filters by open, archived or all (the default). Use it to find progress_board_ids for " +
+        "makerble_manage_progress_boards.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["open", "archived", "all"], description: "Which boards to list. Default all." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/progress_boards", p),
+    },
+
+    {
+      name: "makerble_manage_progress_boards",
+      description:
+        "Archive, reopen or delete several Progress Boards at once, as the Archive, Reopen and Delete buttons do for the " +
+        "boards ticked in the Rows view of the Manage Progress Boards page. Archiving (what users may call closing) hides " +
+        "a board until it is reopened, and keeps it archived if its Project is later reopened. Delete is permanent and " +
+        "cannot be undone.\n" +
+        "Each board is changed only if the user may: archive and reopen need a Board Admin or the board's creator; delete " +
+        "needs a Board Admin who is an Organisation Editor. Boards they may not change, or can't see, are skipped and " +
+        "listed in skipped with the reason; the rest still change. At most 100 boards at a time.\n" +
+        "Workflow: find the boards with makerble_list_progress_boards (can_archive and can_delete say what is allowed), " +
+        "show the user the exact boards, and for delete warn that it cannot be undone and wait for them to confirm. " +
+        "Returns {action, updated_ids, skipped: [{id, name, reason}], message}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          bulk_action: { type: "string", enum: ["archive", "reopen", "delete"], description: "What to do to the boards." },
+          progress_board_ids: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 1,
+            maxItems: 100,
+            description: "The Progress Boards to change, at most 100.",
+          },
+        },
+        required: ["bulk_action", "progress_board_ids"],
+      },
+      handler: (body) => post("/progress_boards/bulk_action", body),
+    },
+
+    {
       name: "makerble_create_survey_links",
       description:
         "Generate personal survey links (Survey Invitation links / survey tokens) for Contacts (Beneficiaries) " +
@@ -1018,19 +2482,28 @@ export function buildTools(api) {
         "(4) Call this tool. " +
         "\nRecipients: beneficiary_ids must be Contacts already in the Survey Campaign's Project. emails can be any " +
         "address: it is matched to an existing Contact of the organisation, or a new Contact is created. " +
+        "A Contact created from an email joins the organisation but NOT the Survey Campaign's Project, so to pass " +
+        "their id in beneficiary_ids later, first call makerble_add_contacts_to_project (or reuse their existing " +
+        "link from makerble_list_survey_links). " +
         "At most 200 beneficiary_ids + emails per call. " +
         "\nlink_expiry: 'use_once' (default) — the link stops working after one response; " +
         "'evergreen' — the link stays active for repeat responses. " +
         "Requires Project Editor or Organisation Editor access. " +
         "Returns send_survey_id and data: [{beneficiary_id, email, survey_token, survey_url, link_expiry, " +
-        "is_anonymised, send_survey_wave_id, expired, created_at}].",
+        "is_anonymised, send_survey_wave_id, expired, created_at}]. " +
+        "A 422 for refused Contacts lists them in invalid_beneficiary_ids, split into beneficiary_ids_not_in_project " +
+        "(in the organisation but not the Project: add them with makerble_add_contacts_to_project, then retry) and " +
+        "beneficiary_ids_not_found (not Contacts of the organisation).",
       inputSchema: {
         type: "object",
         properties: {
           project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
           beneficiary_ids: { type: "array", items: { type: "number" }, description: "Contact IDs in the Survey Campaign's Project" },
           emails: { type: "array", items: { type: "string" }, description: "Email addresses; matched to or creating Contacts. Nothing is emailed." },
-          send_survey_wave_id: { type: "number", description: "Optional Wave ID from makerble_list_survey_waves" },
+          send_survey_wave_id: {
+            type: "number",
+            description: "Wave ID from makerble_list_survey_waves. Required when the Survey Campaign has force_interval true and has Waves; otherwise the call is refused with 'Select an interval for this survey.'",
+          },
           link_expiry: { type: "string", enum: ["use_once", "evergreen"], default: "use_once" },
           is_anonymised: { type: "boolean", default: false, description: "Record responses anonymously" },
         },
@@ -1047,18 +2520,24 @@ export function buildTools(api) {
         "(Project Story Category). Use it to find a Contact's (Beneficiary's) existing link and reuse it instead " +
         "of generating a new one with makerble_create_survey_links. Check `expired`: a 'use_once' link that has " +
         "already been answered is expired and no longer works. " +
+        "Also use it to see who has started a survey response but not finished it (the 'Surveys in progress' " +
+        "column on the Response Rates tab): `responses_in_progress` lists the unfinished responses the Contact " +
+        "saved with Finish Later on that link, newest first, as [{send_survey_wave_id, last_updated_at}]; it is " +
+        "empty when there are none. Unfinished responses are kept for 30 days after they were last updated, and " +
+        "an unfinished response is not a completed survey. Pass in_progress: true to list only links with one. " +
         "Filter by beneficiary_id and/or send_survey_wave_id. Requires Project Editor or Organisation Editor access. " +
         "Returns {page, page_size, page_count, total_count, data: [{beneficiary_id, email, survey_token, survey_url, " +
-        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at}]}.",
+        "link_expiry, is_anonymised, send_survey_wave_id, expired, created_at, responses_in_progress}]}.",
       inputSchema: {
         type: "object",
         properties: {
           project_story_category_id: { type: "number", description: "The Survey Campaign (Project Story Category) ID" },
           beneficiary_id: { type: "number", description: "Only this Contact's links" },
           send_survey_wave_id: { type: "number", description: "Only links for this Wave" },
+          in_progress: { type: "boolean", description: "true: only links where the Contact has started a response but not finished it" },
           page: { type: "number" },
           per_page: { type: "number", description: "Default 10, max 200" },
-          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time" },
+          last_sync_datetime: { type: "string", description: "Only links changed after this ISO 8601 time (saving an unfinished response doesn't change the link)" },
         },
         required: ["project_story_category_id"],
       },
@@ -1069,16 +2548,49 @@ export function buildTools(api) {
     // ── Cases ──────────────────────────────────────────────────────────────────
     {
       name: "makerble_list_cases",
-      description: "List all Cases. Each Case belongs to one Contact and one Project.",
+      description:
+        "List all Cases. Each Case belongs to one Contact (Beneficiary) and one Project. " +
+        "To find Cases by their answers to Case Form questions (custom field definitions), as the " +
+        "filters on the Manage Cases page do: call makerble_list_case_filter_fields first for the " +
+        "question IDs and each question's filter_format, then pass custom_field_definition_hash. " +
+        "A Case must match every question given.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
-          per_page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
           last_synced_datetime: { type: "string" },
+          custom_field_definition_hash: {
+            type: "object",
+            description:
+              "Answers to filter by, keyed by question ID, in the question's filter_format: " +
+              "text → \"theft\" (answer contains it, ignoring case); number_range → {min, max}; " +
+              "date_range / time_range / datetime_range → {from, to} (e.g. \"2025-01-31\", \"09:00\", " +
+              "\"2025-01-31T14:00\"), both ends included and either optional; choice_ids → [choice IDs]; " +
+              "yes_no → [\"yes\"] (ticked) or [\"no\"] (not ticked or unanswered); " +
+              "has_files_no_files → [\"has_files\"] or [\"no_files\"]; album_ids → [Album IDs].",
+          },
         },
       },
       handler: (p) => get("/cases", p),
+    },
+
+    {
+      name: "makerble_list_case_filter_fields",
+      description:
+        "List the Case Form questions (custom field definitions) that Cases can be filtered by: the " +
+        "questions on the Case Forms of the organisations whose Cases the user can see, each once, " +
+        "alphabetically. Returns each question's id, name, field_type, filter_format and, for select " +
+        "questions, its answer choices [{id, name}]. Use the id and filter_format to build " +
+        "custom_field_definition_hash for makerble_list_cases.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+      },
+      handler: (p) => get("/cases/filter_fields", p),
     },
 
     {
@@ -1128,6 +2640,81 @@ export function buildTools(api) {
       handler: (p) => get("/custom_field_categories", p),
     },
 
+    // ── Teams ─────────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_teams",
+      description:
+        "List an Organisation's Teams. A Team groups colleagues (users) across Projects; on screen its people " +
+        "are 'Managers' (team leaders) and 'Members'. Returns each Team's id, name, colour, manager_ids and " +
+        "member_ids (user IDs), and its project auto-add settings: auto_add_to_projects (true when someone " +
+        "who joins the Team is added to projects), auto_add_project_ids, auto_add_filter_ids (saved Projects " +
+        "page filters whose matching open projects they're added to) and the project role a new manager " +
+        "(auto_add_manager_role) and a new member (auto_add_member_role) gets: 'editor' = Project Manager, " +
+        "'reporter' = Changemaker, 'observer' = Analyst. Anyone in the Organisation can see its Teams.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Teams changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/teams", p),
+    },
+
+    {
+      name: "makerble_set_team_projects",
+      description:
+        "Choose which projects a Team automatically adds the people who join it to, and with which project " +
+        "role (the 'Automatically add managers and members to projects' toggle on the Create/Edit Team popup). " +
+        "Only an Organisation Admin of the Team's Organisation can do this. Send only the fields to change. " +
+        "People are added only at the moment they join the Team: this doesn't add the Team's current people " +
+        "to anything, and someone later removed from one of the projects isn't added back. People who " +
+        "already have a role on a project keep it. Workflow: (1) makerble_list_teams to find the Team; " +
+        "(2) makerble_list_projects for project IDs (open projects of the same Organisation only), and/or " +
+        "makerble_get_automation_options with kind 'project' for saved_filters (saved Projects page filters " +
+        "the user can use); (3) call this with auto_add_to_projects true and the IDs. Roles: 'editor' = " +
+        "Project Manager, 'reporter' = Changemaker, 'observer' = Analyst (defaults: managers editor, " +
+        "members reporter). Returns the updated Team; an invalid ID or role returns errors by field.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          auto_add_to_projects: { type: "boolean", description: "Turn adding people to projects on or off" },
+          auto_add_project_ids: { type: "array", items: { type: "number" }, description: "Projects to add people to (replaces the list)" },
+          auto_add_filter_ids: { type: "array", items: { type: "number" }, description: "Saved project filters whose matching projects people are added to (replaces the list)" },
+          auto_add_manager_role: { type: "string", enum: ["editor", "reporter", "observer"], description: "Project role for a new Team manager" },
+          auto_add_member_role: { type: "string", enum: ["editor", "reporter", "observer"], description: "Project role for a new Team member" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/teams/${id}`, body),
+    },
+
+    {
+      name: "makerble_add_team_members",
+      description:
+        "Add colleagues (users) to a Team as Members or Managers, as the Create/Edit Team popup and the Teams " +
+        "tab of 'Invite a colleague' do. The Team's other people are left as they are, and someone already in " +
+        "the Team in that role is skipped. Only an Organisation Admin of the Team's Organisation can do this, and " +
+        "everyone added must already be a colleague in the Organisation: find their user IDs with " +
+        "makerble_list_users first. When the Team has auto_add_to_projects on (see makerble_list_teams and " +
+        "makerble_set_team_projects), the people who join are added in the background to its projects, with " +
+        "the Team's project role for a Manager or a Member. Returns the updated Team.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Team ID" },
+          user_ids: { type: "array", items: { type: "number" }, description: "Colleagues to add" },
+          role: { type: "string", enum: ["member", "manager"], description: "Add them as Members or as Managers" },
+        },
+        required: ["id", "user_ids", "role"],
+      },
+      handler: ({ id, ...body }) => post(`/teams/${id}/members`, body),
+    },
+
     // ── Checklists ────────────────────────────────────────────────────────────
     {
       name: "makerble_list_checklists",
@@ -1153,8 +2740,11 @@ export function buildTools(api) {
       name: "makerble_get_checklist",
       description:
         "Get one Checklist by ID: its ordered actions (action_type, title, description and criteria, " +
-        "which say what counts as done, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
-        "owner_relationship_side and a readable owner_description), the Projects that offer it with their assignment_mode " +
+        "which say what counts as done, due_within_days: the deadline, in days after the Checklist is added " +
+        "to a Contact, null for none, and who is responsible: owner_kind, owner_user_id, owner_team_id, " +
+        "owner_relationship_side and a readable owner_description, stage_id and video_url, the step's video or null), " +
+        "its stages (Participant Journey stages: " +
+        "id, name, icon, position and colour, in order), the Projects that offer it with their assignment_mode " +
         "('manual': colleagues may add it to Contacts by hand; 'automatic': every Contact in the Project " +
         "gets it) and how many Contacts have it.",
       inputSchema: {
@@ -1163,6 +2753,147 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/checklists/${id}`),
+    },
+
+    {
+      name: "makerble_get_checklist_summary",
+      description:
+        "Get the Checklist Summary for one Checklist: an oversight table showing, for each project (Workspace) " +
+        "you oversee that uses the Checklist, who manages it, its other colleagues, and how far its Contacts have got " +
+        "through each step. Use it to answer questions like 'which projects are behind on the Intake checklist?' or " +
+        "'who is responsible for the project with the lowest consent-form completion?'. A Checklist is a list of steps " +
+        "(actions) an organisation expects to be done for each Contact (Beneficiary), e.g. 'Consent form', 'Enrol'. " +
+        "Only Organisation Admins, Team Leaders and Album Editors can use this; others get 403. " +
+        "Workflow: 1) find the checklist_id with makerble_list_checklists (or from a Checklist the user names); " +
+        "2) call this tool; 3) to rank projects by a step, pass sort 'step_<n>' (n = the step number from the steps list) " +
+        "and direction 'asc' to find the furthest behind. " +
+        "Returns {checklist_id, checklist_name, sort, direction, steps: [{id, number, action_type, title}], page, page_size, " +
+        "page_count, total_count, data: [{project_id, project_name, managed_by: [names of Project Managers], " +
+        "workspace_colleagues: [names of reporters and observers], contacts_count (Contacts in the project with this " +
+        "Checklist), steps: [{action_id, number, done_count, percent}]}]}. Only Contacts the user may see are counted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number", description: "ID of the Checklist to summarise" },
+          sort: {
+            type: "string",
+            description: "Column to sort projects by: 'project' (default, by name), 'managed_by', 'colleagues', or 'step_<number>' to sort by the share of Contacts who have done that step (1 = first step)",
+          },
+          direction: { type: "string", enum: ["asc", "desc"], description: "Sort direction; default asc" },
+          page: { type: "number", description: "Page number, starting at 1" },
+          per_page: { type: "number", description: "Projects per page (default 10, max 200)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/summary`, p),
+    },
+
+    {
+      name: "makerble_get_checklist_progress",
+      description:
+        "See where the Contacts on a Checklist have got to: the pipeline shown in the Progress section of the " +
+        "Checklist's profile page. For each action, in order, returns completed_count (Contacts who have done it), " +
+        "furthest_count (Contacts for whom it is the furthest action done) and waiting_count (Contacts for whom it " +
+        "is the first action not done, so someone who did steps 1 and 3 is waiting on step 2), each with the first " +
+        "list_limit (30) Contacts as {beneficiary_id, name}. Also returns contacts_count and complete_count (every " +
+        "action done). Only Contacts the user can see are counted. Use it to answer 'who is stuck on which step' or " +
+        "'how many have finished intake'. Each Contact in a waiting list also has days_waiting (since the Checklist " +
+        "was added or the previous action was done), overdue (the action is past its due date), skipped_a_step (a " +
+        "colleague logged starting a later action first) and responsible (who is responsible for that action). Also " +
+        "returns overdue_count and complete (the first Contacts with every action done). Pass project_id to count only " +
+        "Contacts in one of the Projects the Checklist is added to (see makerble_get_checklist's projects), and " +
+        "responsible to count only Contacts whose waiting action a person or Team is responsible for.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          responsible: {
+            type: "string",
+            description: "Optional: 'me' (the signed-in user, directly or through one of their Teams), 'user:<user id>' " +
+              "or 'team:<team id>'. Only Contacts whose waiting action they are responsible for are counted.",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/checklists/${id}/progress`, params),
+    },
+
+    {
+      name: "makerble_list_checklist_progress_contacts",
+      description:
+        "List EVERY Contact behind one of a Checklist's progress counts, a page at a time. " +
+        "makerble_get_checklist_progress gives the counts but only the first list_limit (30) Contacts of each list; " +
+        "use this for the rest, e.g. to name everyone waiting on a step. Choose the list with list: " +
+        "'completed', 'furthest' or 'waiting' (the Table's lists for the action action_id: who has done it, for whom it " +
+        "is the furthest action done, who is waiting on it), 'board' (the Board column for action_id: those waiting on " +
+        "it, longest waiting first) or 'complete' (everyone with every action done; no action_id). Get action ids from " +
+        "makerble_get_checklist_progress's actions. Returns {page, page_size, page_count, total_count, data}, each " +
+        "Contact {beneficiary_id, name, actions_done}; in the waiting and board lists each also has days_waiting, " +
+        "overdue, skipped_a_step and responsible. Takes the same project_id and responsible filters as " +
+        "makerble_get_checklist_progress. Only Contacts the user can see are counted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          list: { type: "string", enum: ["completed", "furthest", "waiting", "board", "complete"], description: "Which list" },
+          action_id: { type: "number", description: "The action whose list it is. Required for every list but 'complete'" },
+          project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          responsible: { type: "string", description: "Optional: 'me', 'user:<user id>' or 'team:<team id>'" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Contacts per page (default 10, max 200)" },
+        },
+        required: ["id", "list"],
+      },
+      handler: ({ id, ...params }) => get(`/checklists/${id}/progress/contacts`, params),
+    },
+
+    {
+      name: "makerble_get_checklist_journey",
+      description:
+        "See a Checklist as its Participant Journey: the Journey view on the Checklist's profile page, which shows " +
+        "the steps left to right, grouped into stages (e.g. Sign up → Arrange support → Provide support → Monitor " +
+        "progress → Achieve the goal). Returns columns in order: each stage with its stage_id, name, icon and colour, " +
+        "and its steps (action_id, number, title, action_type and action_name, which is 'Not set yet' while no action " +
+        "type is chosen). A Checklist without stages has one column per step, named 'Step 1', 'Step 2' and so on, with " +
+        "a null stage_id. Each step also has done_count (Contacts who have done it) and waiting_count (Contacts for whom " +
+        "it is the first step not done), out of contacts_count, counting only Contacts the user can see. Use it to " +
+        "describe or present an Organisation's participant journey; for who is waiting where, use " +
+        "makerble_get_checklist_progress. To add or change stages, use makerble_update_checklist.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "Checklist ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/checklists/${id}/journey`),
+    },
+
+    {
+      name: "makerble_sketch_checklist",
+      description:
+        "Draft a participant journey Checklist from what an Organisation has already set up in one of its Projects " +
+        "('Sketched from your setup' on the Checklists page). Nothing is saved. Without project_id it picks the running " +
+        "Project with the most Contacts (beneficiaries) that has at least two of: an active Signup Page, a Contact Form " +
+        "(other than the Organisation's default), a Waiting List or Alumni status, and a Survey (Story Category); with " +
+        "project_id it drafts from that Project. The draft uses the five Participant Journey stages, leaving out any " +
+        "with nothing found: Sign up (one 'Complete a form' step per Signup Page), Arrange support (the Contact Forms, " +
+        "then Waiting List → Enrolled), Provide support (each Survey's first Wave, and 'Invite to an event' for the " +
+        "Project's Event Formats), Monitor progress (later Waves) and Achieve the goal (Move to Alumni). Every step " +
+        "already says what counts as done. Returns project_id, project_name, name ('<Project> journey'), summary (one " +
+        "sentence on what was found) and checklist: {name, stages, actions} in exactly the shape " +
+        "makerble_create_checklist takes. All are null when no Project has enough to draft from. Requires someone " +
+        "who can create Checklists for the Organisation." +
+        "\nWorkflow: (1) makerble_sketch_checklist. (2) Show the user the stages and steps and adjust them as asked " +
+        "(rename, remove, add). (3) makerble_create_checklist with charity_id and the checklist's name, stages and actions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "Optional: draft from this Project instead of the one Makerble would choose" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/checklists/sketch", p),
     },
 
     {
@@ -1175,9 +2906,15 @@ export function buildTools(api) {
         "custom_field_category_ids = Custom Forms for contacts, case_form_ids, label_ids) or pairs: " +
         "relationship_sides '<relationship_category_id>:parent|child', project_states " +
         "'<project_id>:<beneficiary_state_id>', project_event_categories '<project_id>:<event_category_id>', " +
-        "survey_waves '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
-        "campaign without Waves>'. The two 'for a relative' types take relatives: [{relationship_side, " +
+        "survey_waves, one of '<project_story_category_id (Survey Campaign)>:<send_survey_wave_id, or 0 for a " +
+        "campaign without Waves>' (that campaign in its Project), 'survey:<story_category_id (Survey)>' (that " +
+        "Survey in any Project) or 'shared:<story_category_id>:<send_survey_wave_id of a Shared Wave>' (that " +
+        "Shared Interval of the Survey in any Project). With many Projects, prefer a Survey or Shared Interval " +
+        "over listing every campaign. The two 'for a relative' types take relatives: [{relationship_side, " +
         "beneficiary_category_ids or survey_waves}], where the side is the relative's own (e.g. the Son). " +
+        "Instead of specific values, criteria {any: true} counts any record of the kind ('Any [noun]' on " +
+        "the Create Checklist page, named by any_name, e.g. 'Any relationship'). Criteria with nothing " +
+        "chosen are 'Not set yet': the action is saved but can't be done until something is chosen. " +
         "Action types with no criteria_keys are done by any record of the kind (e.g. create_task).",
       inputSchema: { type: "object", properties: {} },
       handler: () => get("/checklists/action_types"),
@@ -1187,9 +2924,16 @@ export function buildTools(api) {
       name: "makerble_create_checklist",
       description:
         "Create a Checklist for an Organisation. Requires an Organisation editor or reporter. Each action " +
-        "needs an action_type and, unless that type has no criteria_keys, at least one criteria value " +
-        "(see makerble_list_checklist_action_types). Actions keep the order given." +
+        "needs an action_type and, unless that type has no criteria_keys, criteria: specific values, or " +
+        "{any: true} for any record of the kind (see makerble_list_checklist_action_types). An action " +
+        "with no criteria is saved as 'Not set yet' and can't be done until they are set. Actions keep the order given." +
         " Each action may name who is responsible for it (owner_kind); leave it out for nobody in particular." +
+        " Each action may have a deadline (due_within_days); leave it out for none." +
+        " To map a participant journey, group the actions into stages (Participant Journey stages, each a name and an " +
+        "icon): list the stages with a key of your choosing and give each action the stage_key of its stage. Stages keep " +
+        "the order given and each stage's actions sit together. An action may leave out action_type to be saved as 'Not " +
+        "set yet', e.g. when sketching a journey before deciding how each step is recorded; it can't be done until a type " +
+        "is chosen." +
         "\nWorkflow: (1) makerble_list_checklist_action_types. (2) Find IDs with makerble_list_projects, " +
         "makerble_list_surveys, makerble_list_survey_campaigns, makerble_list_survey_waves, " +
         "makerble_list_contact_bio_forms etc., and owners with makerble_get_checklist_owner_options and " +
@@ -1201,15 +2945,59 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           name: { type: "string" },
           description: { type: "string" },
+          stages: {
+            type: "array",
+            description: "Optional Participant Journey stages, in order. Actions join one with stage_key",
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string", description: "Any short label unique in this request, e.g. 'signup', named by actions' stage_key" },
+                name: { type: "string", description: "e.g. 'Sign up', 'Arrange support'" },
+                icon: { type: "string", enum: ["clipboard", "calendar", "people", "chart", "flag", "message", "home", "heart", "school", "book"], description: "The stage's icon (default clipboard)" },
+              },
+              required: ["key", "name"],
+            },
+          },
           actions: {
             type: "array",
             items: {
               type: "object",
               properties: {
-                action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task" },
+                action_type: { type: "string", description: "e.g. add_role, complete_survey, create_task. Leave it out for 'Not set yet'" },
+                stage_key: { type: "string", description: "Optional: the key of the stage this action belongs to" },
                 title: { type: "string", description: "Shown on the Contact profile, e.g. 'Give them a Role'" },
                 description: { type: "string" },
-                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
+                due_within_days: {
+                  type: "integer",
+                  minimum: 0,
+                  maximum: 3650,
+                  description: "'Due within N days of the checklist being added': the action is due this many days after the " +
+                    "Checklist is added to a Contact (0 = the same day). Leave it out for no deadline",
+                },
+                only_this_project: {
+                  type: "boolean",
+                  description: "'Only count records in this project': for project_scopable types (surveys, events, labelled stories, cases, " +
+                    "project states), count only records made in the Project the Checklist was added to the Contact through",
+                },
+                allow_manual_completion: {
+                  type: "boolean",
+                  description: "'Allow colleagues to tick this off by hand with a note' (default false), for offline steps such as a " +
+                    "phone call or a paper form. See makerble_mark_contact_checklist_action_done",
+                },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, e.g. for self-paced training. " +
+                    "On the Checklist's page, Watch the journey shows each step as a card with its video: YouTube, Vimeo, Loom and " +
+                    "Google Drive links play in the card; other links (SharePoint, Slack) open in a new tab",
+                },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': what a colleague sees when they start this action for a Contact " +
+                    "before the actions above it on the Checklist are done. 'remind' (default) shows a reminder they can dismiss; " +
+                    "'ask_reason' ('Warn and ask for a reason to skip') makes them give a reason, which is logged",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1222,7 +3010,7 @@ export function buildTools(api) {
                   description: "For owner_kind 'relationship': '<relationship_category_id>:parent|child', the colleague's own side",
                 },
               },
-              required: ["action_type"],
+              required: ["title"],
             },
           },
         },
@@ -1236,13 +3024,31 @@ export function buildTools(api) {
       description:
         "Update a Checklist's name, description or actions. Requires an Organisation editor or reporter. " +
         "To change an action send its id with the new fields; to remove one send {id, _destroy: true}; " +
-        "actions without an id are added. Get the current actions with makerble_get_checklist first.",
+        "actions without an id are added. Get the current actions with makerble_get_checklist first." +
+        " Stages (Participant Journey stages) work the same way: send an existing stage's id to rename it, change its " +
+        "icon or move it (position), {id, _destroy: true} to remove it, and a new stage with a key. An action joins a " +
+        "stage with stage_key: a new stage's key, or an existing stage's id as a string; an empty stage_key takes it out " +
+        "of its stage. A stage left without actions is removed.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number" },
           name: { type: "string" },
           description: { type: "string" },
+          stages: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number", description: "An existing stage's ID" },
+                key: { type: "string", description: "For a new stage: any short label unique in this request, named by actions' stage_key" },
+                _destroy: { type: "boolean" },
+                name: { type: "string" },
+                icon: { type: "string", enum: ["clipboard", "calendar", "people", "chart", "flag", "message", "home", "heart", "school", "book"] },
+                position: { type: "number" },
+              },
+            },
+          },
           actions: {
             type: "array",
             items: {
@@ -1250,11 +3056,33 @@ export function buildTools(api) {
               properties: {
                 id: { type: "number" },
                 _destroy: { type: "boolean" },
-                action_type: { type: "string" },
+                action_type: { type: "string", description: "Empty for 'Not set yet'" },
+                stage_key: { type: "string", description: "A new stage's key, or an existing stage's id as a string; empty for no stage" },
                 position: { type: "number" },
                 title: { type: "string" },
                 description: { type: "string" },
-                criteria: { type: "object" },
+                criteria: { type: "object", description: "What counts as done, keyed by the type's criteria_keys, or {any: true} for any record of the kind" },
+                due_within_days: {
+                  type: ["integer", "null"],
+                  minimum: 0,
+                  maximum: 3650,
+                  description: "Days after the Checklist is added to a Contact that the action is due; null removes the deadline",
+                },
+                only_this_project: { type: "boolean", description: "'Only count records in this project' (project_scopable types only)" },
+                allow_manual_completion: {
+                  type: "boolean",
+                  description: "'Allow colleagues to tick this off by hand with a note'. Left as it is when not sent",
+                },
+                video_url: {
+                  type: "string",
+                  description: "'Video (optional)': a web link (https://) to a video about this step, shown in Watch the journey. " +
+                    "An empty string removes it. Left as it is when not sent",
+                },
+                if_earlier_steps_not_done: {
+                  type: "string",
+                  enum: ["remind", "ask_reason"],
+                  description: "'If earlier steps aren't done': 'remind' or 'ask_reason' (ask for a reason to skip). Left as it is when not sent",
+                },
                 owner_kind: {
                   type: "string",
                   enum: ["none", "adder", "user", "team", "relationship"],
@@ -1281,25 +3109,48 @@ export function buildTools(api) {
         "Set how a Project offers a Checklist (the Add to Projects popup). mode 'manual': colleagues may " +
         "add it to the Project's Contacts by hand. 'automatic': every Contact now in the Project gets it " +
         "(in the background) and so does every Contact who later joins or is created in it. 'none': stop " +
-        "offering it; Contacts who already have it keep it. Requires an Organisation editor or the " +
-        "Project's Project Manager.",
+        "offering it; Contacts who already have it keep it. For an automatic one, on_leave says what happens " +
+        "when a Contact leaves the Project, moves to a closed status in it (Alumni or Declined) or is archived: " +
+        "'keep' (the default) or 'remove_if_incomplete', which takes it off them unless every action is done. " +
+        "A Checklist removed that way keeps the Contact's progress and comes back when they rejoin. You can " +
+        "send on_leave on its own to change only that. Requires an Organisation editor or the Project's " +
+        "Project Manager. Returns {project_id, assignment_mode, on_leave}.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The Checklist ID" },
           project_id: { type: "number" },
           mode: { type: "string", enum: ["none", "manual", "automatic"] },
+          on_leave: {
+            type: "string",
+            enum: ["keep", "remove_if_incomplete"],
+            description: "Only for mode 'automatic': what happens when a Contact leaves the Project",
+          },
         },
-        required: ["id", "project_id", "mode"],
+        required: ["id", "project_id"],
       },
-      handler: ({ id, project_id, mode }) => patch(`/checklists/${id}/projects/${project_id}`, { mode }),
+      handler: ({ id, project_id, mode, on_leave }) =>
+        patch(`/checklists/${id}/projects/${project_id}`, {
+          ...(mode !== undefined && { mode }),
+          ...(on_leave !== undefined && { on_leave }),
+        }),
     },
 
     {
       name: "makerble_get_contact_checklists",
       description:
         "Get a Contact's (beneficiary's) Checklists, as on the Checklists box of their profile page: for " +
-        "each, done_count of actions_count and every action with done true/false and who is responsible " +
+        "each, done_count of actions_count and every action with done true/false. A done action has a " +
+        "completion saying when it was done (completed_at: when the record that did it was made, e.g. the " +
+        "survey's date), by whom (completed_by_user_id, completed_by_name; null when unknown), how " +
+        "(completion_method: detected, or manual when a colleague ticked it off by hand) and with what record (proof_type and proof_id, e.g. Story " +
+        "123; proof_deleted true once that record was deleted). A done action stays done. Actions are " +
+        "ticked in the background a few seconds after the record is saved, so re-check shortly after " +
+        "creating a story or role. Each action has a deadline when its Checklist sets one: due_on (the date, " +
+        "the day the Checklist was added to the Contact plus the action's due_within_days; null for none), " +
+        "done_late (done after due_on) and overdue (not done and due_on has passed). Use overdue to find " +
+        "the steps that need chasing. allow_manual_completion says whether an action can be ticked off by " +
+        "hand (makerble_mark_contact_checklist_action_done). Each action also says who is responsible " +
         "for it for this Contact: owner_kind etc., owner_overridden (true when changed for this Contact " +
         "only), owner_description (e.g. 'Safeguarding Team'), responsible_user_ids (only colleagues who " +
         "can see the Contact) and owner_warning when nobody responsible can see them. Use it to see what " +
@@ -1317,24 +3168,224 @@ export function buildTools(api) {
     },
 
     {
-      name: "makerble_add_checklist_to_contact",
+      name: "makerble_get_contact_next_step",
       description:
-        "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
-        "one of the Contact's Projects lets you add are allowed; call with list_available: true to get them " +
-        "first (returns [{id, name}] and adds nothing).",
+        "Get what to do next for a Contact (beneficiary), as on the Next step card of their profile: the first " +
+        "action not yet done on each of their Checklists, the most pressing first (overdue, then the earliest " +
+        "due_on, then by checklist name). data[0] is the next step. Each step gives the checklist " +
+        "(checklist_id, checklist_name), its place in it (number of total, e.g. step 4 of 6), the action " +
+        "(action_id, action_type, action_name e.g. 'Invite to an event', title, description), its deadline " +
+        "(due_on, overdue), if_earlier_steps_not_done ('remind', or 'ask_reason' when a colleague must give a " +
+        "reason to skip it) and who is responsible (owner_description, responsible_user_ids). others_count is " +
+        "how many other checklists are waiting; all_done is true when every action on the Contact's " +
+        "checklists is done. Use it to tell a colleague what to do next for a Contact; to see every action, " +
+        "use makerble_get_contact_checklists. Only Contacts you can see are returned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+        },
+        required: ["beneficiary_id"],
+      },
+      handler: ({ beneficiary_id }) => get(`/beneficiaries/${beneficiary_id}/checklists/next_step`),
+    },
+
+    {
+      name: "makerble_get_focus",
+      description:
+        "Get what needs the signed-in user next, as on their Focus page (Today › Focus): one list from every " +
+        "source they haven't switched off, most overdue first. Today the only source is Checklist Actions " +
+        "(type 'checklist_actions'): for each Contact (beneficiary) and Checklist, the first step not yet done, " +
+        "when the user is responsible for it. Each item has id, type, title (the step), contact {id, name}, " +
+        "context (e.g. 'Checklist Action · Intake · step 2 of 5', plus who is responsible when it isn't the user), " +
+        "url, due_on, due_text (e.g. '15 days overdue', 'Due today', 'No due date'), section ('overdue', 'today', " +
+        "'this_week' for the next 7 days, or 'later' for later or undated) and action {label, url, method}. The " +
+        "response also gives counts (all, and per type), sections [{key, label, count}], sources [{key, label, " +
+        "shown}] and teams (true when the user is in a Team, so scope='teams' is available). Use it to answer " +
+        "'what should I do next?' or 'what's overdue for me?'; then use makerble_get_contact_next_step or " +
+        "makerble_get_contact_checklists for a Contact's detail. Only Contacts the user can see are included, " +
+        "and there is no view of everyone's work: use a Checklist's progress for that.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scope: {
+            type: "string",
+            enum: ["me", "teams"],
+            description: "'me' (default): what the user is responsible for. 'teams': also what their Teams are responsible for.",
+          },
+          type: { type: "string", description: "Only items of this type, e.g. 'checklist_actions'." },
+          section: { type: "string", enum: ["overdue", "today", "this_week", "later"], description: "Only items in this section." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+      },
+      handler: (params) => get("/focus", params),
+    },
+
+    {
+      name: "makerble_set_focus_sources",
+      description:
+        "Choose which sources the signed-in user's Focus page (Today › Focus) shows, as its ⚙ 'What Focus shows " +
+        "you' panel does. Pass the keys to show; every other source is switched off. Keys come from the sources " +
+        "list of makerble_get_focus (today only 'checklist_actions', labelled Checklist Actions). Saved for this " +
+        "user only; their email and web notification settings are unchanged. Returns sources [{key, label, shown}].",
+      inputSchema: {
+        type: "object",
+        properties: {
+          shown_sources: { type: "array", items: { type: "string" }, description: "The source keys to show; [] for none" },
+        },
+        required: ["shown_sources"],
+      },
+      handler: ({ shown_sources }) => patch("/focus/settings", { shown_sources }),
+    },
+
+    {
+      name: "makerble_get_start_page",
+      description:
+        "Get the signed-in user's start page: the Today page they land on after signing in and whenever they " +
+        "click Home or the Makerble logo, chosen under Personal Settings › Preferences › Start page. Returns " +
+        "start_page (the key of their choice; 'newsfeed' when they've never chosen) and options [{key, label, " +
+        "description}], the pages they can choose: 'newsfeed' (Newsfeed, formerly My Home, the default), 'focus' " +
+        "(Focus, their next steps across Checklists), 'snapshot' (Snapshot, their organisation's headline numbers) " +
+        "and 'autopilot' (Autopilot, only offered when Autopilot is on for one of their organisations). Use it " +
+        "before makerble_set_start_page to see which pages can be chosen.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/start_page"),
+    },
+
+    {
+      name: "makerble_set_start_page",
+      description:
+        "Set the signed-in user's start page, as Personal Settings › Preferences › Start page does: the Today " +
+        "page they land on after signing in and when they click Home or the Makerble logo. start_page must be " +
+        "the key of one of the options makerble_get_start_page returns ('newsfeed', 'focus', 'snapshot' or " +
+        "'autopilot'); a page not offered to this user is refused. Saved for this user only. If Focus is chosen " +
+        "but they can neither see nor create a Checklist, Home takes them to Newsfeed with a note saying why. " +
+        "Returns start_page and options, as makerble_get_start_page does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          start_page: { type: "string", enum: ["newsfeed", "focus", "snapshot", "autopilot"], description: "The start page's key" },
+        },
+        required: ["start_page"],
+      },
+      handler: ({ start_page }) => patch("/start_page", { start_page }),
+    },
+
+    {
+      name: "makerble_check_contact_checklist_step",
+      description:
+        "Before doing a Checklist action for a Contact (beneficiary), check whether its earlier steps on the same " +
+        "Checklist are done (the 'soft gate'). Returns gated (true when earlier steps aren't done), missing (each " +
+        "{action_id, number, action_type, title, required_first}) and reason_required (true when a missing step is " +
+        "set to 'Warn and ask for a reason to skip', shown to colleagues as Required first). Nothing is blocked: " +
+        "workflow: (1) call this; (2) if gated, tell the user which steps are missing and suggest doing the first " +
+        "one instead; (3) if they still want to go ahead, call makerble_skip_contact_checklist_steps, with a reason " +
+        "when reason_required is true; (4) then do the action. Get checklist_id and action_id from " +
+        "makerble_get_contact_next_step or makerble_get_contact_checklists.",
       inputSchema: {
         type: "object",
         properties: {
           beneficiary_id: { type: "number", description: "The Contact ID" },
           checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action about to be done" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id }) =>
+        get(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/gate`),
+    },
+
+    {
+      name: "makerble_skip_contact_checklist_steps",
+      description:
+        "Record that a Checklist action is being done for a Contact before its earlier steps are done (going past " +
+        "the soft gate found with makerble_check_contact_checklist_step). Saves who, when, which steps were skipped " +
+        "and the reason, and puts it on the Contact's timeline as a story. A reason is required when a missing step " +
+        "is Required first (reason_required). Needs edit access to the Contact. Returns the skip: " +
+        "{id, checklist_action_id, skipped_actions: [{id, title, required_first}], reason, user_id, story_id, created_at}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action being done early" },
+          reason: { type: "string", description: "Why it is being done before the earlier steps (max 2000 characters)" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id, reason }) =>
+        post(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/skips`, { reason }),
+    },
+
+    {
+      name: "makerble_list_checklist_skips",
+      description:
+        "List the times colleagues did a Checklist's actions before the earlier steps were done (skipped steps, the " +
+        "exceptions shown on the Checklist's Board), newest first: who (user_id, user_name), for which Contact " +
+        "(beneficiary_id), which action (checklist_action_id, action_title), which steps were skipped and the reason. " +
+        "Only Contacts you can see are included. Use it to spot where a process isn't being followed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          checklist_id: { type: "number" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only skips saved after this (ISO 8601)" },
+        },
+        required: ["checklist_id"],
+      },
+      handler: ({ checklist_id, ...p }) => get(`/checklists/${checklist_id}/skips`, p),
+    },
+
+    {
+      name: "makerble_add_checklist_to_contact",
+      description:
+        "Add a Checklist to a Contact by hand (Add a Checklist on their profile page). Only Checklists that " +
+        "one of the Contact's Projects lets you add are allowed, plus, for an Organisation Admin, one that was " +
+        "removed from the Contact while one of their Projects adds it automatically; call with list_available: true to get them " +
+        "first (returns [{id, name, projects: [{id, name}]}] and adds nothing). A Checklist is added through " +
+        "one of its projects: when it lists more than one, pass the chosen project_id (actions set to 'Only " +
+        "count records in this project' then count only that Project's records). Adding one that was removed " +
+        "from the Contact earlier (makerble_remove_checklist_from_contact) restores the actions they had done.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          project_id: { type: "number", description: "The Project to add it through; required when the Checklist lists several projects" },
           list_available: { type: "boolean", description: "Only list the Checklists that can be added" },
         },
         required: ["beneficiary_id"],
       },
-      handler: ({ beneficiary_id, checklist_id, list_available }) =>
+      handler: ({ beneficiary_id, checklist_id, project_id, list_available }) =>
         list_available || !checklist_id
           ? get(`/beneficiaries/${beneficiary_id}/checklists/available`)
-          : post(`/beneficiaries/${beneficiary_id}/checklists`, { checklist_id }),
+          : post(`/beneficiaries/${beneficiary_id}/checklists`, project_id ? { checklist_id, project_id } : { checklist_id }),
+    },
+
+    {
+      name: "makerble_remove_checklist_from_contact",
+      description:
+        "Remove a Checklist from one Contact (beneficiary), as 'Remove from this contact' in the ⋯ menu of a " +
+        "Checklist on their profile's Checklists box does: for one added by mistake or no longer relevant. It " +
+        "disappears from the Contact's Checklists, the Checklist's progress and their Focus items, and the " +
+        "removal is recorded on the Contact's History. Their progress is kept: adding the Checklist again " +
+        "(makerble_add_checklist_to_contact) restores the actions they had done. A Project that adds the " +
+        "Checklist automatically won't add it back. Allowed for Organisation Admins, and for colleagues who " +
+        "could add that Checklist to the Contact by hand; anyone else gets 403. Returns {checklist_id, " +
+        "beneficiary_id, removed_at, removed_by_user_id}." +
+        "\nWorkflow: (1) makerble_get_contact_checklists to find the checklist_id and show the user how many " +
+        "actions are done (done_count of actions_count). (2) Confirm with the user. (3) this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number", description: "The Checklist ID, from makerble_get_contact_checklists" },
+        },
+        required: ["beneficiary_id", "checklist_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id }) => del(`/beneficiaries/${beneficiary_id}/checklists/${checklist_id}`),
     },
 
     {
@@ -1382,6 +3433,41 @@ export function buildTools(api) {
       handler: async ({ beneficiary_id, checklist_id, action_id, use_checklist_default, ...owner }) => {
         const path = `/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/owner`;
         return use_checklist_default ? del(path) : patch(path, owner);
+      },
+    },
+
+    {
+      name: "makerble_mark_contact_checklist_action_done",
+      description:
+        "Tick off by hand one action of a Contact's (beneficiary's) Checklist, for a step that leaves no " +
+        "record Makerble can detect: a phone call, a home visit, a paper consent form (the 'Mark as done…' " +
+        "link on their profile's Checklists box). Only actions whose Checklist allows it can be ticked off " +
+        "this way: allow_manual_completion true in makerble_get_contact_checklists. The note is saved as a " +
+        "Story on the Contact's timeline, which becomes the action's proof; completion_method is then " +
+        "'manual'. completed_on is the date it happened (YYYY-MM-DD, today or earlier). When the Contact is " +
+        "in more than one Project you can record stories in and the Checklist wasn't added through one of " +
+        "them, give project_id to say which Project the Story goes in. Requires edit access to the Contact. " +
+        "Send undo: true to take it back: only the colleague who marked it, or an Organisation Admin, can; " +
+        "the Story stays on the timeline. Attaching an evidence file isn't possible here; use the API " +
+        "directly (multipart) or the profile page for that. Returns {checklist_id, action_id, done, completion}." +
+        "\nWorkflow: (1) makerble_get_contact_checklists for the checklist_id and an action id with " +
+        "allow_manual_completion true and done false. (2) this tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          beneficiary_id: { type: "number", description: "The Contact ID" },
+          checklist_id: { type: "number" },
+          action_id: { type: "number", description: "The Checklist action's id" },
+          completed_on: { type: "string", description: "Date it happened, YYYY-MM-DD; today or earlier" },
+          note: { type: "string", description: "What happened. Required unless undo is true" },
+          project_id: { type: "number", description: "The Project to record the note's Story in, when there is a choice" },
+          undo: { type: "boolean", description: "Take back a tick made by hand instead" },
+        },
+        required: ["beneficiary_id", "checklist_id", "action_id"],
+      },
+      handler: ({ beneficiary_id, checklist_id, action_id, undo, ...completion }) => {
+        const path = `/beneficiaries/${beneficiary_id}/checklists/${checklist_id}/actions/${action_id}/completion`;
+        return undo ? del(path) : post(path, completion);
       },
     },
 
@@ -1439,8 +3525,17 @@ export function buildTools(api) {
         "event_filter_params / qualifying_event_filter_params}: on the days change_id was recorded for a " +
         "Contact at an event, the % of those days the qualifying Engagement Trackers were also recorded " +
         "for them at an event on the same date, e.g. all 4 meals on every class day = from '100', to '100'), " +
-        "distance_travelled ({trackers: [{indicator_id, directions: " +
-        "['improved'|'no_change'|'worsened']}], same_project}), indicator_comparisons ({indicator_id: " +
+        "distance_travelled (Distance Travelled Direction: {trackers: [{indicator_id, directions: " +
+        "['improved'|'no_change'|'worsened'|'reached_top']}], match: 'any'|'all'|'at_least', match_count, " +
+        "same_project, story_category_ids, responses_between}; compares each Contact's first and latest answer to each Choice Tracker, reached_top = " +
+        "latest answer is the best on the scale; match says how many trackers a Contact must meet, default any, " +
+        "e.g. improved in at least 2 of 3 goals = match 'at_least', match_count 2; with denominator " +
+        "'enough_data' the % is out of Contacts with two responses on that many trackers; optional " +
+        "story_category_ids (Survey ids) compares only answers given in those Surveys, e.g. when teachers and " +
+        "parents fill in different versions of the same survey; optional responses_between " +
+        "('dd/mm/yyyy - dd/mm/yyyy', either end may be blank) compares only answers dated in that range, " +
+        "narrowing a Cohort Tracker's reporting period), " +
+        "indicator_comparisons ({indicator_id: " +
         "{response: 'any'|'latest', op, sub_ratio_ids, values}}) and indicator_sub_ratios_hash " +
         "({indicator_id: [sub_ratio_id]}). The Contacts page's other sections apply to Contacts' current " +
         "details, e.g. group_ids, beneficiary_types, age_from / age_to ({year, month, day}), " +
@@ -1731,8 +3826,8 @@ export function buildTools(api) {
         "Makerble's own features create, rather than Contacts tagged in updates. Its source says what it " +
         "counts: 'signpostings' (Signpostings made from a Project), 'internal_referrals' (Contacts in a " +
         "Project added to another of the Organisation's Projects), 'cases_created' (Cases created on a " +
-        "Project), 'cases_closed' (each time one of those Cases is closed) or 'cases_open' (the Cases open " +
-        "at the end of each timeframe). count_mode is 'items' (each signposting, referral, Case or closing; " +
+        "Project), 'cases_closed' (each time one of those Cases is closed), 'cases_open' (the Cases open " +
+        "at the end of each timeframe) or 'time_spent' (hours logged in Timesheets, unit 'hours'). count_mode is 'items' (each signposting, referral, Case or closing; " +
         "result_kind 'additive', adds up across periods, except cases_open which is always 'snapshot') or " +
         "'contacts' (each Contact once; result_kind 'snapshot'). Only an Organisation's editors and reporters, and its project managers, " +
         "can see them.",
@@ -1776,7 +3871,7 @@ export function buildTools(api) {
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           project_id: { type: "number", description: "The Project to preview the result on" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "See makerble_create_workflow_tracker" },
         },
@@ -1804,7 +3899,17 @@ export function buildTools(api) {
         "with that Case Form (IDs from makerble_list_case_forms); leave it out for any Case Form. " +
         "Confidential Cases are counted but only listed to people who can see them. count_mode 'items' " +
         "(default) counts each signposting, referral, Case or closing and adds up across periods (except " +
-        "cases_open); 'contacts' counts each Contact once and is a snapshot. Requires an editor or reporter of the Organisation." +
+        "cases_open); 'contacts' counts each Contact once and is a snapshot. 'time_spent' adds up the hours " +
+        "logged in Timesheets on the Project (or an Album's Projects, each entry once), to 1 decimal place: Task " +
+        "and Update (Story) Timesheets are dated by their Update, or by when the Task was done, and Event " +
+        "Timesheets by when the Event started, so time logged later lands in the period the work happened; " +
+        "Timesheets on draft Updates aren't counted. It always counts 'items' and its unit is 'hours'. Its " +
+        "settings: kinds (any of 'updates_and_tasks', 'event_staff' for Event Workers and Event Managers, " +
+        "'event_guests' for Contacts at Events; default the first two), and optionally only some colleagues' " +
+        "time: user_ids (makerble_list_users) and/or roles ('editor': Organisation Admins and Project " +
+        "Managers, 'reporter': Changemakers, 'observer': Observers), which leave Event guests' time as it is. " +
+        "Use it in a Formula Tracker for e.g. hours per flagged child (Time spent ÷ a Cohort Tracker). " +
+        "Requires an editor or reporter of the Organisation." +
         "\nWorkflow: (1) makerble_list_projects for Project IDs. (2) makerble_preview_workflow_tracker to " +
         "check the count. (3) makerble_create_workflow_tracker. (4) makerble_add_workflow_tracker_to_project " +
         "to place it in a column of a Project's Impact Scorecard, optionally with a target. Albums pick it " +
@@ -1815,13 +3920,15 @@ export function buildTools(api) {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           name: { type: "string", description: "Shown next to the result, e.g. 'Signpostings made'" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: {
             type: "object",
             description:
               "internal_referrals: {destinations: 'any'|'only'|'except', project_ids: [number]}; " +
-              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); signpostings: none",
+              "cases_created, cases_closed, cases_open: {case_form_id: number} (optional); " +
+              "time_spent: {kinds: ['updates_and_tasks'|'event_staff'|'event_guests'], user_ids: [number], " +
+              "roles: ['editor'|'reporter'|'observer']} (all optional); signpostings: none",
           },
         },
         required: ["charity_id", "name", "source"],
@@ -1842,7 +3949,7 @@ export function buildTools(api) {
           id: { type: "number" },
           name: { type: "string" },
           description: { type: "string" },
-          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open"] },
+          source: { type: "string", enum: ["signpostings", "internal_referrals", "cases_created", "cases_closed", "cases_open", "time_spent"] },
           count_mode: { type: "string", enum: ["items", "contacts"] },
           settings: { type: "object", description: "Replaces the stored settings" },
         },
@@ -1945,7 +4052,9 @@ export function buildTools(api) {
         "Get a Workflow Tracker's result on a Project's or an Album's (Bundle's) Results Canvas, and the items " +
         "behind it (e.g. each signposting: the Contact (Beneficiary), who they were signposted to and when; each " +
         "internal referral: the Contact, the Project they were added to and when; each Case: the Contact, the Case's " +
-        "title and case_id, and when it was created, closed or last opened). On an Album the item or " +
+        "title and case_id, and when it was created, closed or last opened; each Time spent entry: whose time it is " +
+        "(user_id, user_name, or the Contact for an Event guest's), its hours, the Update, Task or Event it was " +
+        "logged on (story_id, task_id or event_id) and that item's date; number is then hours). On an Album the item or " +
         "Contact is counted once across its open Projects, so an Album's result is never the sum of its " +
         "Projects'. result_kind 'additive' (counting each item) adds up across periods; 'snapshot' (counting each " +
         "Contact once, or the Cases open) is worked out for the window on its own, read as_of its last day (or today while that is " +
@@ -1990,6 +4099,268 @@ export function buildTools(api) {
       },
       handler: async ({ id, project_id }) => {
         await del(`/workflow_trackers/${id}/projects/${project_id}`);
+        return { removed: true, id, project_id };
+      },
+    },
+
+    // ── Formula Trackers (CP-8514) ─────────────────────────────────────────────
+    {
+      name: "makerble_list_formula_trackers",
+      description:
+        "List an Organisation's Formula Trackers. A Formula Tracker is a metric worked out from the " +
+        "Organisation's other trackers with + − × ÷, numbers and brackets, e.g. Referrals completed = " +
+        "External referrals + Internal referrals, or % of children receiving support = Children supported ÷ " +
+        "Children enrolled × 100. Each has its formula as tokens (expression), formula_text (the formula in " +
+        "words), display_format ('number' or 'percentage'), decimal_places, unit_label and result_kind: " +
+        "'additive' (only + and − of trackers that add up; adds up across periods) or 'snapshot' (each " +
+        "timeframe worked out from its own totals). Only an Organisation's editors and reporters, and its " +
+        "project managers, can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/formula_trackers", p),
+    },
+
+    {
+      name: "makerble_get_formula_tracker",
+      description:
+        "Get one Formula Tracker by ID: its formula (expression tokens and formula_text), display settings, " +
+        "result_kind, where it is used (usage: projects, albums, templates) and warnings about its formula.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/formula_trackers/${id}`),
+    },
+
+    {
+      name: "makerble_list_formula_tracker_operands",
+      description:
+        "List the trackers a Formula Tracker can use, by name: the Organisation's Activity and Engagement " +
+        "trackers (type 'Change'), Achievement and Numerical trackers (type 'Indicator'; Choice trackers " +
+        "aren't listed), Cohort Trackers ('CohortTracker'), Workflow Trackers ('WorkflowTracker'), filtered " +
+        "versions ('FilteredMetric') and other Formula Trackers ('FormulaTracker'). Each has the type and id " +
+        "to put in a tracker token, its front-end type_name (e.g. 'Engagement tracker'), its unit and whether " +
+        "it adds up across periods (result_kind). Use this before makerble_create_formula_tracker.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/formula_trackers/operands", p),
+    },
+
+    {
+      name: "makerble_preview_formula_tracker",
+      description:
+        "Check a formula before saving it: returns its result on one of the Organisation's Projects for the " +
+        "current period (ending at the Project's next deadline, or today), Year to Date and All-time (null " +
+        "where it divides by 0), each tracker's own result, result_kind, and warnings worth checking (a " +
+        "tracker used twice is counted twice; a Numerical tracker added to a count; trackers with different " +
+        "units added together; dividing by a tracker that could be 0). A formula with errors (e.g. it ends " +
+        "with an operator, or brackets don't match) is refused with errors and warnings. Takes the same " +
+        "expression as makerble_create_formula_tracker; pass formula_tracker_id when editing one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "The Project to preview the result on" },
+          formula_tracker_id: { type: "number", description: "The Formula Tracker being edited, if any" },
+          expression: { type: "array", description: "See makerble_create_formula_tracker", items: { type: "object" } },
+          display_format: { type: "string", enum: ["number", "percentage"] },
+        },
+        required: ["charity_id", "project_id", "expression"],
+      },
+      handler: ({ charity_id, project_id, formula_tracker_id, ...formula_tracker }) =>
+        post("/formula_trackers/preview", { charity_id, project_id, formula_tracker_id, formula_tracker }),
+    },
+
+    {
+      name: "makerble_create_formula_tracker",
+      description:
+        "Create a Formula Tracker (Create a metric > Formula Tracker): a metric worked out from the " +
+        "Organisation's other trackers. expression is the formula as an ordered list of tokens: " +
+        "{kind: 'tracker', type, id} (type and id from makerble_list_formula_tracker_operands), " +
+        "{kind: 'operator', value: '+' | '-' | '*' | '/'}, {kind: 'number', value: 100}, {kind: 'open'} " +
+        "and {kind: 'close'} (brackets). × and ÷ are worked out before + and −, brackets first. Examples: " +
+        "A + B is [{kind:'tracker',type:'Change',id:1},{kind:'operator',value:'+'},{kind:'tracker',type:'WorkflowTracker',id:2}]; " +
+        "a percentage A ÷ B × 100 adds {kind:'operator',value:'/'}, B, {kind:'operator',value:'*'}, " +
+        "{kind:'number',value:100} with display_format 'percentage'. For each timeframe each tracker's result " +
+        "is worked out first, then the formula, so a Year to Date percentage is Year to Date numerator ÷ Year " +
+        "to Date denominator. Dividing by 0 gives no result. Refused when the formula is empty, starts or ends " +
+        "with an operator, has two operators or values in a row, unmatched or empty brackets, uses another " +
+        "Organisation's tracker, or uses itself. Requires an editor or reporter of the Organisation." +
+        "\nWorkflow: (1) makerble_list_formula_tracker_operands for the trackers. (2) makerble_list_projects " +
+        "for a Project ID. (3) makerble_preview_formula_tracker to check the result and warnings. " +
+        "(4) makerble_create_formula_tracker. (5) makerble_add_formula_tracker_to_project to place it in a " +
+        "column of a Project's Impact Scorecard, optionally with a target. Albums pick it up automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "Shown next to the result, e.g. 'Referrals completed'" },
+          description: { type: "string" },
+          expression: {
+            type: "array",
+            description: "The formula's tokens, in order",
+            items: {
+              type: "object",
+              properties: {
+                kind: { type: "string", enum: ["tracker", "operator", "number", "open", "close"] },
+                type: { type: "string", enum: ["Change", "Indicator", "CohortTracker", "WorkflowTracker", "FilteredMetric", "FormulaTracker"] },
+                id: { type: "number" },
+                value: { description: "operator: + - * /; number: the number" },
+              },
+              required: ["kind"],
+            },
+          },
+          display_format: { type: "string", enum: ["number", "percentage"], description: "Show result as (default number)" },
+          decimal_places: { type: "number", description: "0 to 3, default 0" },
+          unit_label: { type: "string", description: "Optional, e.g. 'h per child'" },
+        },
+        required: ["charity_id", "name", "expression"],
+      },
+      handler: ({ charity_id, ...formula_tracker }) =>
+        post("/formula_trackers", { formula_tracker: { charity_id, ...formula_tracker } }),
+    },
+
+    {
+      name: "makerble_update_formula_tracker",
+      description:
+        "Update a Formula Tracker's name, description, expression (replaces the whole formula), " +
+        "display_format, decimal_places or unit_label. Only the fields sent change. Changes apply everywhere " +
+        "it is used (see makerble_get_formula_tracker usage). Requires an Organisation editor, or the " +
+        "reporter who created it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          name: { type: "string" },
+          description: { type: "string" },
+          expression: { type: "array", description: "See makerble_create_formula_tracker", items: { type: "object" } },
+          display_format: { type: "string", enum: ["number", "percentage"] },
+          decimal_places: { type: "number" },
+          unit_label: { type: "string" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...formula_tracker }) => patch(`/formula_trackers/${id}`, { formula_tracker }),
+    },
+
+    {
+      name: "makerble_delete_formula_tracker",
+      description:
+        "Delete a Formula Tracker. Refused while it is used on any Project, Album or Scorecard Template; " +
+        "remove it from those first.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+      },
+      handler: async ({ id }) => {
+        await del(`/formula_trackers/${id}`);
+        return { deleted: true, id };
+      },
+    },
+
+    {
+      name: "makerble_add_formula_tracker_to_project",
+      description:
+        "Place a Formula Tracker in a column of a Project's Impact Scorecard (Edit Project Metrics), " +
+        "optionally with a one-off target (a whole percentage, 0 to 100, for a percentage tracker). Columns: " +
+        "activities, engagement, potential (short-term outcomes), behaviour (medium-term), growth (long-term). " +
+        "The tracker and Project must belong to the same Organisation, and you need rights to edit the " +
+        "Project's metrics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          column: { type: "string", enum: ["activities", "engagement", "potential", "behaviour", "growth"] },
+          target: { type: "number", description: "Optional one-off target" },
+        },
+        required: ["id", "project_id", "column"],
+      },
+      handler: ({ id, project_id, column, target }) =>
+        post(`/formula_trackers/${id}/projects/${project_id}`, { column, ...(target !== undefined ? { target } : {}) }),
+    },
+
+    {
+      name: "makerble_get_formula_tracker_targets",
+      description:
+        "Get a Formula Tracker's targets on a Project or an Album (its Set Targets page): the one-off " +
+        "target and any deadline targets ([{date, number}]). Pass project_id or album_id. Requires rights to " +
+        "edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id }) =>
+        get(album_id ? `/formula_trackers/${id}/albums/${album_id}` : `/formula_trackers/${id}/projects/${project_id}`),
+    },
+
+    {
+      name: "makerble_set_formula_tracker_targets",
+      description:
+        "Set a Formula Tracker's targets on a Project or an Album (Set Targets): target is the one-off " +
+        "number; deadlines is a list of {date: 'YYYY-MM-DD', number} that REPLACES this tracker's deadline " +
+        "targets there ([] clears them). An additive tracker adds its targets up across deadlines; a snapshot " +
+        "uses each deadline's target on its own. A percentage tracker's targets are whole percentages from 0 " +
+        "to 100. An Album's target is never the sum of its Projects'. The tracker must already be on that " +
+        "Project or one of the Album's Projects. Requires rights to edit that Project's or Album's targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+          album_id: { type: "number", description: "The Album (Bundle) ID" },
+          target: { type: "number", description: "One-off target" },
+          deadlines: {
+            type: "array",
+            description: "Deadline targets, replacing any already set for this tracker",
+            items: {
+              type: "object",
+              properties: { date: { type: "string" }, number: { type: "number" } },
+              required: ["date", "number"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_id, album_id, ...targets }) =>
+        patch(album_id ? `/formula_trackers/${id}/albums/${album_id}` : `/formula_trackers/${id}/projects/${project_id}`, targets),
+    },
+
+    {
+      name: "makerble_remove_formula_tracker_from_project",
+      description: "Remove a Formula Tracker from a Project's Impact Scorecard, and its Albums if no other Project in them uses it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Formula Tracker ID" },
+          project_id: { type: "number" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: async ({ id, project_id }) => {
+        await del(`/formula_trackers/${id}/projects/${project_id}`);
         return { removed: true, id, project_id };
       },
     },
@@ -2164,6 +4535,33 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_create_engagement_tracker",
+      description:
+        "Call makerble_list_changes or makerble_search_library first and reuse a tracker that fits; only create " +
+        "what's missing. Creates an Engagement Tracker (a participation Change; also called an Attendance " +
+        "tracker): a yes/no record of whether a Contact took part, e.g. 'Attended the weekly session'. It is " +
+        "made the same way as on the Create Metric page: hidden from other organisations and editable only by " +
+        "the owning organisation's Organisation Editors. organisation_id must be an organisation (Charity) the " +
+        "user belongs to; leave it out to make the user the owner. If the user's organisation or library " +
+        "already has a tracker with the same or a near-identical name, nothing is created and you get a 409 " +
+        "error listing the duplicates (id, type, name, owner): reuse one, or call again with force: true only " +
+        "if none fits. Returns the new tracker: id, name, icon, stage_id, activity (false), participation " +
+        "(true), owner_type, owner_id. To put it in a Survey, pass its id as activity_tracker_id in a question " +
+        "of makerble_create_survey or makerble_update_survey.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The Engagement Tracker's name, e.g. 'Attended the weekly session'" },
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user belongs to. Leave out to make the user the owner" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["name"],
+      },
+      handler: ({ name, organisation_id, force }) =>
+        post("/engagement_trackers", { name, owner_id: organisation_id, force }),
+    },
+
+    {
       name: "makerble_list_indicators",
       description:
         "List the Indicators (scale/binary/value) the signed-in user can see: their own, and those of every organisation where they are an editor, reporter or observer. Linked to Outcomes. Progress Panel cols 3–5. " +
@@ -2209,13 +4607,21 @@ export function buildTools(api) {
     {
       name: "makerble_list_outcomes",
       description:
-        "List all Outcomes. Each has a stage (short/medium/long-term) placing it in Progress Panel cols 3–5.",
+        "List the Outcomes the signed-in user can see: their own, those of every organisation where they are an editor, reporter or observer, and those used by one of their Projects. " +
+        "Each has a stage (short/medium/long-term) placing it in Progress Panel cols 3–5. " +
+        "The Outcome library shared by all organisations (the public library) is left out unless include_public_library is true. " +
+        "Set it when looking for an existing Outcome to reuse rather than listing the organisation's own.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Also return public-library Outcomes from other organisations. Default false.",
+          },
         },
       },
       handler: (p) => get("/outcomes", p),
@@ -2223,13 +4629,23 @@ export function buildTools(api) {
 
     {
       name: "makerble_get_outcome",
-      description: "Get a single Outcome by ID.",
+      description:
+        "Get a single Outcome by ID. Returns not-found for an Outcome the signed-in user cannot see. " +
+        "A public-library Outcome owned by another organisation is only returned when include_public_library is true.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number" } },
+        properties: {
+          id: { type: "number" },
+          include_public_library: {
+            type: "boolean",
+            description:
+              "Allow a public-library Outcome from another organisation to be returned. Default false.",
+          },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/outcomes/${id}`),
+      handler: ({ id, include_public_library }) =>
+        get(`/outcomes/${id}`, { include_public_library }),
     },
 
     {
@@ -2411,10 +4827,14 @@ export function buildTools(api) {
     {
       name: "makerble_list_dropdown_fields",
       description:
-        "List all Dropdown/List fields (Ratio Sets). Type 'identity' = Contact Bio Forms; 'progress' = Scale Indicators.",
+        "List all Dropdown/List fields (Ratio Sets). Type 'identity' = Contact Bio Forms; 'progress' = Scale Indicators. " +
+        "To find a Dropdown, pass search: it matches the Dropdown's name, its answer choices (Sub Ratios), and the places it is used " +
+        "(Contact Bio Forms, Project Templates and Event Forms in your organisations, choice trackers (Scale Indicators) built on it, " +
+        "and the Surveys (Story Categories) those trackers are in), ignoring case. Returns the same paginated list, narrowed.",
       inputSchema: {
         type: "object",
         properties: {
+          search: { type: "string", description: "Text to look for in the Dropdown's name, answer choices or places used" },
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
@@ -2441,7 +4861,284 @@ export function buildTools(api) {
         get("/sub_ratios", { ...p, ...(ratio_set_ids ? { ratio_set_ids } : {}) }),
     },
 
+    {
+      name: "makerble_get_dropdown_records_populated",
+      description:
+        "See which records hold answers from a Dropdown field (a Ratio Set, also called a List), before deleting " +
+        "or replacing it. Use the id from makerble_list_dropdown_fields. Returns title, deletable (true once the " +
+        "Dropdown is in no form and no record holds its answers, as Manage Dropdowns' Delete requires) and records: " +
+        "for each record type (Contacts, Stories, Projects, Events, Surveys, Ideas), organisations (id, name and " +
+        "count of those records in each organisation the user is an Organisation Admin of) and external_usage, true " +
+        "if records in other organisations hold its answers (not counted). Counts only, no records. Shown as " +
+        "'Records populated' in a Dropdown's Actions on Manage Dropdowns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Dropdown's (Ratio Set's) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/ratio_sets/${id}/records_populated`),
+    },
+
     // ── Signup Pages / Offline Collector ────────────────────────────────────────
+    {
+      name: "makerble_list_signup_pages",
+      description:
+        "List the Signup Pages (Referral Link Details in the API) the user can see: public forms people fill in " +
+        "to sign themselves (and their family) up, which create Contacts (Beneficiaries) in a Project. Organisation " +
+        "Editors see all their organisation's Signup Pages; Project Editors, Reporters and Observers see those that " +
+        "collect into their Projects. Returns what the Manage Sign-up Pages table shows: id, name, organisation, " +
+        "type (fixed: each person is an individual, A, B, C, in a fixed order; flexible: people are added per " +
+        "audience (Beneficiary Role), in any number and order), status and active, public_link, emails_enabled, " +
+        "created_by/at and last_updated_by/updated_at, and individuals: for each individual or audience, its label, " +
+        "audience, Contact Form (Beneficiary Category), project, project status (Beneficiary State), surveys " +
+        "(Story Categories) with any wave, and send_emails (whether a confirmation email goes to that person). " +
+        "Includes deactivated Signup Pages. Use makerble_get_signup_page_offline_definition for one Signup Page's " +
+        "fields and full Send Emails settings. Paginated; use last_synced_datetime for incremental sync.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this organisation's Signup Pages." },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200." },
+          last_synced_datetime: { type: "string", description: "Only Signup Pages changed after this ISO 8601 time." },
+        },
+      },
+      handler: (p) => get("/referral_link_details", p),
+    },
+
+    {
+      name: "makerble_list_relationship_categories",
+      description:
+        "List an organisation's Relationship Categories: the kinds of relationship Contacts (Beneficiaries) can have " +
+        "with each other, each with two sides, e.g. School & Pupil or Mother & Son (parent_title and child_title). " +
+        "Use an id with makerble_create_signup_page (fixed) or makerble_create_permitted_relationship. Any member of the " +
+        "organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, parent_title, child_title, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_create_relationship_category",
+      description:
+        "Create a Relationship Category: a kind of relationship Contacts (Beneficiaries) can have with each other, " +
+        "with two sides, e.g. Parent & Child or Client & Emergency Contact (parent_title and child_title). This is " +
+        "'New Relationship Type' on the organisation's Relationship Types page. " +
+        "\nWhen it's needed: a fixed Signup Page (makerble_create_signup_page, type fixed) that signs up several " +
+        "people at once (e.g. a child and their parent) connects them with a Relationship Category, so the " +
+        "organisation must have one first. Flexible Signup Pages also need audiences (Contact Roles) and permitted " +
+        "relationships. " +
+        "\nAlways call makerble_list_relationship_categories first and reuse a category that already fits. The same " +
+        "pair of titles can't exist twice in an organisation, whatever their case: the API then answers 422 with " +
+        "errors ['Already exists'] and existing_id, the id of the one already there; use that id instead. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the category: { id, parent_title, child_title, created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          parent_title: { type: "string", description: "The first side, e.g. Parent" },
+          child_title: { type: "string", description: "The second side, e.g. Child" },
+        },
+        required: ["parent_title", "child_title"],
+      },
+      handler: (p) => post("/relationship_categories", p),
+    },
+
+    {
+      name: "makerble_list_audiences",
+      description:
+        "List an organisation's audiences (Contact Roles; Beneficiary Roles), e.g. Participant, Parent or Volunteer, " +
+        "as on its Audiences page, by name. Each lists the Contact Types (Beneficiary Types: Person, Organisation, ...) " +
+        "it is for. A flexible Signup Page (makerble_create_signup_page, type flexible) signs people up as audiences, " +
+        "and a permitted relationship (makerble_list_permitted_relationships) says which audiences may be on each side " +
+        "of a Relationship Category. Any member of the organisation can list them. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, name, color, contact_types: [{ id, name }], " +
+        "created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/audiences", p),
+    },
+
+    {
+      name: "makerble_create_audience",
+      description:
+        "Create an audience (Contact Role; Beneficiary Role), e.g. Participant or Parent: the role a Contact " +
+        "(Beneficiary) has in the organisation. This is 'New Audience' on the Audiences page. " +
+        "\nWhen it's needed: a flexible Signup Page signs each person up as an audience, and needs a permitted " +
+        "relationship between them. Order for a flexible Signup Page: (1) a Relationship Category " +
+        "(makerble_list_relationship_categories / makerble_create_relationship_category); (2) the audiences on each " +
+        "side (this tool); (3) a permitted relationship between them (makerble_create_permitted_relationship); " +
+        "(4) makerble_create_signup_page. " +
+        "\nAlways call makerble_list_audiences first and reuse one that fits: names aren't unique, so creating " +
+        "'Parent' twice makes two audiences. color is one of the approved colours (the first, #f96d67, if left out): " +
+        "#f96d67 #f31208 #bc1204 #f92915 #f26f21 #ff6800 #e59200 #ffa300 #62a837 #71c240 #2b800e #36ac9a #2e9283 " +
+        "#226c61 #225f85 #2e85bc #3596d6 #063262 #ac3898 #6c235f #620a4d #8c1b6d #d07db7 #a81e6a #e82a92 #8e0132. " +
+        "contact_type_id links it to a Contact Type (Beneficiary Type, e.g. Person or Organisation; " +
+        "makerble_list_contact_types); Person if left out. " +
+        "\nOnly organisation editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the audience: { id, name, color, contact_types: [{ id, name }], created_at, updated_at }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          name: { type: "string", description: "e.g. Participant" },
+          color: { type: "string", description: "One of the approved colours, e.g. #ac3898. Optional." },
+          contact_type_id: { type: "number", description: "The Contact Type (Beneficiary Type) it is for. Optional; Person if left out." },
+        },
+        required: ["name"],
+      },
+      handler: (p) => post("/audiences", p),
+    },
+
+    {
+      name: "makerble_list_permitted_relationships",
+      description:
+        "List an organisation's permitted relationships (Role-holder Relationships), as on its Role-holder " +
+        "Relationships page: for a Relationship Category (e.g. Parent & Child), which audience (Contact Role; " +
+        "Beneficiary Role) may be on its parent side and which on its child side, and which of the category's titles " +
+        "each may hold. A flexible Signup Page can only sign people up as audiences that have one. " +
+        "relationship_category_id narrows it to one category. Only organisation editors (Organisation Admins) can list " +
+        "them; anyone else gets 403. " +
+        "Returns { page, page_size, page_count, total_count, data: [{ id, relationship_category: { id, parent_title, " +
+        "child_title }, parent_audience: { id, name }, child_audience: { id, name }, parent_audience_titles, " +
+        "child_audience_titles, created_at, updated_at }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "Only those for this Relationship Category" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string" },
+        },
+      },
+      handler: (p) => get("/permitted_relationships", p),
+    },
+
+    {
+      name: "makerble_create_permitted_relationship",
+      description:
+        "Create a permitted relationship (Role-holder Relationship): say which audience (Contact Role; Beneficiary " +
+        "Role) may be on each side of a Relationship Category, e.g. Parent on the parent side of Parent & Child and " +
+        "Participant on the child side. This is 'New Role-holder Relationship' on the Role-holder Relationships page. " +
+        "\nWhen it's needed: a flexible Signup Page (makerble_create_signup_page, type flexible) can only sign people " +
+        "up as audiences with a permitted relationship between them. Order: (1) a Relationship Category " +
+        "(makerble_list_relationship_categories / makerble_create_relationship_category); (2) the two audiences " +
+        "(makerble_list_audiences / makerble_create_audience); (3) this tool; (4) makerble_create_signup_page. " +
+        "\nAlways call makerble_list_permitted_relationships first (with relationship_category_id) and reuse one " +
+        "that fits. By default the parent audience holds the category's parent_title and the child audience its " +
+        "child_title; parent_audience_titles / child_audience_titles choose others, from the category's two titles " +
+        "only (e.g. ['Brother', 'Sister'] for an audience that may be either side). " +
+        "\nThe category and both audiences must be the organisation's own (404 otherwise). Only organisation " +
+        "editors (Organisation Admins) may create them; anyone else gets 403. " +
+        "Returns the permitted relationship, in the same shape as makerble_list_permitted_relationships.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation. Optional if you belong to only one organisation." },
+          relationship_category_id: { type: "number", description: "The Relationship Category" },
+          parent_audience_id: { type: "number", description: "The audience on the category's parent side (Audience A)" },
+          child_audience_id: { type: "number", description: "The audience on the category's child side (Audience B)" },
+          parent_audience_titles: { type: "array", items: { type: "string" }, description: "Optional: which of the category's titles the parent audience may hold" },
+          child_audience_titles: { type: "array", items: { type: "string" }, description: "Optional: which of the category's titles the child audience may hold" },
+        },
+        required: ["relationship_category_id", "parent_audience_id", "child_audience_id"],
+      },
+      handler: (p) => post("/permitted_relationships", p),
+    },
+
+    {
+      name: "makerble_create_signup_page",
+      description:
+        "Make a Signup Page (Referral Link Detail in the API): a public form people fill in to sign themselves, and " +
+        "often their family, up; each person becomes a Contact (Beneficiary) in a Project. Makes it as the New Signup " +
+        "Page screen does, active unless active is false, and returns it with its public_link. Only Organisation " +
+        "Editors can. There are two types. FIXED (type: fixed): Individual A is the person signing up (project_id, " +
+        "beneficiary_state_id = project status (Beneficiary State), contact_form_id = Contact Form (Beneficiary " +
+        "Category), surveys); each entry in individuals adds Individual B, C, ... in that order, related to Individual A " +
+        "through a Relationship Category (relationship is its parent or child title, e.g. \"Child\"). Prerequisite: the " +
+        "organisation has at least one Relationship Category. FLEXIBLE (type: flexible): each entry in audiences is an " +
+        "audience (Beneficiary Role) respondents can add any number of people as, in any order (e.g. several children). " +
+        "Prerequisite: each audience is a role with a permitted relationship (role-holder relationship) in the " +
+        "organisation. Every Project, Contact Form, Relationship Category and audience must be the organisation's, and " +
+        "each survey (Story Category) one its Project collects, with an optional wave_id of that survey; otherwise the " +
+        "422 errors name each problem. Workflow: (1) makerble_list_signup_pages to check the organisation doesn't " +
+        "already have this Signup Page. (2) makerble_list_projects, makerble_list_contact_bio_forms and " +
+        "makerble_list_surveys for the ids. (3) makerble_create_signup_page. (4) Optionally " +
+        "makerble_set_signup_page_emails for its confirmation emails. Set allow_finish_later: true when people will " +
+        "need to save a long Signup Page part-way through: they then get a Save & Finish Later button and a resume link " +
+        "(unfinished forms are deleted 30 days after they were last saved).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The organisation" },
+          name: { type: "string" },
+          type: { type: "string", enum: ["fixed", "flexible"] },
+          active: { type: "boolean", description: "Default true" },
+          project_id: { type: "number", description: "Individual A's Project (fixed); for flexible, defaults to the first audience's" },
+          beneficiary_state_id: { type: "number", description: "Project status people are added with, e.g. Enrolled or Waiting List" },
+          contact_form_id: { type: "number", description: "Individual A's Contact Form (Beneficiary Category)" },
+          surveys: {
+            type: "array",
+            description: "Surveys the Project collects, each with an optional wave",
+            items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } }, required: ["id"] },
+          },
+          description: { type: "string" },
+          thank_you_message: { type: "string" },
+          allow_finish_later: { type: "boolean", description: "Default false. Let people save the Signup Page part-way through and finish it later from a resume link (Allow people to save this form and finish it later)" },
+          individuals: {
+            type: "array",
+            description: "Fixed only: Individual B, C, ... in order",
+            items: {
+              type: "object",
+              properties: {
+                relationship_category_id: { type: "number" },
+                relationship: { type: "string", description: "The Relationship Category's parent or child title for this individual" },
+                project_id: { type: "number" },
+                beneficiary_state_id: { type: "number" },
+                contact_form_id: { type: "number" },
+                surveys: { type: "array", items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } } } },
+              },
+            },
+          },
+          audiences: {
+            type: "array",
+            description: "Flexible only: one per audience (Beneficiary Role)",
+            items: {
+              type: "object",
+              properties: {
+                beneficiary_role_id: { type: "number" },
+                project_id: { type: "number" },
+                beneficiary_state_id: { type: "number" },
+                contact_form_id: { type: "number" },
+                surveys: { type: "array", items: { type: "object", properties: { id: { type: "number" }, wave_id: { type: "number" } } } },
+              },
+            },
+          },
+        },
+        required: ["charity_id", "name", "type"],
+      },
+      handler: (body) => post("/referral_link_details", body),
+    },
+
     {
       name: "makerble_get_signup_page_offline_definition",
       description:
@@ -2450,7 +5147,13 @@ export function buildTools(api) {
         "Offline Collector app uses. Useful for inspecting or testing a Signup Page's offline " +
         "form before it goes out to field workers. Uses your own Makerble credentials, and only " +
         "works for Signup Pages belonging to an organisation you have access to. Does not include " +
-        "the offline submission bearer token — that's only issued to the offline device itself.",
+        "the offline submission bearer token — that's only issued to the offline device itself. " +
+        "When any Send Emails email is switched on, it also returns send_emails: for each individual " +
+        "(or audience) whether its confirmation email is on and, if so, the subject_line, message_body, " +
+        "merge_tags (the {{Field name}} personalisation tags, each with the Contact Form field's id and " +
+        "field_type, or null if no field matches), recipient_fields (the email fields it is sent to) and " +
+        "included_individuals (whose submitted details are added); and the same for additional_recipients " +
+        "(fixed email addresses, whose emails aren't personalised). Without send_emails, no email is on.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2459,6 +5162,60 @@ export function buildTools(api) {
         required: ["signup_page_id"],
       },
       handler: ({ signup_page_id }) => get(`/referral_link_details/${signup_page_id}/definition`),
+    },
+
+    {
+      name: "makerble_set_signup_page_emails",
+      description:
+        "Set the Send Emails settings of a Signup Page (Referral Link Detail): the confirmation email each person " +
+        "who is signed up receives once the Signup Page is completed, and an email to Additional Recipients (fixed " +
+        "addresses such as the office). Saves what the Send Emails screen saves. Only Organisation Editors can do this, " +
+        "and the organisation must have email messaging switched on in Preferences (otherwise a 422 says so). " +
+        "Workflow: (1) makerble_get_signup_page_offline_definition to see the individuals' labels (\"Individual A\", " +
+        "\"Individual B\", or a flexible Signup Page's audience person names), each Contact Form's fields, and any " +
+        "current send_emails. (2) Pick each individual's email field(s) (fields of type email_address) for " +
+        "recipient_field_ids. (3) Call this tool. Personalise subject_line and message_body (HTML) with {{Field name}} " +
+        "merge tags naming the individual's Contact Form fields, e.g. {{name}}; Additional Recipients' emails aren't " +
+        "personalised. included_individuals adds those individuals' submitted answers to the email. Individuals you " +
+        "leave out keep their settings; enabled: false switches an email off. Everything is saved or nothing is. " +
+        "Returns send_emails as the definition shows it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          signup_page_id: { type: "number", description: "The Signup Page (Referral Link Detail) ID" },
+          individuals: {
+            type: "array",
+            description: "Confirmation emails to the people signed up, one per individual or audience",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string", description: "The individual's label from the definition, e.g. \"Individual A\"" },
+                enabled: { type: "boolean" },
+                subject_line: { type: "string", description: "May contain {{Field name}} merge tags" },
+                message_body: { type: "string", description: "HTML. May contain {{Field name}} merge tags" },
+                recipient_field_ids: { type: "array", items: { type: "number" }, description: "Email fields on this individual's Contact Form to send to" },
+                include_submission_details: { type: "boolean", description: "Add the submitted answers of included_individuals" },
+                included_individuals: { type: "array", items: { type: "string" }, description: "Labels of the individuals whose answers are added" },
+              },
+              required: ["label"],
+            },
+          },
+          additional_recipients: {
+            type: "object",
+            description: "The email to fixed addresses, e.g. the organisation's office",
+            properties: {
+              enabled: { type: "boolean" },
+              recipients: { type: "array", items: { type: "string" }, description: "Email addresses" },
+              subject_line: { type: "string" },
+              message_body: { type: "string", description: "HTML" },
+              include_submission_details: { type: "boolean" },
+              included_individuals: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        required: ["signup_page_id"],
+      },
+      handler: ({ signup_page_id, ...body }) => put(`/referral_link_details/${signup_page_id}/email_settings`, body),
     },
 
     {
@@ -2574,8 +5331,10 @@ export function buildTools(api) {
         "System Access users only). frameworks is the ordered list of existing Impact Frameworks; " +
         "new_frameworks names new, empty Impact Frameworks to create and add at the end (e.g. one per " +
         "Objective). value_source is 'organisation_values' (each Organisation's own Financial Values, the " +
-        "default) or 'set_values' (values defined in the set per Outcome, set later with " +
-        "makerble_update_framework_set). status 'draft' hides it from people who can't edit it.\n" +
+        "default) or 'set_values' (values defined in the set per Outcome, and optionally per Outcome's own " +
+        "Indicator, set later with makerble_update_framework_set). level3_singular/plural name each " +
+        "Outcome's own Indicators, e.g. 'Measure' for the TOM System. status 'draft' hides it from people " +
+        "who can't edit it.\n" +
         "Workflow: (1) makerble_list_framework_sets to avoid duplicating an existing set. " +
         "(2) makerble_create_framework_set. (3) Link the Organisation's own Indicators to the set's " +
         "Outcomes so its Stories count towards them.",
@@ -2590,6 +5349,8 @@ export function buildTools(api) {
           level1_plural: { type: "string", description: "e.g. goals" },
           level2_singular: { type: "string", description: "e.g. Target" },
           level2_plural: { type: "string", description: "e.g. targets" },
+          level3_singular: { type: "string", description: "e.g. Measure (default Indicator)" },
+          level3_plural: { type: "string", description: "e.g. measures (default indicators)" },
           value_source: { type: "string", enum: ["organisation_values", "set_values"] },
           version_label: { type: "string", description: "e.g. '2025 review'" },
           supersedes_id: { type: "number", description: "The Framework Set this version replaces" },
@@ -2620,9 +5381,11 @@ export function buildTools(api) {
       description:
         "Update a Framework Set the user can edit. Only the fields sent change, except that frameworks " +
         "(when sent) replaces the whole ordered list and financial_values (when sent) replaces the " +
-        "Financial Value chosen for each Outcome. financial_values are used when value_source is " +
-        "'set_values': find Outcome IDs with makerble_list_outcomes and Financial Values the Organisation " +
-        "can use in Makerble.",
+        "Financial Values chosen for the set. financial_values are used when value_source is " +
+        "'set_values'. Give a row an indicator_id to value one of the Outcome's own Indicators (e.g. a " +
+        "TOMs Measure); a Story counting as that Indicator then uses its value instead of the Outcome's. " +
+        "Find Outcome IDs with makerble_list_outcomes, an Outcome's own Indicators with " +
+        "makerble_list_outcome_indicators, and Financial Values the Organisation can use in Makerble.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2635,6 +5398,8 @@ export function buildTools(api) {
           level1_plural: { type: "string" },
           level2_singular: { type: "string" },
           level2_plural: { type: "string" },
+          level3_singular: { type: "string" },
+          level3_plural: { type: "string" },
           value_source: { type: "string", enum: ["organisation_values", "set_values"] },
           version_label: { type: "string" },
           supersedes_id: { type: "number" },
@@ -2657,7 +5422,14 @@ export function buildTools(api) {
             type: "array",
             items: {
               type: "object",
-              properties: { outcome_id: { type: "number" }, financial_value_id: { type: "number" } },
+              properties: {
+                outcome_id: { type: "number" },
+                indicator_id: {
+                  type: "number",
+                  description: "Optional: one of the Outcome's own Indicators; omit for the Outcome's own value",
+                },
+                financial_value_id: { type: "number" },
+              },
               required: ["outcome_id", "financial_value_id"],
             },
           },
@@ -2675,7 +5447,9 @@ export function buildTools(api) {
         "Indicators (progress trackers) linked to an Outcome inside a Framework Set, e.g. its 'Bootcamp " +
         "completions' Indicator linked to SDG Target 4.4. Every Story recorded against that Indicator " +
         "then counts towards the Outcome, in every project (all_projects: true) or only the projects " +
-        "in project_ids. Returns indicator_name, outcome_title, project_ids and all_projects.",
+        "in project_ids. Returns indicator_name, outcome_title, framework_indicator_id and " +
+        "framework_indicator_name (which of the Outcome's own Indicators it counts as, if any), project_ids " +
+        "and all_projects.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2695,18 +5469,26 @@ export function buildTools(api) {
         "Link one of an Organisation's Indicators to an Outcome (e.g. an SDG Target) in a Framework Set the " +
         "Organisation can use, so its Stories count towards that Outcome. The Indicator must be one the " +
         "Organisation owns or uses in its projects. Leave project_ids empty to count it in every project, " +
-        "or list the projects it should count in; linking again with more projects adds them. Requires an " +
-        "Organisation admin.\n" +
+        "or list the projects it should count in; linking again with more projects adds them. Optionally " +
+        "give framework_indicator_id: which of the Outcome's own Indicators the Organisation's Indicator " +
+        "counts as (e.g. the TOMs Measure 'NT1: Local direct employees (FTE)' under a TOMs Outcome). In a " +
+        "set with its own Financial Values, Stories are then valued at that Indicator's value. It can't be " +
+        "changed on an existing link: remove the link first. Requires an Organisation admin.\n" +
         "Workflow: (1) makerble_list_framework_sets to choose a set. (2) makerble_get_framework_set for its " +
         "Impact Frameworks (template_id), then find the Outcome ID inside the right framework, e.g. with " +
-        "makerble_list_outcomes. (3) makerble_list_indicators for the Organisation's Indicator. " +
-        "(4) makerble_link_indicator_to_framework.",
+        "makerble_list_outcomes. (3) Optionally makerble_list_outcome_indicators for that Outcome's own " +
+        "Indicators. (4) makerble_list_indicators for the Organisation's Indicator. " +
+        "(5) makerble_link_indicator_to_framework.",
       inputSchema: {
         type: "object",
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           indicator_id: { type: "number" },
           outcome_id: { type: "number", description: "An Outcome in one of the set's Impact Frameworks" },
+          framework_indicator_id: {
+            type: "number",
+            description: "Optional: one of the Outcome's own Indicators that this Indicator counts as",
+          },
           project_ids: { type: "array", items: { type: "number" }, description: "Empty or omitted: every project" },
         },
         required: ["charity_id", "indicator_id", "outcome_id"],
@@ -2802,7 +5584,15 @@ export function buildTools(api) {
         "the events of projects they edit and events they are an Event Manager or Event Worker at. " +
         "Filters: charity_id (one organisation), project_id, event_category_id (Event Format, e.g. Workshops — " +
         "find ids with makerble_list_event_formats), event_type, start_date / end_date (YYYY-MM-DD; the event " +
-        "starts between them), master_event_id (every event in one recurring series). Each item returns id, " +
+        "starts between them), master_event_id (every event in one recurring series), and form_field_filters: " +
+        "the answers on the event's Event Creation Form (its custom fields and Dropdowns), e.g. every event whose " +
+        "Activity Dropdown is Archery. Call makerble_list_event_filter_fields first for the filter keys, then pass " +
+        "an object of key => value: text for a Text / Email Address field (contains, ignoring case), digits for a " +
+        "Telephone field, 'yes' or 'no' for a Tickbox / Attachment / Signature field, <key>_from and/or <key>_to " +
+        "for a Number, Date (YYYY-MM-DD) or Time (HH:MM) range, and a list of answer choice ids for a Dropdown " +
+        "(the event matches if it has any of them). Several keys must all match. sort orders the whole list by " +
+        "those fields: a sort_key from makerble_list_event_filter_fields followed by asc or desc, several " +
+        "comma-separated; blank answers come last. Each item returns id, " +
         "name, start_datetime, end_datetime, timezone, location, event_type, master_event_id, project {id, name}, " +
         "event_category {id, name} (the Event Format), guests_count (guests are Contacts), managers_count and " +
         "workers_count. Use makerble_get_event for an event's full details. " +
@@ -2817,12 +5607,50 @@ export function buildTools(api) {
           start_date: { type: "string", description: "Only events starting on or after this date (YYYY-MM-DD)" },
           end_date: { type: "string", description: "Only events starting on or before this date (YYYY-MM-DD)" },
           master_event_id: { type: "number", description: "Only the events of the recurring series this master event starts" },
+          form_field_filters: {
+            type: "object",
+            description:
+              "Event Creation Form answers to match, keyed by the filter_keys of makerble_list_event_filter_fields, " +
+              "e.g. { \"custom_field_12\": \"archery\", \"custom_field_15_from\": 5, \"ratio_set_7\": [31, 32] }",
+            additionalProperties: {
+              oneOf: [{ type: "string" }, { type: "number" }, { type: "array", items: { type: "number" } }],
+            },
+          },
+          sort: { type: "string", description: "e.g. 'custom_field_12 desc' or 'ratio_set_7 asc, custom_field_15 desc'. Default: soonest first" },
           page: { type: "number" },
           per_page: { type: "number", description: "Events per page. Default 10, max 200" },
           last_synced_datetime: { type: "string", description: "Only events changed after this ISO 8601 time" },
         },
       },
       handler: (p) => get("/events", p),
+    },
+
+    {
+      name: "makerble_list_event_filter_fields",
+      description:
+        "List the fields events can be filtered and sorted by with makerble_list_events: the custom fields and " +
+        "Dropdowns (ratio sets) on the Event Creation Forms of the user's organisations' Event Formats " +
+        "(event categories) — the 'Event Creation Form fields' section of the Filter Events panel on Makerble's " +
+        "Manage Events page. Use it when someone wants to find events by what was recorded about them, e.g. 'all " +
+        "the archery sessions' or 'events for ages 5 to 10'. Each item returns key, id, name, data_type (text, " +
+        "email_address, telephone, number, date, time, tickbox, file (Attachment), signature or dropdown), " +
+        "filter_keys (the keys to use in form_field_filters; a Number, Date or Time field has <key>_from and " +
+        "<key>_to), filter_hint (what value to send) and sort_key (for sort). A Dropdown's filter takes answer " +
+        "choice (sub ratio) ids: pass dropdown_id with that item's id, and optionally query with part of a " +
+        "name, to list its answer choices [{id, name}] alphabetically instead. " +
+        "Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "Only this Organisation's (Charity's) Event Creation Forms" },
+          dropdown_id: { type: "number", description: "List this Dropdown's answer choices instead of the fields" },
+          query: { type: "string", description: "With dropdown_id: only answer choices whose name contains this" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Items per page. Default 10, max 200" },
+        },
+      },
+      handler: ({ dropdown_id, ...p }) =>
+        dropdown_id ? get(`/event_filter_fields/${dropdown_id}/choices`, p) : get("/event_filter_fields", p),
     },
 
     {
@@ -3075,6 +5903,87 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_list_registers",
+      description:
+        "List the Registers of the recurring event series the signed-in user staffs: each series in which they are " +
+        "an Event Worker or Event Manager of an event starting today or later, soonest next event first, as the " +
+        "Registers tab of the Events tile on My Homepage shows them. Use it to answer 'which registers do I need to " +
+        "fill in?' and to find a series' master_event_id for makerble_get_event_register. Returns { page, page_size, " +
+        "page_count, total_count, data: [{ master_event_id, name (the series name), project: {id, name}, " +
+        "next_event: {id, name, start_datetime} }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Series per page. Default 10, max 200" },
+        },
+      },
+      handler: (p) => get(`/registers`, p),
+    },
+
+    {
+      name: "makerble_get_event_register",
+      description:
+        "Get the Register of a recurring event series: the attendance grid a teacher would use, with a row per " +
+        "guest (Contact / beneficiary) invited to any event in the series and, for every event in the series in " +
+        "date order, that guest's answers to the attendance Survey (Story Category) set on the Event Format. Pass " +
+        "the id of any event in the series (the master event or a subsequent event); a one-off event has no " +
+        "register (404). Use it to answer questions like 'who attended the last three Ruby Training sessions?' or " +
+        "'how late was Ann each week?'. Returns { master_event_id, name (the series name, without the event's " +
+        "number), schedule, project: {id, name}, survey: {id, name} or null when the Event Format has no " +
+        "attendance Survey, columns: [{ current_field_id, name, type (scale, binary, value, participation or " +
+        "custom_field), compulsory }], events: [{ id, name, start_datetime, full (at its guest capacity), totals: " +
+        "[{ current_field_id, name, total }] for Activity metrics, which are counted once per event rather than " +
+        "per guest }], page, page_size, page_count, total_count, data: [{ contact_id, name, events: [{ event_id, " +
+        "in_event (whether the guest is invited to that event), story_id (the guest's latest attendance Story for " +
+        "it, or null), answers: { current_field_id: value or null } }] }] }. Guests are in alphabetical order, a " +
+        "page at a time. Anyone who can open the event page can read it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of any event in the series" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Guests per page. Default 10, max 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/events/${id}/register`, p),
+    },
+
+    {
+      name: "makerble_update_register_cell",
+      description:
+        "Save one answer on the Register of a recurring event series: one guest's (Contact's) answer to one " +
+        "question of the attendance Survey (Story Category) for one event, as the pencil in a Register cell does. " +
+        "Use makerble_get_event_register first to find the event ids, contact ids and question ids (columns[]." +
+        "current_field_id, and events[].totals[].current_field_id for Activity metrics) and each question's type. " +
+        "The answer goes in the guest's latest attendance Story for that event; if they have none, they are added " +
+        "to the event's latest Story, or a Story is created. Only that one answer changes, and compulsory questions " +
+        "may be left unanswered. value by type: scale = an array of answer choice (sub-ratio) ids, e.g. [12] " +
+        "(makerble_list_answer_choices lists them; the Survey may allow only one); binary or participation = true " +
+        "or false; value = a number of 0 or more; custom_field = text, a date as YYYY-MM-DD or a time as HH:MM; an " +
+        "empty value clears the answer. For an Activity metric (counted once per event) leave out contact_id and " +
+        "send the event's total as a whole number. The contact must already be a guest at the event " +
+        "(makerble_add_event_guests adds one). Event Workers and Event Managers of the event, its Project Managers " +
+        "and Organisation Admins may save answers. Returns { event_id, contact_id, current_field_id, story_id, answer }.\n" +
+        "Before saving, tell the user which guest, event and question you will change and the new answer.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          event_id: { type: "number", description: "The event the answer is for" },
+          contact_id: { type: "number", description: "The guest (Contact id); leave out for an Activity metric total" },
+          current_field_id: { type: "number", description: "The question, from makerble_get_event_register's columns" },
+          value: {
+            description: "The answer: sub-ratio ids, true/false, a number, text, YYYY-MM-DD or HH:MM. Empty clears it.",
+            anyOf: [{ type: "array", items: { type: "number" } }, { type: "boolean" }, { type: "number" }, { type: "string" }],
+          },
+        },
+        required: ["event_id", "current_field_id", "value"],
+      },
+      handler: ({ event_id, ...body }) => patch(`/events/${event_id}/register/cells`, body),
+    },
+
+    {
       name: "makerble_add_event_guests",
       description:
         "Add Contacts (beneficiaries) as guests of an event, as the event page's Add Guests does. Only Contacts " +
@@ -3239,6 +6148,91 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_event_format",
+      description:
+        "Get one Event Format (called Event Category / event_category in the API) with all its settings. " +
+        "An Event Format is a template for events — e.g. Workshops, Classes, Meetings, Therapy sessions — " +
+        "managed on an organisation's Manage Event Formats page. Only an Organisation Admin of its " +
+        "organisation can read it (others get 403; another organisation's returns 404). Find the id with " +
+        "makerble_list_event_formats. Use it to check whether a format is a one-to-one or group appointment " +
+        "and how long its appointments last. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/event_categories/${id}`),
+    },
+
+    {
+      name: "makerble_create_event_format",
+      description:
+        "Create an Event Format (called Event Category / event_category in the API): a template for an " +
+        "organisation's events, as Create Event Format on the Manage Event Formats page. Only an Organisation " +
+        "Admin of charity_id can create one (others get 403). Give it a name and the organisation's Guest " +
+        "Statuses its events use (guest_status_ids, in order). To make it an appointment, set appointment_type " +
+        "('one_to_one' or 'group'), and optionally default_length_minutes and the preparation and debrief time " +
+        "a colleague needs either side. To use it in a Project afterwards, add it to the Project in Makerble. " +
+        "Invalid settings return 422 with errors listing each problem. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) the Event Format belongs to" },
+          name: { type: "string", description: "Name, e.g. 'Therapy session' or 'Drop-in'" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          survey_kiosk_enabled: { type: "boolean", description: "Self Check-in at its events" },
+          attendance_form_id: { type: "number", description: "The Survey (Story Category) used to record attendance at its events" },
+          appointment_type: {
+            type: ["string", "null"],
+            enum: ["one_to_one", "group", null],
+            description: "Whether events of this format are appointments: 'one_to_one' (one guest each, e.g. a therapy session), 'group', or null for Not an appointment",
+          },
+          default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
+          preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
+          debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: (body) => post("/event_categories", body),
+    },
+
+    {
+      name: "makerble_update_event_format",
+      description:
+        "Edit an Event Format (called Event Category / event_category in the API), as Edit on the Manage " +
+        "Event Formats page. Only the settings you send change. Only an Organisation Admin of its organisation " +
+        "can edit it (others get 403; another organisation's returns 404). Use it to rename a format, change " +
+        "its Guest Statuses, or set whether it is a one-to-one or group appointment (appointment_type; null " +
+        "for Not an appointment), its default length, and the preparation and debrief time either side. " +
+        "Invalid settings return 422 with errors, e.g. a default length not in 5-minute steps. " +
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Event Format (event_category) id, from makerble_list_event_formats" },
+          name: { type: "string" },
+          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses (event states) its events use, in order" },
+          survey_kiosk_enabled: { type: "boolean", description: "Self Check-in at its events" },
+          attendance_form_id: { type: "number", description: "The Survey (Story Category) used to record attendance at its events" },
+          appointment_type: {
+            type: ["string", "null"],
+            enum: ["one_to_one", "group", null],
+            description: "Whether events of this format are appointments: 'one_to_one' (one guest each, e.g. a therapy session), 'group', or null for Not an appointment",
+          },
+          default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
+          preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
+          debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/event_categories/${id}`, body),
+    },
+
+    {
       name: "makerble_delete_event_format",
       description:
         "Permanently delete an Event Format (called Event Category / event_category in the API). " +
@@ -3260,65 +6254,6 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => del(`/event_categories/${id}`),
-    },
-
-    {
-      name: "makerble_get_event_format",
-      description:
-        "Read one Event Format (called Event Category / event_category in the API): the template an organisation's " +
-        "events are created from, such as Workshops or Drop-in. Returns its name, settings (survey_kiosk_enabled is " +
-        "Self Check-in, attendance_form_id the Survey used to record attendance, Event Role settings), guest_statuses " +
-        "(id and name, in order; the first is given to new guests) and project_ids (the projects whose events can use " +
-        "it). Only an Organisation Admin of its organisation can read it. Find the id with makerble_list_event_formats.",
-      inputSchema: {
-        type: "object",
-        properties: { id: { type: "number", description: "The Event Format (event_category) id" } },
-        required: ["id"],
-      },
-      handler: ({ id }) => get(`/event_categories/${id}`),
-    },
-
-    {
-      name: "makerble_create_event_format",
-      description:
-        "Create an Event Format (called Event Category / event_category in the API) in an organisation: a template " +
-        "for events, such as Drop-in, Workshop or Class. Only an Organisation Admin of the organisation can. Check " +
-        "makerble_list_event_formats first and reuse a format that already exists rather than making a near-duplicate. " +
-        "guest_status_ids are the organisation's Guest Statuses its events' guests can have, in order (the first is " +
-        "given to new guests). A new Event Format can't be used for events until it is added to a project with " +
-        "makerble_add_event_format_to_project. Returns the new Event Format.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          charity_id: { type: "number", description: "The Organisation (Charity) that will own it" },
-          name: { type: "string" },
-          guest_status_ids: { type: "array", items: { type: "number" }, description: "The organisation's Guest Statuses, in order" },
-          survey_kiosk_enabled: { type: "boolean", description: "Self Check-in at its events" },
-          attendance_form_id: { type: "number", description: "The Survey (Story Category) used to record attendance at its events" },
-        },
-        required: ["charity_id", "name"],
-      },
-      handler: (p) => post("/event_categories", p),
-    },
-
-    {
-      name: "makerble_update_event_format",
-      description:
-        "Rename an Event Format (Event Category), change its Self Check-in or attendance Survey, or replace its Guest " +
-        "Statuses (give them all, in order). Only an Organisation Admin of its organisation can. Every event that uses " +
-        "the format is affected. Give only what changes. Returns the updated Event Format.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          id: { type: "number", description: "The Event Format (event_category) id" },
-          name: { type: "string" },
-          guest_status_ids: { type: "array", items: { type: "number" } },
-          survey_kiosk_enabled: { type: "boolean" },
-          attendance_form_id: { type: ["number", "null"] },
-        },
-        required: ["id"],
-      },
-      handler: ({ id, ...p }) => patch(`/event_categories/${id}`, p),
     },
 
     {
@@ -3354,6 +6289,1723 @@ export function buildTools(api) {
         required: ["id", "project_id"],
       },
       handler: ({ id, project_id }) => del(`/event_categories/${id}/projects/${project_id}`),
+    },
+
+    // ── Calendar Feeds ────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_calendar_feeds",
+      description:
+        "List an Organisation's (Charity's) Calendar Feeds that the user can see. A Calendar Feed is a private " +
+        "subscription link (feed_url) that a calendar app such as Google Calendar, Outlook or Apple Calendar " +
+        "subscribes to, so the organisation's events appear there and stay up to date. Each feed shows the " +
+        "events the person who made it can see, narrowed by its filters, from the last 12 months to the next 24. " +
+        "Each item returns id, name, charity_id, feed_url (give this to the user to subscribe), expired, " +
+        "filter_params (project_ids, event_category_ids, user_ids, beneficiary_ids, event_types), " +
+        "created_by_name and updated_by_name. Check here before making a new feed, to reuse one that already " +
+        "covers what the user wants. Paginated: returns { page, page_size, page_count, total_count, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) id" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Calendar Feeds per page. Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only Calendar Feeds changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, ...p }) => get("/calendar_feeds", { charity_id, ...p }),
+    },
+
+    {
+      name: "makerble_create_calendar_feed",
+      description:
+        "Make a Calendar Feed: a private subscription link that puts an Organisation's (Charity's) events into " +
+        "a calendar app (Google Calendar, Outlook, Apple Calendar) and keeps them up to date. The feed contains " +
+        "the events the user can see, from the last 12 months to the next 24, narrowed by any filters given: " +
+        "only some Projects, Event Formats (Event Categories), staff (Event Managers and Workers, by user id) " +
+        "or guests (Contacts / Beneficiaries, by id). With no filters it contains every event the user can see. " +
+        "Find ids with makerble_list_projects, makerble_list_project_event_formats, makerble_list_users and " +
+        "makerble_list_contacts. Returns the feed with its feed_url. To subscribe, the user pastes feed_url " +
+        "into their calendar app (in Google Calendar: Other calendars > From URL; in Outlook: Add calendar > " +
+        "Subscribe from web). Tell the user to keep the link private: anyone who has it can read the events, " +
+        "including guests' names.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) the feed is for" },
+          name: { type: "string", description: "A name for the feed, e.g. 'Youth Mentoring drop-ins'" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Only events of these Projects" },
+          event_category_ids: { type: "array", items: { type: "number" }, description: "Only events of these Event Formats" },
+          user_ids: { type: "array", items: { type: "number" }, description: "Only events these users are Event Managers or Workers of" },
+          beneficiary_ids: { type: "array", items: { type: "number" }, description: "Only events these Contacts are guests of" },
+        },
+        required: ["charity_id", "name"],
+      },
+      handler: ({ charity_id, name, ...filters }) =>
+        post("/calendar_feeds", { calendar_feed: { charity_id, name, filter_params: feedFilters(filters) } }),
+    },
+
+    {
+      name: "makerble_update_calendar_feed",
+      description:
+        "Rename a Calendar Feed or change which events it contains. Only the person who made the feed, or an " +
+        "Organisation Admin, can change it. Give name to rename it. Give any of the filters to replace the " +
+        "feed's filters as a whole: filters you leave out are cleared, so pass every filter the feed should " +
+        "keep (read them first with makerble_list_calendar_feeds). The feed_url stays the same, so calendars " +
+        "already subscribed pick up the change. Returns the updated feed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Calendar Feed id, from makerble_list_calendar_feeds" },
+          name: { type: "string" },
+          project_ids: { type: "array", items: { type: "number" } },
+          event_category_ids: { type: "array", items: { type: "number" } },
+          user_ids: { type: "array", items: { type: "number" } },
+          beneficiary_ids: { type: "array", items: { type: "number" } },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, name, ...filters }) => {
+        const calendar_feed = {};
+        if (name !== undefined) calendar_feed.name = name;
+        if (Object.values(filters).some((v) => v !== undefined)) calendar_feed.filter_params = feedFilters(filters);
+        return patch(`/calendar_feeds/${id}`, { calendar_feed });
+      },
+    },
+
+    {
+      name: "makerble_delete_calendar_feed",
+      description:
+        "Delete a Calendar Feed. Its feed_url stops working, so calendar apps subscribed to it stop receiving " +
+        "events. Only the person who made the feed, or an Organisation Admin, can delete it. Confirm with the " +
+        "user before calling. Returns nothing on success.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Calendar Feed id, from makerble_list_calendar_feeds" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/calendar_feeds/${id}`),
+    },
+
+    // ── API keys ──────────────────────────────────────────────────────────────
+    {
+      name: "makerble_list_api_keys",
+      description:
+        "List an Organisation's (Charity's) API keys, including revoked ones. An API key lets a custom " +
+        "integration the Organisation builds (a reporting tool, a data warehouse sync, a CRM link) call the " +
+        "Makerble API for that Organisation only, acting as one colleague (user) chosen when the key was " +
+        "created, with exactly that colleague's access. Calls made with an Organisation's API keys count " +
+        "towards its monthly API usage. Returns each key's name, secret_hint (the start of the key, " +
+        "e.g. mk_live_Ab12, to recognise it by), user_id (the colleague it acts as), created_by_id, " +
+        "last_used_at, revoked_at and active (false once revoked). The key itself is never returned here. " +
+        "Only the Organisation's admins (Organisation Admins) can use the API key tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only keys changed after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/api_keys", p),
+    },
+
+    {
+      name: "makerble_create_api_key",
+      description:
+        "Create an API key for a custom integration an Organisation builds. Use it when someone wants another " +
+        "system to call the Makerble API for their Organisation, instead of sharing a person's own login. " +
+        "The key acts as user_id, who must be a colleague in the Organisation (find one with " +
+        "makerble_list_users), and can see and do only what they can, in this Organisation only. Ask the " +
+        "user which colleague it should act as and what it is for (the name). The response includes " +
+        "`secret` (mk_live_…): it is shown only this once, so give it to the user straight away and tell " +
+        "them to store it safely, e.g. in a password manager, because anyone who has it can use Makerble as " +
+        "that colleague. The integration sends it as the header Authorization: Bearer mk_live_…. If the " +
+        "colleague later leaves the Organisation, the key stops working until they are added back.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "What the key is for, e.g. 'Finance dashboard'" },
+          user_id: { type: "number", description: "The colleague (user) the key acts as" },
+        },
+        required: ["charity_id", "name", "user_id"],
+      },
+      handler: ({ charity_id, ...api_key }) => post("/api_keys", { charity_id, api_key }),
+    },
+
+    {
+      name: "makerble_revoke_api_key",
+      description:
+        "Revoke an Organisation's API key, e.g. when an integration is retired or the key may have leaked. " +
+        "Anything using the key stops working at once, and this cannot be undone, so confirm with the user " +
+        "first. The key stays listed by makerble_list_api_keys with active: false. To replace a key, create " +
+        "a new one with makerble_create_api_key, update the integration, then revoke the old one.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The API key ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/api_keys/${id}`),
+    },
+
+    // ── Announcements (CP-9007, CP-9058) ──────────────────────────────────────
+    {
+      name: "makerble_list_announcements",
+      description:
+        "List Announcements, newest first. An Announcement is a popup that each signed-in user in its audience " +
+        "sees once, between its start and end dates. Two kinds: Makerble's own \"What's new in Makerble\" popups " +
+        "(scope_type null, e.g. \"Projects are now Workspaces\"), written by Makerble staff; and an Organisation's, " +
+        "Workspace's or Team's announcements (scope_type Charity, Project or Team, with scope_id), written by the " +
+        "people who look after it for the colleagues there. System Access users (Makerble staff) see every one. " +
+        "Anyone else sees only those for places where they hold the role: an Organisation Admin sees their " +
+        "Organisation's and its Workspaces' and Teams'; a Workspace editor (Project Editor) that Workspace's; a " +
+        "Team leader that Team's. Someone who can make announcements nowhere gets 403. Give scope_type and " +
+        "scope_id to list one place's. Returns each one's scope_type, scope_id, title (headline), body (message), " +
+        "visual_type (name_change, vimeo or none), name_changes, audience, starts_on, ends_on, status (draft or " +
+        "scheduled), current_status (draft, scheduled, live or ended), seen_count (people who have seen it), " +
+        "seen_counts_by_source ({popup, whats_new}: how many first saw it in the popup and how many by opening it " +
+        "in Wishlist › What's new) and learn_more_click_count.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scope_type: {
+            type: "string",
+            enum: ["Charity", "Project", "Team"],
+            description: "With scope_id, only this place's: Charity (Organisation), Project (Workspace) or Team",
+          },
+          scope_id: { type: "number", description: "The Organisation, Workspace or Team ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/announcements", p),
+    },
+
+    {
+      name: "makerble_get_announcement",
+      description:
+        "Get one Announcement (a popup: Makerble's own, or an Organisation's, Workspace's or Team's, see " +
+        "scope_type and scope_id) by id, with how many people have seen it (seen_count; seen_counts_by_source " +
+        "splits it into {popup, whats_new}: first seen in the popup, or by opening it in Wishlist › What's new) " +
+        "and clicked its \"Learn more\" link (learn_more_click_count). System Access users can get any; anyone else only one " +
+        "for a place where they are an Organisation Admin, Workspace editor or Team leader, otherwise 403.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Announcement ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/announcements/${id}`),
+    },
+
+    {
+      name: "makerble_save_announcement",
+      description:
+        "Create or update an Announcement: a popup each signed-in user in its audience sees once, between its " +
+        "start and end dates. Without id it creates one; with id it changes only the fields you send.\n\n" +
+        "Whose announcement: to announce to the colleagues of an Organisation, a Workspace (Project) or a Team, " +
+        "give scope_type (Charity, Project or Team) and scope_id when creating. Its audience is then always the " +
+        "colleagues there (an Organisation's colleagues; a Workspace's editors, reporters and observers; a Team's " +
+        "members and leaders; never Contacts with a login), so leave audience out. Each colleague sees at most one " +
+        "of these a day, after any of Makerble's own. The user must be an Organisation Admin of that Organisation " +
+        "(or of the Workspace's or Team's Organisation), an editor of that Workspace, or a leader of that Team; " +
+        "otherwise 403. Find the ID with makerble_list_projects or makerble_list_teams. Without scope_type, it is " +
+        "one of Makerble's own \"What's new in Makerble\" popups, which only System Access users (Makerble staff) " +
+        "can make. An announcement never moves to another place, so scope_type and scope_id are ignored on " +
+        "update.\n\n" +
+        "Writing rules: title (the headline, up to 90 characters) is in sentence case and says plainly what " +
+        "changed, e.g. \"Surveys now have a Duplicate button\". body (the message, up to 280 characters) says what " +
+        "the person needs to do, which is often nothing, e.g. \"Nothing has moved. Only the names have changed.\" " +
+        "Use Makerble's on-screen words (Contacts, Surveys, Workspaces), never database names.\n\n" +
+        "Visual: for a feature with an Intro animation, use visual_type intro_animation with intro_key set to the " +
+        "key of the feature's Intro (guidance panel), e.g. checklists. This is the default for a feature: the popup " +
+        "plays the Intro's storyboard as it is when shown, so the two stay in step (the Intro must have an animation; " +
+        "if it later loses it, the popup shows no visual). Only when the Intro's animation doesn't fit, for example " +
+        "when just one part of a feature is new, use visual_type storyboard with a storyboard of the announcement's " +
+        "own, in the same format and rules as an Intro's ({archetype, loop_seconds, alt, steps}); one that breaks the " +
+        "rules is refused with 422 naming the problem. Both animations are for Makerble's own only. " +
+        "For a rename, set visual_type to name_change and give 1 to 3 name_changes " +
+        "[{old_name, new_name}], played as an animation in that order. For a video, set visual_type to vimeo " +
+        "and vimeo_url (https://vimeo.com/<id>, or https://vimeo.com/<id>/<hash> for an unlisted video). " +
+        "For a picture of the feature, such as a screenshot or illustration, set visual_type to image, give image " +
+        "as {filename, data} with the file's contents in base64 (a PNG, JPG, GIF or WebP file of up to 5 MB), and " +
+        "image_alt saying what the picture shows for screen reader users (required, up to 250 characters). The " +
+        "popup shows it whole, never cropped. On update, leave image out to keep the saved one; changing " +
+        "visual_type away from image removes it. The response's image_url links to the saved image. " +
+        "Otherwise use none. The name change animation is for Makerble's own only. learn_more_url is optional: " +
+        "for Makerble's own it must be a page in the Makerble User Guide " +
+        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...); for a place's it can be any https page.\n\n" +
+        "Workflow: save it as a draft first (status draft, the default for a new one), which nobody sees, and " +
+        "show the user the draft. Only set status to scheduled, with starts_on and ends_on, once they agree " +
+        "(or use makerble_schedule_announcement to pick the next free days for one of Makerble's own), " +
+        "because a scheduled announcement with today's date shows to people straight away. To end one early, " +
+        "set ends_on to today. Editing a live one doesn't show it again to people who have already seen it.\n\n" +
+        "Targeting (Makerble's own only, System Access users): roles narrows who sees it to people holding at least " +
+        "one of the listed roles, in place of audience. Contacts with a login (active_participant) and Survey " +
+        "Portal users (survey_portal_user) are left out unless you list their role. audience_rules narrows it " +
+        "further by behaviour, as JSON over named facts: each rule is exactly one of {fact, params}, {all: [rules]}, " +
+        "{any: [rules]} or {not: rule}. For example, only people whose organisation hasn't set up Distance " +
+        "Travelled in any of their organisations: {\"all\": [{\"fact\": \"distance_travelled_not_set_up\"}]}. " +
+        "Call makerble_list_announcement_facts first for the facts and their params; an unknown fact or param is " +
+        "refused with 422, naming the rule. Send roles [] or audience_rules {} to clear them.\n\n" +
+        "Pages (Makerble's own only, System Access users): page_keys limits it to some pages, so a feature is " +
+        "announced where it lives, e.g. [\"contacts\"] for a Contacts feature shows it only when someone opens " +
+        "Manage Contacts, including when they move there from another page without reloading. A page key is the " +
+        "key of the page's Intro (guidance panel), such as contacts, events, checklists, surveys, tasks or " +
+        "custom_tables; pages without an Intro can't be chosen. An unknown key is refused with 422, listing the " +
+        "keys available. Send page_keys [] to show it on any page again (the default).\n\n" +
+        "Button (Makerble's own only): for a feature announcement, set button_deep_link to the feature's page from " +
+        "makerble_list_deep_links (usually its manage page, e.g. checklists, or its create page, e.g. create_contact) " +
+        "and give button_label a label that says where it goes, e.g. \"Explore Checklists\". The button then closes the " +
+        "popup and opens that page in the person's own organisation; for someone who can't open it, it only closes the " +
+        "popup. Send null to clear it. The response's button_click_count says how many people clicked through.\n\n" +
+        "Feature tour (Makerble's own only): feature_tour_id links a feature tour (from makerble_list_feature_tours). " +
+        "While that tour is live, the popup's button says \"Take the tour\" instead of button_label and starts the " +
+        "tour on its first page. Send null to clear it.\n\n" +
+        "Feature launch (Makerble's own only): feature_launch_id says which feature launch (from " +
+        "makerble_list_feature_launches) the announcement is for. Wherever the announcement leaves body, " +
+        "learn_more_url, button_deep_link or feature_tour_id empty, the popup and What's new use the launch's " +
+        "short_description, user_guide_url, deep_link and feature_tour_id, so body can be left empty while the " +
+        "launch has a short_description. Send null to clear it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Announcement to update. Leave out to create a new one." },
+          scope_type: {
+            type: "string",
+            enum: ["Charity", "Project", "Team"],
+            description: "When creating: whose announcement, an Organisation (Charity), Workspace (Project) or Team. Leave out for Makerble's own.",
+          },
+          scope_id: { type: "number", description: "When creating, with scope_type: the Organisation, Workspace or Team ID" },
+          title: { type: "string", description: "Headline, sentence case, up to 90 characters" },
+          body: { type: ["string", "null"], description: "Message, up to 280 characters. May be empty for an announcement whose feature launch has a short_description" },
+          visual_type: { type: "string", enum: ["name_change", "vimeo", "image", "intro_animation", "storyboard", "none"] },
+          name_changes: {
+            type: "array",
+            description: "For name_change: 1 to 3 renames, in the order they play",
+            items: {
+              type: "object",
+              properties: { old_name: { type: "string" }, new_name: { type: "string" } },
+              required: ["old_name", "new_name"],
+            },
+          },
+          vimeo_url: { type: "string", description: "For vimeo: the Vimeo link" },
+          image: {
+            type: "object",
+            description:
+              "For image: the picture, as {filename, data} with data the file's contents in base64. A PNG, JPG, GIF " +
+              "or WebP file of up to 5 MB. Leave out on update to keep the saved image.",
+            properties: {
+              filename: { type: "string", description: "The file's name, e.g. duplicate-survey.png" },
+              data: { type: "string", description: "The file's contents in base64" },
+            },
+            required: ["filename", "data"],
+          },
+          intro_key: {
+            type: "string",
+            description: "For intro_animation (Makerble's own only): the key of the Intro whose animation it plays, e.g. checklists",
+          },
+          storyboard: {
+            type: "object",
+            description:
+              "For storyboard (Makerble's own only): the announcement's own animation, {archetype, loop_seconds, alt, " +
+              "steps}, with the same rules as an Intro's storyboard. Use only when the Intro's animation doesn't fit.",
+          },
+          image_alt: {
+            type: "string",
+            description: "For image, required: what the picture shows, read out by screen readers. Up to 250 characters.",
+          },
+          learn_more_url: {
+            type: "string",
+            description: "Optional. A Makerble User Guide page for Makerble's own; any https page for a place's",
+          },
+          button_label: { type: "string", description: "Up to 24 characters; defaults to \"Got it\"" },
+          audience: {
+            type: "string",
+            enum: ["everyone", "colleagues", "administrators"],
+            description:
+              "Makerble's own only. everyone: every signed-in user. colleagues: everyone except Contacts with a " +
+              "login. administrators: Organisation Admins. Ignored for a place's announcement, and when roles has any.",
+          },
+          roles: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["organisation_admin", "editor", "reporter", "observer", "team_leader", "active_participant", "survey_portal_user"],
+            },
+            description:
+              "Makerble's own only. Show it only to people holding one of these roles, in place of audience: " +
+              "organisation_admin (Organisation Admin), editor (Workspace editor), reporter, observer, team_leader, " +
+              "active_participant (Contact with a login), survey_portal_user. Empty or left out: audience decides.",
+          },
+          audience_rules: {
+            type: "object",
+            description:
+              "Makerble's own only. Behaviour rules over named facts from makerble_list_announcement_facts, e.g. " +
+              "{\"all\": [{\"fact\": \"distance_travelled_not_set_up\", \"params\": {\"across\": \"all_organisations\"}}]}. " +
+              "{} for none.",
+          },
+          page_keys: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Makerble's own only. The pages it shows on, by each page's Intro key, e.g. [\"contacts\"] for Manage " +
+              "Contacts. Empty or left out when creating: any page. Sent, it replaces the list.",
+          },
+          button_deep_link: {
+            type: ["string", "null"],
+            description:
+              "Makerble's own only. The deep link the button opens (a name from makerble_list_deep_links); null for a " +
+              "button that only closes the popup",
+          },
+          feature_tour_id: {
+            type: ["number", "null"],
+            description: "Makerble's own only. The feature tour its button starts with \"Take the tour\" while the tour is live; null to clear",
+          },
+          feature_launch_id: {
+            type: ["number", "null"],
+            description: "Makerble's own only. The feature launch it announces; its message, links and tour fill any left empty here. null to clear",
+          },
+          starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
+          ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
+          status: { type: "string", enum: ["draft", "scheduled"], description: "draft (nobody sees it) or scheduled" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/announcements/${id}`, body) : post("/announcements", body)),
+    },
+
+    {
+      name: "makerble_list_deep_links",
+      description:
+        "List Makerble's deep links: the pages a link can open in the signed-in person's own organisation, such as " +
+        "Manage Checklists (checklists) or Create a contact (create_contact). Each has its name, a readable label in " +
+        "on-screen words, its group (Contacts, Events, Surveys, ...) and the role the person needs: user (anyone signed " +
+        "in), member (an Editor, Reporter or Observer of the organisation or one of its Workspaces) or editor (an Editor " +
+        "of the organisation). A record link opens one record, such as the first Contact the person can see.\n\n" +
+        "When to use: to choose where an Announcement's button goes (button_deep_link in makerble_save_announcement), " +
+        "usually the feature's manage page, or its create page. The same names work as " +
+        "https://www.makerble.com/deeplink/<name> in the User Guide. The list only changes with a release. Only System " +
+        "Access users (Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/deep_links"),
+    },
+
+    {
+      name: "makerble_list_announcement_facts",
+      description:
+        "List the named facts an Announcement's audience_rules can use to target people by behaviour, such as " +
+        "distance_travelled_not_set_up (the person's organisation hasn't set up Distance Travelled) or " +
+        "has_not_added_a_story (they haven't added a story yet). Each fact has a key (what a rule names), a " +
+        "description, a label and its params with the values they accept and their default. A fact about a " +
+        "person's organisations takes across: for someone in several organisations, whether it must hold for any " +
+        "one of them (any_organisation, the default), every one (all_organisations) or the oldest one they belong " +
+        "to (first_organisation).\n\n" +
+        "When to use: before setting audience_rules with makerble_save_announcement, to see which facts exist. " +
+        "Facts are written in Makerble's code, so the list only changes with a release. Only System Access users " +
+        "(Makerble staff) can use it; anyone else gets 403.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/announcements/facts"),
+    },
+
+    {
+      name: "makerble_schedule_announcement",
+      description:
+        "Schedule one of Makerble's own \"What's new in Makerble\" Announcements on the next free days. Each " +
+        "person sees at most one of Makerble's announcements a day, so announcements whose dates overlap take " +
+        "turns and the later ones wait. This sets the start date to the first day, from today, on which no other " +
+        "Makerble announcement starts, keeps the announcement's own length (14 days if it has no dates yet), and " +
+        "sets its status to scheduled. Any dates it had are replaced.\n\n" +
+        "When to use: once the feature an announcement describes is live on production, to schedule its draft " +
+        "(made earlier with makerble_save_announcement). Don't use it before the feature is live: a scheduled " +
+        "announcement whose start date is today shows to people straight away. To choose the dates yourself, use " +
+        "makerble_save_announcement with status scheduled, starts_on and ends_on instead.\n\n" +
+        "Only System Access users (Makerble staff) can use it (otherwise 403), and only for Makerble's own " +
+        "announcements: an Organisation's, Workspace's or Team's gets 422. Returns the Announcement with its new " +
+        "starts_on, ends_on and status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Announcement to schedule (from makerble_list_announcements)" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => patch(`/announcements/${id}`, { schedule_on_next_free_days: true }),
+    },
+
+    {
+      name: "makerble_list_whats_new",
+      description:
+        "List the signed-in user's Wishlist › What's new (the gift icon): the \"What's new in Makerble\" " +
+        "Announcements that have gone live for them, and scheduled ones still to start that they can read early, " +
+        "newest first by start date, with whether they have seen each one. Use it " +
+        "when someone asks what's new in Makerble, what they have missed, or about a recent feature. Only " +
+        "Makerble's own announcements for an audience the user is in are listed, never an Organisation's, " +
+        "Workspace's or Team's. Listing them doesn't mark them seen; the user still gets an unseen one in the " +
+        "popup. Each has id, title (headline), body (message), starts_on, section (new_since_joined: it started " +
+        "on or after the day the user's account was made; before_joined), visual_type, image_url, vimeo_url, " +
+        "learn_more_url (a Makerble User Guide page), includes_tour and feature_tour_id (its button starts that " +
+        "feature tour), asked_for (it answered one of the user's own requests in Wishlist › Your wishlist), " +
+        "seen and seen_at.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section: {
+            type: "string",
+            enum: ["new_since_joined", "before_joined"],
+            description: "Only this section. Leave out for both, newest first",
+          },
+          filter: {
+            type: "string",
+            enum: ["unread", "read"],
+            description:
+              "unread: only the ones the user hasn't opened yet (What's new › Unread), e.g. to tell them what they've " +
+              "missed. read: only the ones they have opened (What's new › Read). Leave out for both",
+          },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only announcements changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/whats_new", p),
+    },
+
+    {
+      name: "makerble_list_wishes",
+      description:
+        "List the signed-in user's own Wishlist: the feature requests and feedback they have sent Makerble " +
+        "from the gift icon (Wishlist › Your wishlist), newest first. Use it when someone asks what they've " +
+        "asked Makerble for, or what happened to a request. Only the user's own are ever returned, never a " +
+        "colleague's. Each has kind (feature_request or feedback), body (what they wrote), status (where it is, " +
+        "in the words they see: \"Received\", \"We are looking at this\", \"Estimate sent to your bill payer\", " +
+        "\"Being built\", \"Shipped\"; feedback reads \"Read by the Makerble team\"), helpdesk_key (the Helpdesk " +
+        "ticket a feature request became, e.g. MC-2501, once it exists) and announcement_id (the Announcement " +
+        "that answered it, if any).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only items changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/wishes", p),
+    },
+
+    {
+      name: "makerble_create_wish",
+      description:
+        "Send Makerble a feature request or feedback for the signed-in user, as Wishlist › Your wishlist " +
+        "(the gift icon) does. kind feature_request goes to Makerble's Helpdesk and shows as \"Received\" " +
+        "straight away; if it needs custom work, Makerble sends an estimate to the organisation's bill payer, " +
+        "not to the user. kind feedback stays in Makerble and is read by the Makerble team.\n\n" +
+        "Workflow: write body in the user's own words, describing what they'd like Makerble to do and why. " +
+        "Never include names or details of the people the organisation supports (its Contacts). Show the user " +
+        "the text and get their agreement before sending, because it goes to Makerble's team. If the user " +
+        "belongs to more than one organisation, ask which one it's about and pass its charity_id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["feature_request", "feedback"] },
+          body: { type: "string", description: "What they'd like, up to 2,000 characters. No details of people they support." },
+          charity_id: {
+            type: "number",
+            description: "Which of the user's organisations it's about. Needed only if they belong to more than one.",
+          },
+        },
+        required: ["kind", "body"],
+      },
+      handler: (body) => post("/wishes", body),
+    },
+
+    {
+      name: "makerble_list_coming_soon",
+      description:
+        "List what Makerble has committed to building next, as Wishlist › Coming soon shows it (the API calls " +
+        "these Roadmap items): building_now items first, then up_next, each in order, with no dates. Use it " +
+        "when someone asks whether a feature is planned. Anyone can read the published items. Makerble staff " +
+        "(System Access) also see unpublished ones, and stale is true for any unchanged for 60 days. Returns " +
+        "each item's title, body (description), stage, stage_label, position and published.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only items changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/roadmap_items", p),
+    },
+
+    {
+      name: "makerble_save_coming_soon_item",
+      description:
+        "Create or update an item in Wishlist › Coming soon (a Roadmap item): something Makerble has " +
+        "committed to building. Without id it creates one at the end of its stage; with id it changes only " +
+        "the fields you send, and moving it to another stage puts it at the end of that stage. Only users " +
+        "with System Access (Makerble staff) can use this; anyone else gets 403.\n\n" +
+        "Writing rules: title (up to 90 characters) names the feature in customer language, e.g. " +
+        "\"Formula Trackers\". body (up to 280 characters) says what it will let people do, e.g. \"Add metrics " +
+        "together to show a combined result.\" Never give dates. Use Makerble's on-screen words (Contacts, " +
+        "Surveys, Workspaces), never database names.\n\n" +
+        "Workflow: create it with published false first, which only Makerble staff see, and show the user. Set " +
+        "published to true once they agree, because a published item shows to every Makerble user.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The item to update. Leave out to create a new one." },
+          title: { type: "string", description: "Up to 90 characters, customer language" },
+          body: { type: "string", description: "What it will let people do, up to 280 characters, no dates" },
+          stage: { type: "string", enum: ["building_now", "up_next"], description: "Building now or Up next" },
+          published: { type: "boolean", description: "Whether every Makerble user sees it in Coming soon" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/roadmap_items/${id}`, body) : post("/roadmap_items", body)),
+    },
+
+    // ── Welcome Tours (CP-9049) ──────────────────────────────────────────────
+    {
+      name: "makerble_list_tours",
+      description:
+        "List Welcome Tours. A Welcome Tour is the guided tour of Makerble's own pages that a new colleague is " +
+        "offered after adding their name and photo on their welcome journey: each stop dims the page except one " +
+        "area (e.g. the Spaces menu, or the Contacts table) and shows a card, and either waits for Next or asks " +
+        "them to click something (action: click). A tour belongs to an Organisation and, optionally, one of its " +
+        "Teams; team_id null means the Organisation's default tour, for people whose teams have none. Only a live " +
+        "tour is shown to people. mode required is shown as Mandatory: people can put it off with \"I'll do this " +
+        "later\" up to later_limit times, then must finish it. Makerble staff (System Access) see every tour; an " +
+        "Organisation Admin sees their own Organisation's tours; anyone else gets 403. Returns each tour with its " +
+        "stops in order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "Only this Organisation's tours" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only tours changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/tours", p),
+    },
+
+    {
+      name: "makerble_get_tour",
+      description:
+        "Get one Welcome Tour by id, with its settings and its stops in order (group, title, text, what to click, " +
+        "the text shown after the click, and whether a click stop can be skipped), and watch_checklist_ids, the " +
+        "Checklists that Watch the journey shows straight after the tour. Makerble staff, or an " +
+        "Organisation Admin of its Organisation.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The Welcome Tour ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/tours/${id}`),
+    },
+
+    {
+      name: "makerble_save_tour",
+      description:
+        "Create or update a Welcome Tour, or change an Organisation's welcome journey settings.\n\n" +
+        "Organisation Admins can change what their Welcome journey settings page changes on their own " +
+        "Organisation's tours: mode (required = Mandatory, optional = people can skip or end it), start_skippable " +
+        "(\"People can skip the tour when it is first offered\"), later_limit (how many times someone can choose " +
+        "\"I'll do this later\", 1 to 10), and in stops, each named by id or stop_key: included (whether the tour " +
+        "shows the stop; an unticked stop keeps its wording), body (its wording, up to 280 characters of plain " +
+        "text; empty uses Makerble's default_body) and skippable (stops that ask for a click). A stop_key the tour " +
+        "doesn't have yet adds that stop. The Essentials stops (navbar_spaces, navbar_user) are always included. " +
+        "watch_checklist_ids chooses up to 2 Checklists (ids from makerble_list_checklists) for Watch the journey, " +
+        "the step of the welcome journey straight after the tour that walks a new colleague through each " +
+        "Checklist's steps; a person sees only those on their own workspaces (projects), and [] falls back to up " +
+        "to 2 Checklists on their workspaces, most recently updated first. More than 2 is refused. " +
+        "Only the fields sent change. They can also set photo_skippable (\"People can skip adding a profile " +
+        "picture\") and watch_skippable (\"People can skip Watch the journey\") for the whole Organisation, with " +
+        "organisation_id and no id.\n\n" +
+        "Makerble staff (System Access) can change everything: without id it creates a tour (name and " +
+        "organisation_id needed; it starts as a draft nobody sees), with id it changes only the fields sent. " +
+        "Each stop's stop_key is the key of one of the stops Makerble knows: call makerble_list_tour_stops to see " +
+        "them all, grouped by feature (Contacts, Events, Checklists, Registers, Reports and more), with the page " +
+        "each opens and its default wording. A stop with _destroy: true is removed. Each Team, and the default, can have one live tour.\n\n" +
+        "Workflow: get the tour first, change what the user asked for, and save. Make a tour live only once the " +
+        "user agrees, because live tours are offered to people straight away.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour to update. Leave out to create one (staff only)." },
+          organisation_id: { type: "number", description: "The Organisation, when creating a tour or setting photo_skippable or watch_skippable" },
+          photo_skippable: { type: "boolean", description: "Whether people joining the Organisation can skip adding a profile picture" },
+          watch_skippable: { type: "boolean", description: "Whether people joining the Organisation can skip Watch the journey, the Checklists shown after the tour" },
+          name: { type: "string" },
+          team_id: { type: ["number", "null"], description: "The Team it is for; null for the Organisation's default" },
+          mode: { type: "string", enum: ["required", "optional"] },
+          status: { type: "string", enum: ["draft", "live"] },
+          start_skippable: { type: "boolean" },
+          later_limit: { type: "number", description: "1 to 10" },
+          watch_checklist_ids: {
+            type: "array",
+            items: { type: "number" },
+            maxItems: 2,
+            description: "Up to 2 Checklist ids, in order, for Watch the journey after the tour; [] to clear",
+          },
+          stops: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number" },
+                position: { type: "number" },
+                group_name: { type: "string" },
+                stop_key: { type: "string", description: "Names the stop instead of id; adds it if the tour doesn't have it" },
+                title: { type: "string" },
+                body: { type: "string", description: "The stop's wording; empty uses Makerble's default_body" },
+                included: { type: "boolean", description: "Whether the tour shows this stop" },
+                action_text: { type: "string" },
+                after_text: { type: "string" },
+                skippable: { type: "boolean" },
+                _destroy: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+      handler: async ({ id, photo_skippable, watch_skippable, ...body }) => {
+        if ((photo_skippable !== undefined || watch_skippable !== undefined) && !id) {
+          return patch(`/organisations/${body.organisation_id}/welcome_journey_settings`, { photo_skippable, watch_skippable });
+        }
+        return id ? patch(`/tours/${id}`, body) : post("/tours", body);
+      },
+    },
+
+    // ── Feature tours (CP-9155) ──────────────────────────────────────────────
+    {
+      name: "makerble_list_feature_tours",
+      description:
+        "List feature tours (CP-9155). A feature tour is a short guided tour that introduces one feature to people " +
+        "who already use Makerble, unlike a Welcome Tour, which is a new colleague's first tour. It belongs to no " +
+        "Organisation: Makerble staff write it once. A live tour with a page_key is offered by \"Take the tour\" on " +
+        "that page's Intro (the Show/Hide Guidance panel at the top of a Manage page, e.g. page_key contacts); each " +
+        "Intro has at most one live tour. status is draft, amends_needed (a draft that came back from review) or " +
+        "live; only a live tour is shown to anyone. auto_prompt offers it once, the first time someone opens its page. Each " +
+        "stop is one of the stops Welcome Tours use (stop_key) and shows Makerble's default_title and default_body " +
+        "unless it has its own title or body. Makerble staff (System Access) only; anyone else gets 403. Returns " +
+        "each tour with its stops in order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only feature tours changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/feature_tours", p),
+    },
+
+    {
+      name: "makerble_list_tour_stops",
+      description:
+        "List the stops Makerble knows (CP-9252): the building blocks of every Welcome Tour and feature tour. Each " +
+        "stop focuses on one part of one Makerble page, such as the Filters button on Contacts (Beneficiaries in " +
+        "the API). Use a stop's key as the stop_key of a stop in makerble_save_feature_tour or makerble_save_tour.\n\n" +
+        "Stops come grouped by feature (group_name: Essentials, Contacts, Events, Checklists, Results Canvas, " +
+        "Snapshot, Reports, Registers, Event Catalogues, Personal Portals, Media Gallery and more; Other for a stop " +
+        "with no group), in the order a tour should visit them. For each stop it returns: key; label (which part of " +
+        "which page); page (the page it opens, e.g. \"Contacts (contacts)\" or \"The first Checklist the person can " +
+        "see\"); action and action_label (whether it waits for Next or for a click); default_title and default_body " +
+        "(Makerble's wording, shown unless the tour's stop has its own); empty (the wording shown instead to someone " +
+        "who can open the page but has nothing on it yet, or null if the stop is skipped for them); and shown_to " +
+        "(who sees it, e.g. \"Only for Organisation Editors\"); and feature_tour_count and welcome_tour_count (how many " +
+        "tours use it). A stop the person can't use is skipped when the tour runs.\n\n" +
+        "Send group_name to list one feature's stops, e.g. Registers. The list changes only when Makerble releases " +
+        "new stops. Makerble staff (System Access) only; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          group_name: { type: "string", description: "Only the stops in this feature group, e.g. Registers" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200; there are fewer than 50 stops, so 200 lists them all at once" },
+        },
+      },
+      handler: (p) => get("/tour_stops", p),
+    },
+
+    {
+      name: "makerble_update_tour_stop",
+      description:
+        "Change Makerble's default title and text for one tour stop (CP-9252), as Site Overview › Tour Stops does. " +
+        "A tour stop is one step of a Welcome Tour or feature tour, focused on one part of one Makerble page. Every " +
+        "tour stop that has no wording of its own shows the new default straight away, in every tour that uses " +
+        "it, so check feature_tour_count and welcome_tour_count from makerble_list_tour_stops and confirm with the " +
+        "user first.\n\n" +
+        "Only the fields sent change. Sending a field empty, or the same as Makerble's original wording, goes back " +
+        "to the original. Returns the stop as makerble_list_tour_stops lists it. Marketing and Admin users " +
+        "(Makerble staff) only; Support users and anyone else get 403. To change the wording in one tour only, set " +
+        "that stop's title or body with makerble_save_feature_tour or makerble_save_tour instead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "The stop's key, from makerble_list_tour_stops, e.g. contacts_table" },
+          default_title: { type: "string", description: "Up to 120 characters; empty goes back to Makerble's original" },
+          default_body: { type: "string", description: "Up to 600 characters; empty goes back to Makerble's original" },
+        },
+        required: ["key"],
+      },
+      handler: ({ key, ...body }) => patch(`/tour_stops/${encodeURIComponent(key)}`, body),
+    },
+
+    {
+      name: "makerble_get_feature_tour",
+      description:
+        "Get one feature tour by id, with its key, name, status, page_key (the Intro that offers it), auto_prompt " +
+        "and its stops in order, each with its own title and body (null means Makerble's default_title and " +
+        "default_body are shown) and whether it waits for Next or a click (action). Makerble staff only.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID, from makerble_list_feature_tours" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_tours/${id}`),
+    },
+
+    {
+      name: "makerble_get_feature_tour_funnel",
+      description:
+        "See how people get on with a feature tour (CP-9255): the same numbers as its Funnel page in Site Overview › " +
+        "Feature Tours. Returns totals (started: everyone who has taken it; completed; in_progress; ended_early) and, " +
+        "for each stop in order, how many people reached it, completed it, skipped it themselves (skipped_by_user) or " +
+        "had it skipped because they couldn't use it (skipped_by_system), counting each person once per stop and " +
+        "event. Stop counts start on counts_since, the day they were first recorded (null before anyone has taken a " +
+        "step); the totals cover everyone. Use it after a tour goes live to find the stop where people drop out or " +
+        "where many are skipped by the system (a stop that needs data or a permission most people lack). Makerble " +
+        "staff (System Access) only; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID, from makerble_list_feature_tours" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_tours/${id}/funnel`),
+    },
+
+    {
+      name: "makerble_save_feature_tour",
+      description:
+        "Create or update a feature tour, the short tour that introduces one feature to people already using " +
+        "Makerble. Makerble staff (System Access) only.\n\n" +
+        "Without id it creates one: key (unique, lowercase words joined by underscores, e.g. contacts_filters) and " +
+        "name are needed, and it starts as a draft nobody sees. With id it changes only the fields sent. page_key is " +
+        "the page whose Intro offers it with \"Take the tour\" (e.g. contacts, events; null for none, so it starts " +
+        "only from an announcement; to choose the tour from the Intro's side, use feature_tour_id in " +
+        "makerble_update_guidance_panel). status is draft or amends_needed (nobody sees it; amends_needed marks a " +
+        "draft that came back from review) or live. auto_prompt offers it once on someone's first visit to that page. Each stop's " +
+        "stop_key is the key of one of the stops Makerble knows, the same stops Welcome Tours use: call " +
+        "makerble_list_tour_stops for them all, grouped by feature, with the page each opens, whether it waits for " +
+        "Next or a click, its default wording and who it is shown to. A tour about one feature usually takes every " +
+        "stop in that feature's group, in the order listed. Leave a stop's title or body empty to show " +
+        "Makerble's default. A stop with id changes it, a stop without id adds one, and _destroy: true removes it. " +
+        "A tour can't be live without a stop, and only one live tour can use each page_key.\n\n" +
+        "Workflow: list or get the tour first, call makerble_list_tour_stops (with group_name for one feature) to " +
+        "choose its stops, change what the user asked for, and save. Make a tour live only once the user agrees, " +
+        "because a live tour is offered to people straight away.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The feature tour to update. Leave out to create one." },
+          key: { type: "string", description: "Unique, lowercase words joined by underscores" },
+          name: { type: "string" },
+          status: { type: "string", enum: ["draft", "amends_needed", "live"] },
+          page_key: { type: ["string", "null"], description: "The key of the page whose Intro offers the tour, e.g. contacts; null for none" },
+          auto_prompt: { type: "boolean", description: "Offer the tour once, the first time someone opens its page" },
+          stops: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "number", description: "Changes this stop; leave out to add one" },
+                position: { type: "number" },
+                stop_key: { type: "string" },
+                title: { type: "string", description: "Up to 120 characters; empty uses Makerble's default_title" },
+                body: { type: "string", description: "Up to 600 characters; empty uses Makerble's default_body" },
+                _destroy: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/feature_tours/${id}`, body) : post("/feature_tours", body)),
+    },
+
+    {
+      name: "makerble_delete_feature_tour",
+      description:
+        "Delete a feature tour, its stops and everyone's progress through it. Makerble staff only. Check with the " +
+        "user first; to stop offering a tour without losing it, set its status to draft with " +
+        "makerble_save_feature_tour instead.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature tour ID" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => del(`/feature_tours/${id}`),
+    },
+
+    // ── Feature launches (CP-9271) ───────────────────────────────────────────
+    {
+      name: "makerble_list_feature_launches",
+      description:
+        "List feature launches (CP-9271): one record per Makerble feature holding its launch content, kept by " +
+        "Makerble staff in Site Overview › Feature launches. Each has the feature's name as people see it in " +
+        "Makerble (e.g. Registers), its tier (minor, standard or major), the short_description its announcements " +
+        "show, a longer email_description for the feature launch emails, its links (user_guide_url, blog_url, " +
+        "deep_link, feature_tour_id, intro_key), its email visual (gif, still_frame, image or none) and which of " +
+        "its links the email shows (email_primary_link as the main button, email_text_links as up to two text " +
+        "links), its Jira keys, released_on and the ids of the announcements for it. Use search to find a launch " +
+        "by name before creating one, so a feature never gets two. Makerble staff (System Access) only; anyone " +
+        "else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          search: { type: "string", description: "Only launches whose name contains this text, ignoring case" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only feature launches changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/feature_launches", p),
+    },
+
+    {
+      name: "makerble_get_feature_launch",
+      description:
+        "Get one feature launch by id: its name, tier, short and email descriptions, links, email visual (with the " +
+        "uploaded image's, GIF's and still frame's addresses once there are any), email links, Jira keys, " +
+        "released_on and the ids of the announcements for it. Makerble staff only.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "number", description: "The feature launch ID, from makerble_list_feature_launches" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/feature_launches/${id}`),
+    },
+
+    {
+      name: "makerble_save_feature_launch",
+      description:
+        "Create or update a feature launch, the record that holds a Makerble feature's launch content for its " +
+        "announcements and the feature launch emails. Makerble staff (System Access) only.\n\n" +
+        "Without id it creates one: name is needed and must be unique, ignoring case. With id it changes only the " +
+        "fields sent; send null or an empty string to clear one, and jira_keys or email_text_links replace the " +
+        "whole list. Write descriptions in the words people see in Makerble (Contacts, Surveys, organisation), in " +
+        "sentence case. short_description is the announcement message (up to 280 characters). email_description " +
+        "is 2 to 4 sentences, up to 600 characters: what it is, why it matters and how to start. user_guide_url " +
+        "must be a Makerble User Guide page (https://makerble.atlassian.net/wiki/spaces/MCPD/...), blog_url any " +
+        "https address, and deep_link a name from makerble_list_deep_links. email_visual is gif or still_frame " +
+        "(made from the feature's animation), image (send email_image as { filename, data } with the data in " +
+        "base64: a PNG, JPG, GIF or WebP up to 5 MB) or none, and every visual but none needs email_visual_alt. " +
+        "email_primary_link and each of email_text_links is deep_link, tour, user_guide or blog, and the launch " +
+        "must have that link; text links are up to two, not repeating the main button.\n\n" +
+        "Workflow: search makerble_list_feature_launches by name first and update the launch if it exists. To link " +
+        "an announcement to it, set feature_launch_id with makerble_save_announcement. When a blog post is " +
+        "published, set blog_url and add blog to email_text_links if there is room.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The feature launch to update. Leave out to create one." },
+          name: { type: "string", description: "The feature's name as people see it in Makerble, up to 80 characters; unique" },
+          tier: { type: "string", enum: ["minor", "standard", "major"] },
+          short_description: { type: ["string", "null"], description: "The announcement message, up to 280 characters" },
+          email_description: { type: ["string", "null"], description: "2 to 4 sentences, up to 600 characters" },
+          user_guide_url: { type: ["string", "null"], description: "A page in the Makerble User Guide" },
+          blog_url: { type: ["string", "null"], description: "The blog post, an https address" },
+          deep_link: { type: ["string", "null"], description: "A deep link name, from makerble_list_deep_links" },
+          feature_tour_id: { type: ["number", "null"], description: "The feature tour, from makerble_list_feature_tours" },
+          intro_key: { type: ["string", "null"], description: "The key of the feature's Intro, from makerble_list_guidance_panels" },
+          email_visual: { type: "string", enum: ["gif", "still_frame", "image", "none"] },
+          email_visual_alt: { type: ["string", "null"], description: "What the visual shows, up to 250 characters" },
+          email_image: {
+            type: "object",
+            description: "For an image visual: the file as base64",
+            properties: { filename: { type: "string" }, data: { type: "string", description: "The file's contents in base64" } },
+            required: ["filename", "data"],
+          },
+          email_primary_link: { type: ["string", "null"], enum: ["deep_link", "tour", "user_guide", "blog", null] },
+          email_text_links: {
+            type: "array",
+            maxItems: 2,
+            items: { type: "string", enum: ["deep_link", "tour", "user_guide", "blog"] },
+          },
+          jira_keys: { type: "array", items: { type: "string" }, description: "Jira keys such as CP-9271" },
+          released_on: { type: ["string", "null"], description: "The day it reached production (YYYY-MM-DD)" },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/feature_launches/${id}`, body) : post("/feature_launches", body)),
+    },
+
+    {
+      name: "makerble_preview_feature_launch_email",
+      description:
+        "See the feature launch email (the email that tells people about new Makerble features) for up to 10 " +
+        "feature launches, as one person would get it, or send yourself a test of it. Makerble staff (System " +
+        "Access) only.\n\n" +
+        "Each feature launch shows its name, email visual, email description, a main button and up to two text " +
+        "links. Links into Makerble (a deep link such as \"Open Registers\", and Take the tour) show only for a " +
+        "user whose account can open them; everyone else gets the User Guide and blog links. So send user_email to " +
+        "see it as that Makerble user gets it, or leave it out to see it as someone without a Makerble account.\n\n" +
+        "Returns the subject, who it would go to, and the html and plain-text versions. With send_test: true it " +
+        "instead emails it to you, and only you, with a subject starting [Test], and returns where it went.\n\n" +
+        "Workflow: find the launches with makerble_list_feature_launches, preview first to check the links each " +
+        "person gets, then send a test.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          feature_launch_ids: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: { type: "number" },
+            description: "The feature launches to show, in this order, from makerble_list_feature_launches",
+          },
+          user_email: { type: "string", description: "See it as this Makerble user gets it. Leave out for someone without an account" },
+          intro: { type: "string", description: "An opening paragraph, shown before the feature launches" },
+          subject: { type: "string", description: "The subject. Leave out to name the features" },
+          send_test: { type: "boolean", description: "true to email it to yourself instead of returning it" },
+        },
+        required: ["feature_launch_ids"],
+      },
+      handler: ({ send_test, ...body }) =>
+        post(send_test ? "/feature_launches/email_test" : "/feature_launches/email_preview", body),
+    },
+
+    {
+      name: "makerble_list_training_materials",
+      description:
+        "List an Organisation's Training materials (CP-9130), as on the Training materials page under Helpdesk: links " +
+        "to the organisation's own training documents and videos (crib sheets in Google Docs, Word Online, SharePoint, " +
+        "Loom and so on), each shown to the whole Organisation or to chosen Teams and Workspaces (Projects). Returns " +
+        "only what the signed-in user may see: an Organisation Admin sees them all, anyone else sees those for " +
+        "everyone, for their Teams and for Workspaces they have a role on. Each has id, name, url, description, " +
+        "material_type (document or video), all_organisation, team_ids, project_ids, owner_name (who to ask about it), " +
+        "reviewed_at and, for Organisation Admins, review_due (last reviewed over 12 months ago). Use it to point " +
+        "someone to the right guide, e.g. 'how do I add a new school?'. Pass project_id for one Workspace's training.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "Only the materials linked to this Workspace (Project)" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only those changed since, ISO 8601" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/training_materials`, params),
+    },
+
+    {
+      name: "makerble_create_training_material",
+      description:
+        "Add a Training material (CP-9130) to an Organisation: a name and an https link to one of its own training " +
+        "documents or videos, and who it is for: all_organisation true, and/or team_ids (from the Organisation's Teams) " +
+        "and project_ids (Workspaces). At least one is required. Makerble stores only the link, so remind the user to " +
+        "share the document with the same people, or they will see a request-access page. Only an Organisation Admin " +
+        "(or Makerble staff) can add one. owner_id (the person colleagues should ask) defaults to the user and must be " +
+        "an Organisation Admin. Returns the material, with its id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string", description: "e.g. 'How to add a new school'" },
+          url: { type: "string", description: "The document's link, starting https://" },
+          description: { type: "string", description: "Optional: one or two lines saying who it is for" },
+          material_type: { type: "string", enum: ["document", "video"], description: "Default document" },
+          all_organisation: { type: "boolean", description: "For everyone in the Organisation" },
+          team_ids: { type: "array", items: { type: "number" }, description: "Teams it is for" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Workspaces (Projects) it is for" },
+          owner_id: { type: "number", description: "Who to ask about it; an Organisation Admin" },
+        },
+        required: ["organisation_id", "name", "url"],
+      },
+      handler: ({ organisation_id, ...body }) => post(`/organisations/${organisation_id}/training_materials`, body),
+    },
+
+    {
+      name: "makerble_update_training_material",
+      description:
+        "Change, mark as reviewed or remove one of an Organisation's Training materials (CP-9130). Send only the " +
+        "fields to change; team_ids and project_ids replace who it is linked to (moving a guide from one Team to " +
+        "another takes it away from the first Team's members). mark_as_reviewed true sets its last reviewed date to " +
+        "now, clearing Review due. remove true deletes it from Makerble (the document itself is untouched); confirm " +
+        "with the user first. Only an Organisation Admin (or Makerble staff). Get ids from makerble_list_training_materials.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          id: { type: "number", description: "The Training material ID" },
+          name: { type: "string" },
+          url: { type: "string", description: "Starting https://" },
+          description: { type: "string" },
+          material_type: { type: "string", enum: ["document", "video"] },
+          all_organisation: { type: "boolean" },
+          team_ids: { type: "array", items: { type: "number" } },
+          project_ids: { type: "array", items: { type: "number" } },
+          owner_id: { type: "number" },
+          mark_as_reviewed: { type: "boolean", description: "Set its last reviewed date to now" },
+          remove: { type: "boolean", description: "Delete it from Makerble instead of changing it" },
+        },
+        required: ["organisation_id", "id"],
+      },
+      handler: async ({ organisation_id, id, remove, ...body }) => {
+        const path = `/organisations/${organisation_id}/training_materials/${id}`;
+        if (!remove) return patch(path, body);
+        await del(path);
+        return { removed: true, id };
+      },
+    },
+
+    {
+      name: "makerble_list_unavailability",
+      description:
+        "List when a colleague (User) can't work for an Organisation (Charity) (CP-7456): annual leave, sick leave, " +
+        "training or other, as on the Staff availability page and the colleague's Unavailability page. Each range has " +
+        "from_date, to_date, all_day, from_time and to_time (part days) in the Organisation's timezone, reason_type, a " +
+        "readable summary such as '3/12/2026 13:00–17:30 · Training', and private_note only when the signed-in user is " +
+        "that colleague or an Organisation Admin (Charity Editor). Anyone can list their own; Team Leaders can list their " +
+        "Team, Project Editors the colleagues in their Project, and Organisation Admins everyone. Use it before booking " +
+        "staff onto events, or to answer 'who is off next week?'. A colleague in several Organisations has separate " +
+        "unavailability in each, so organisation_id is required.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200" },
+          last_synced_datetime: { type: "string", description: "Only those changed since, ISO 8601" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id, ...params }) =>
+        get(`/users/${user_id}/unavailabilities`, { charity_id: organisation_id, ...params }),
+    },
+
+    {
+      name: "makerble_get_colleague_capacity",
+      description:
+        "Get a colleague's (User's) capacity caps in one Organisation (Charity), and how much they have taken on, " +
+        "as in the Edit capacity popup on the Staff Availability page (CP-9146). Caps: max_per_day and max_per_week " +
+        "(appointments) and max_one_to_one_contacts (Contacts with an upcoming one-to-one appointment with them); " +
+        "null means no limit. usage gives appointments_today, appointments_this_week and ongoing_one_to_one_contacts, " +
+        "in the Organisation's time zone. An appointment is an event whose Event Format (event category) has an " +
+        "appointment_type (one_to_one or group, see makerble_get_event_format) where the colleague is an Event Worker. " +
+        "Use it to tell whether a colleague is fully booked before assigning them to an event or a new Contact. " +
+        "Anyone who sees the colleague on Staff Availability can read this: the colleague themselves, their Team " +
+        "Leaders, Project Editors of their Projects and Organisation Admins (Charity Editors). can_edit says whether " +
+        "the signed-in user may change the caps with makerble_set_colleague_capacity. 403 if they can't see the " +
+        "colleague, 404 for an Organisation they aren't in. " +
+        "Returns { user_id, charity_id, max_per_day, max_per_week, max_one_to_one_contacts, can_edit, usage }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID. A colleague has separate caps in each Organisation" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id }) => get(`/users/${user_id}/capacity`, { charity_id: organisation_id }),
+    },
+
+    {
+      name: "makerble_set_colleague_capacity",
+      description:
+        "Set a colleague's (User's) capacity caps in one Organisation (Charity), as Edit capacity on the Staff " +
+        "Availability page does (CP-9146): max_per_day and max_per_week (appointments) and max_one_to_one_contacts " +
+        "(Contacts with an upcoming one-to-one appointment with them). Only the caps you send change; send null to " +
+        "remove a limit. Whole numbers from 0 to 1000. Only an Organisation Admin (Charity Editor), or a Team Leader " +
+        "of a Team the colleague is in, may set them; a colleague can't set their own (403). Invalid values return 422 " +
+        "with errors. Returns the same as makerble_get_colleague_capacity.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          max_per_day: { type: ["number", "null"], description: "Maximum appointments a day, or null for no limit" },
+          max_per_week: { type: ["number", "null"], description: "Maximum appointments a week, or null for no limit" },
+          max_one_to_one_contacts: { type: ["number", "null"], description: "Maximum ongoing one-to-one Contacts, or null for no limit" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: ({ user_id, organisation_id, ...caps }) => patch(`/users/${user_id}/capacity?charity_id=${organisation_id}`, caps),
+    },
+
+    {
+      name: "makerble_get_colleague_free_slots",
+      description:
+        "Find when a colleague (User) is free for an appointment of an Event Format (event category) in one " +
+        "Organisation (Charity) (CP-9147). A start time is free when the appointment, padded by the Event Format's " +
+        "preparation and debrief times, fits inside the colleague's availability on the Staff Availability page " +
+        "(respecting its Event Format and Project restrictions), overlaps none of their unavailability (leave, " +
+        "sickness, training; see makerble_list_unavailability) and none of their Event Worker assignments (each padded " +
+        "by its own Event Format's preparation and debrief times), and is on a day and in a week below their caps " +
+        "(see makerble_get_colleague_capacity). A colleague at their limit of one-to-one Contacts has no free " +
+        "one-to-one slots at all. Starts fall on the quarter hour, in the Organisation's time zone. The Event Format " +
+        "needs a Default length (422 without one; see makerble_get_event_format).\n\n" +
+        "By default it returns single free slots from today for 8 weeks. Pass weekly_sessions to plan a recurring " +
+        "appointment: each weekly time (e.g. Mondays 10:00) is returned once, from the first date on which every one " +
+        "of the sessions is free. Any member of the Organisation can see a colleague's slot times; the capacity block " +
+        "(caps, ongoing one-to-one Contacts, at_one_to_one_limit) is null unless the signed-in user sees the colleague " +
+        "on Staff Availability. 404 for an Organisation the user isn't in, or a colleague, Event Format or Project not " +
+        "in it. Paged: { page, page_size, page_count, total_count, data: [{ starts_at, ends_at, date, weekday, " +
+        "start_time, end_time, summary, sessions? }] }, plus the window, time_zone and the Event Format's length, " +
+        "preparation_minutes and debrief_minutes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          event_format_id: { type: "number", description: "The Event Format (event category) ID, from makerble_list_event_formats" },
+          project_id: { type: "number", description: "Optional. The Project the appointment is for: availability restricted to other Projects is left out" },
+          from: { type: "string", description: "Optional. First date, YYYY-MM-DD. Default today" },
+          to: { type: "string", description: "Optional. Last date, YYYY-MM-DD, at most 26 weeks after from. Default 8 weeks after from" },
+          weekly_sessions: { type: "number", description: "Optional. Return weekly series of this many sessions (1 to 52) instead of single slots" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Results per page (default 10, max 200)" },
+        },
+        required: ["user_id", "organisation_id", "event_format_id"],
+      },
+      handler: ({ user_id, organisation_id, event_format_id, ...params }) =>
+        get(`/users/${user_id}/free_slots`, { charity_id: organisation_id, event_category_id: event_format_id, ...params }),
+    },
+
+    {
+      name: "makerble_suggest_staff_for_contact",
+      description:
+        "Suggest which colleagues (users) could take on a Contact (Beneficiary) for one-to-one appointments of an " +
+        "Event Format (Event Category), ranked by Specialisms (Skills) and earliest free weekly slot. Use before " +
+        "booking a recurring appointment with makerble_create_event (CP-9147).\n\n" +
+        "Workflow: (1) find the Contact (makerble_list_contacts); (2) find the Project they are in " +
+        "(makerble_list_projects); (3) find a one-to-one Event Format there (makerble_list_project_event_formats, then " +
+        "makerble_get_event_format: appointment_type must be one_to_one, else 422); (4) call this tool; (5) show the " +
+        "user the suggestions with their reasons and, once they choose, create the recurring event with " +
+        "makerble_create_event, the colleague as an Event Worker and the Contact as a guest, starting at the " +
+        "suggestion's first_slot.starts_at with a weekly recurring_schedule.\n\n" +
+        "Candidates are the Project's colleagues. A colleague with a free series of 6 weekly sessions starting in the " +
+        "next 8 weeks (see makerble_get_colleague_free_slots) is a suggestion; one without is in fully_booked, with " +
+        "free_from, the date they free up if it is within 16 weeks. Suggestions are ranked by: having every Essential " +
+        "need as a Specialism (colleagues missing one still appear, lower down); then the number of Desirable needs " +
+        "matched; then the earliest series inside the Contact's Weekly availability (or any series, when that isn't " +
+        "recorded: contact_availability_note says so); then the fewest ongoing one-to-one Contacts relative to their " +
+        "cap. Each suggestion gives its reasons: specialisms_summary (e.g. \"Eating disorders ✓ (essential) · Music ✗ " +
+        "(desirable)\"), first_slot.summary (e.g. \"Mondays 10:00–11:00 from 24 Nov\"), inside_contact_availability, " +
+        "and load.summary (e.g. \"9 of 12 one-to-one Contacts\"). Each fully booked colleague has a summary such as " +
+        "\"Sarah Jones: fully booked until 8 Dec\". So you can tell the user, for example, \"Sarah would be ideal but " +
+        "is full until 8 Dec; Claire can start next week\".\n\n" +
+        "The signed-in user must be able to see the Contact's profile (404 otherwise) and the Project's events, as an " +
+        "Organisation Admin (Charity Editor) or a Project Editor (403 otherwise). load and at_one_to_one_limit are null " +
+        "for colleagues the user doesn't see on Staff Availability. 422 if the Contact isn't in the Project. " +
+        "Returns { beneficiary_id, project_id, event_category_id, sessions, weeks, contact_availability_note, " +
+        "suggestions: [{ rank, user, has_all_essential, specialisms, specialisms_summary, load, first_slot, " +
+        "inside_contact_availability }], fully_booked: [{ user, has_all_essential, specialisms, specialisms_summary, " +
+        "load, free_from, summary, at_one_to_one_limit }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_id: { type: "number", description: "The Contact (Beneficiary) ID" },
+          project_id: { type: "number", description: "The Project (in the Contact's Organisation) the appointments are for; the Contact must be in it" },
+          event_format_id: { type: "number", description: "A one-to-one Event Format (event category) ID with a Default length" },
+        },
+        required: ["contact_id", "project_id", "event_format_id"],
+      },
+      handler: ({ contact_id, project_id, event_format_id }) =>
+        get(`/beneficiaries/${contact_id}/staff_suggestions`, { project_id, event_category_id: event_format_id }),
+    },
+
+    {
+      name: "makerble_set_unavailability",
+      description:
+        "Record, change or remove when a colleague (User) can't work for an Organisation (Charity) (CP-7456). Makerble " +
+        "won't then assign them to events automatically at those times, and warns anyone assigning them by hand. " +
+        "To record: give from_date and to_date (YYYY-MM-DD) and reason_type; for part of a day set all_day false and " +
+        "give from_time and to_time (HH:MM), in the Organisation's timezone. To change one: pass its id (from " +
+        "makerble_list_unavailability) and only the fields to change. To remove: pass id and remove true. The same " +
+        "people as for listing may do this; private_note (up to 150 characters, health information for sick leave) is " +
+        "only for the colleague themselves and Organisation Admins.\n\n" +
+        "Workflow when the colleague is already on the rota: the reply lists conflicting_events, the upcoming events " +
+        "they are an Event Worker on during the range, each with editable (whether the signed-in user may change it) and " +
+        "unassigned. Each event's Event Managers are emailed either way. Show the user the list and ask which events to " +
+        "take the colleague off; then call again with the same id and unassign_event_ids (only editable events are " +
+        "changed), or pass unassign_event_ids in the first call if the user has already said.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: { type: "number", description: "The colleague (User) ID" },
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          id: { type: "number", description: "The range to change or remove; leave out to record a new one" },
+          from_date: { type: "string", description: "YYYY-MM-DD" },
+          to_date: { type: "string", description: "YYYY-MM-DD" },
+          all_day: { type: "boolean", description: "Default true. False for part of a day, with from_time and to_time" },
+          from_time: { type: "string", description: "HH:MM, for part of a day" },
+          to_time: { type: "string", description: "HH:MM, for part of a day" },
+          reason_type: { type: "string", enum: ["annual_leave", "sick_leave", "training", "other"] },
+          private_note: { type: "string", description: "Optional, up to 150 characters" },
+          unassign_event_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Events from conflicting_events to take the colleague off",
+          },
+          remove: { type: "boolean", description: "Remove the range given by id instead of changing it" },
+        },
+        required: ["user_id", "organisation_id"],
+      },
+      handler: async ({ user_id, organisation_id, id, remove, ...body }) => {
+        const base = `/users/${user_id}/unavailabilities`;
+        if (remove) {
+          if (!id) throw new McpError(ErrorCode.InvalidParams, "Pass the id of the range to remove");
+          await del(`${base}/${id}?charity_id=${organisation_id}`);
+          return { removed: true, id };
+        }
+        const payload = { charity_id: organisation_id, ...body };
+        return id ? patch(`${base}/${id}`, payload) : post(base, payload);
+      },
+    },
+
+    {
+      name: "makerble_list_tour_progress",
+      description:
+        "See who has finished a Welcome Tour (CP-9053), as the Who has finished page does: the colleagues in the " +
+        "tour's Team (everyone in the Organisation for its default tour), by name, each with their team, status " +
+        "(not_started, in_progress, deferred = chose \"I'll do this later\", completed or skipped), tour (as the " +
+        "page shows it, e.g. \"Paused at stop 3 of 7\"), later_used (e.g. \"1 of 3\"), last_active_at and " +
+        "reminded_at. summary gives the page's tiles: finished, part_way, not_started and average_minutes (which " +
+        "counts only tours finished without \"I'll do this later\"). Only colleagues are listed, never Contacts " +
+        "(Beneficiaries) or active participants. Paginated. Use it to answer \"who hasn't finished the tour?\", " +
+        "then makerble_send_tour_reminder to nudge them. An Organisation Admin of the tour's Organisation, or " +
+        "Makerble staff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour ID, from makerble_list_tours" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...p }) => get(`/tours/${id}/progress`, p),
+    },
+
+    {
+      name: "makerble_send_tour_reminder",
+      description:
+        "Remind a colleague to finish their Welcome Tour: emails them a link that opens the tour at the stop " +
+        "they reached, as Send a reminder on the Who has finished page does. Each person can be reminded once " +
+        "every 7 days; a second reminder sooner is refused with a message saying when the next one can be sent, " +
+        "as is someone who has finished or isn't a colleague in the Organisation. Returns reminded_at and " +
+        "next_reminder_from. Find who hasn't finished with makerble_list_tour_progress first, and check with the " +
+        "user before emailing people. An Organisation Admin of the tour's Organisation, or Makerble staff.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Welcome Tour ID" },
+          user_id: { type: "number", description: "The colleague to remind, from makerble_list_tour_progress" },
+        },
+        required: ["id", "user_id"],
+      },
+      handler: ({ id, user_id }) => post(`/tours/${id}/reminders`, { user_id }),
+    },
+
+    // ── Guidance Panels ───────────────────────────────────────────────────────
+    {
+      name: "makerble_list_guidance_panels",
+      description:
+        "List the Guidance Panels. A Guidance Panel is the Show/Hide Guidance introduction at the top of a " +
+        "Manage page in Makerble (for example Manage Events or Manage Contact Groups): an eyebrow (e.g. " +
+        "\"Makerble® Events\"), a one-line headline, 2 to 5 points that each start with a short bold lead, the " +
+        "sentence shown instead of the page's main button to people who can't use it (staff_text), a " +
+        "\"Learn more\" link to the page's article in the Makerble User Guide, and an optional Vimeo video. " +
+        "Panels are the same for every Organisation. Returns each panel's key (use it with " +
+        "makerble_get_guidance_panel and makerble_update_guidance_panel), page_name, module (the sidebar " +
+        "section: spaces, crm, scheduling, surveys, impact or settings), the wording, vimeo_url, storyboard " +
+        "(the animation drawn when there is no video, or null), visual (what shows beside the text now: vimeo, " +
+        "storyboard, animation, image or none), feature_tour_id and feature_tour_name (the feature tour its " +
+        "\"Take the tour\" offers: the live one, otherwise the one most recently updated; null for none), " +
+        "updated_at and updated_by. Only " +
+        "Makerble staff with System Access can use the Guidance Panel tools; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200; there are about 45 panels" },
+          last_synced_datetime: { type: "string", description: "Only panels changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/guidance_panels", p),
+    },
+
+    {
+      name: "makerble_get_guidance_panel",
+      description:
+        "Get one Guidance Panel (the Show/Hide Guidance introduction at the top of a Manage page) by its key, " +
+        "e.g. events or contact_groups, with its last 10 versions, newest first: who changed it, when, which " +
+        "parts changed (changed) and each changed field's value before and after (changes). Read a panel " +
+        "with this before changing it with makerble_update_guidance_panel, and use the versions to see or " +
+        "explain earlier wording.",
+      inputSchema: {
+        type: "object",
+        properties: { key: { type: "string", description: "The panel's key, from makerble_list_guidance_panels" } },
+        required: ["key"],
+      },
+      handler: ({ key }) => get(`/guidance_panels/${encodeURIComponent(key)}`),
+    },
+
+    {
+      name: "makerble_update_guidance_panel",
+      description:
+        "Change a Guidance Panel's wording, video, animation storyboard or feature tour: the Show/Hide Guidance introduction " +
+        "(shown as the page's \"Intro\") at the top of a " +
+        "Manage page. The page shows the change from its next load, and the change is kept as a version " +
+        "attributed to the user. Send only the fields to change; points replaces the whole list in the order " +
+        "given.\n\n" +
+        "Before rewriting a panel: (1) read it with makerble_get_guidance_panel; (2) read its user_guide_url " +
+        "article, so the wording matches what the feature actually does; (3) keep the panel's purpose.\n\n" +
+        "Writing rules: use Makerble's on-screen terms (Contacts, not beneficiaries; organisation, not " +
+        "charity; Surveys; Signup Pages; Bio Forms), plain UK English and the second person. The headline " +
+        "states the benefit to the reader in one line of at most 80 characters, with no full stop. Give 2 to 5 " +
+        "points, each with a lead of 2 to 5 words (shown in bold, up to 40 characters) and text that finishes " +
+        "the sentence (up to 200 characters). staff_text (up to 300 characters) tells someone who can't use the " +
+        "page's main action who can, e.g. \"Ask an Administrator in your organisation to create Events.\" " +
+        "user_guide_url must be a page in the Makerble User Guide " +
+        "(https://makerble.atlassian.net/wiki/spaces/MCPD/...).\n\n" +
+        "vimeo_url must be empty (to go back to the page's own image or animation) or one of " +
+        "https://vimeo.com/<id>, https://vimeo.com/<id>/<hash> for an unlisted video, or " +
+        "https://player.vimeo.com/video/<id>?h=<hash>.\n\n" +
+        "storyboard is the Intro's animation, drawn in the page's module colour from Makerble building " +
+        "blocks whenever there is no Vimeo link (a video always wins). Send null to remove it. It is an object: " +
+        "archetype (assemble: the parts of a page of the feature come together; flow: a short walkthrough of " +
+        "using it; journey: one piece of data travels from page to page by itself, e.g. a tick on a Register " +
+        "turning up on the contact's profile timeline; concept: a metaphor for the idea, which Matt must approve " +
+        "before it is saved), loop_seconds (4 to 20), alt (10 to 250 characters describing what the animation " +
+        "shows, read by screen readers) and 1 to 24 steps played in order. Step types: appear (puts a block on " +
+        "the stage: block is one of top_bar, sidebar_item, table_row, card, button, field, chip, avatar, " +
+        "chart_bar, cell (a tickable Register cell), timeline_item, calendar_event or icon; optional id that later " +
+        "steps target, lowercase letters, digits and underscores; optional text up to 40 characters; a chart_bar " +
+        "needs value 0 to 100 and a calendar_event value 1 (Monday) to 5 (Friday); an avatar, table_row, card or " +
+        "timeline_item may have face 1 to 5, one of the Makerble avatars, so people are faces, not initials; " +
+        "an icon block needs icon, one of pin, map, calendar, clock, document, chart, people, home, envelope, " +
+        "phone, star or heart, drawn in the module colour beside its text, for a concept's metaphor), " +
+        "move_cursor, click, highlight and check (each with target, the id of a block on the stage), type " +
+        "(target is a field, text is what is typed), swap (replaces the target's text with text), cut (clears " +
+        "the stage for the next scene; earlier blocks can't be targeted after it), frame (must be a scene's " +
+        "first step: draws the scene as a simplified page, captioned with text or the page's usual name; frame " +
+        "is register, profile, table, web_page, calendar or compare), carry (target is a block on the stage, to " +
+        "is the id of a block that appears after the next cut: at that cut the carried block stays in flight, " +
+        "then flies onto the to block, the only way anything outlives a cut) and zoom (scales in on target for " +
+        "two beats, then back out). A Journey has two or three framed scenes, carries its hero (the tick, the " +
+        "booking) from one to the next, uses the same face for the same person in every scene, holds the payoff " +
+        "with check and highlight rather than zoom (the frames read without it), and runs 10 to 12 seconds; " +
+        "people who turn off motion see only its last scene. Use the feature's real button and page " +
+        "names in sentence case. A chip, card or row shows a tick box only if a check step ticks it, so " +
+        "chips work as plain labels. Up to 8,000 characters of JSON.\n\n" +
+        "feature_tour_id chooses the feature tour (from makerble_list_feature_tours) that the Intro's \"Take the " +
+        "tour\" offers, or null for none. It points that tour's page_key at this Intro and unlinks any other " +
+        "tour that pointed here; the response's notices names it (e.g. \"Checklists is no longer offered " +
+        "here.\"). Only a live tour is shown. It is refused when the chosen tour is live and another live tour " +
+        "is already on this Intro: send null first to take that one off, with the user's agreement.\n\n" +
+        "A broken rule returns 422 with every message in errors, and nothing is changed: " +
+        "fix them and try again. Show the user the new wording before saving it unless they asked you to go " +
+        "ahead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "The panel's key, e.g. events" },
+          eyebrow: { type: "string", description: "e.g. \"Makerble® Events\"" },
+          headline: { type: "string", description: "One line, at most 80 characters" },
+          points: {
+            type: "array",
+            minItems: 2,
+            maxItems: 5,
+            description: "2 to 5 points, in order",
+            items: {
+              type: "object",
+              properties: {
+                lead: { type: "string", description: "Shown in bold, 2 to 5 words, up to 40 characters" },
+                text: { type: "string", description: "Finishes the sentence, up to 200 characters" },
+              },
+              required: ["lead", "text"],
+            },
+          },
+          staff_text: { type: "string", description: "Shown instead of the main action to people who can't use it" },
+          user_guide_url: { type: "string", description: "A page in the Makerble User Guide (MCPD space)" },
+          vimeo_url: { type: "string", description: "A Vimeo link, or an empty string to remove the video" },
+          storyboard: {
+            type: ["object", "null"],
+            description: "The Intro's animation (see the rules above), or null to remove it",
+            properties: {
+              archetype: { type: "string", enum: ["assemble", "flow", "journey", "concept"] },
+              loop_seconds: { type: "integer", minimum: 4, maximum: 20 },
+              alt: { type: "string", description: "What the animation shows, 10 to 250 characters" },
+              steps: {
+                type: "array",
+                minItems: 1,
+                maxItems: 24,
+                items: {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut", "frame", "carry", "zoom"],
+                    },
+                    block: {
+                      type: "string",
+                      enum: [
+                        "top_bar", "sidebar_item", "table_row", "card", "button", "field", "chip", "avatar", "chart_bar",
+                        "cell", "timeline_item", "calendar_event", "icon",
+                      ],
+                    },
+                    id: { type: "string" },
+                    target: { type: "string" },
+                    text: { type: "string" },
+                    value: { type: "integer", minimum: 0, maximum: 100, description: "chart_bar 0 to 100; calendar_event weekday 1 to 5" },
+                    face: { type: "integer", minimum: 1, maximum: 5, description: "One of the Makerble avatars" },
+                    icon: {
+                      type: "string",
+                      enum: ["pin", "map", "calendar", "clock", "document", "chart", "people", "home", "envelope", "phone", "star", "heart"],
+                      description: "For an icon block (required there, and only there): the icon it shows",
+                    },
+                    frame: { type: "string", enum: ["register", "profile", "table", "web_page", "calendar", "compare"] },
+                    to: { type: "string", description: "For carry: the id of the block it lands on after the next cut" },
+                  },
+                  required: ["type"],
+                },
+              },
+            },
+            required: ["archetype", "loop_seconds", "alt", "steps"],
+          },
+          feature_tour_id: {
+            type: ["number", "null"],
+            description: "The feature tour this Intro offers with \"Take the tour\", from makerble_list_feature_tours; null for none",
+          },
+        },
+        required: ["key"],
+      },
+      handler: ({ key, ...guidance_panel }) =>
+        patch(`/guidance_panels/${encodeURIComponent(key)}`, { guidance_panel }),
+    },
+
+    // ── Eventbrite ────────────────────────────────────────────────────────────
+    {
+      name: "makerble_get_eventbrite_connection",
+      description:
+        "See whether an Organisation (Charity) is connected to Eventbrite, the ticketing site, and whether " +
+        "the connection still works. Makerble's Eventbrite integration brings Eventbrite events, ticket " +
+        "holders and check-ins into Makerble as Events, Contacts (beneficiaries) and attendance Stories. " +
+        "Returns status: not_connected, choosing_organisation (signed in, but the Eventbrite sign-in belongs " +
+        "to several Eventbrite organisations and one must be chosen; see available_organizations and " +
+        "makerble_choose_eventbrite_organization), active, or reconnect_required (Eventbrite no longer " +
+        "accepts the sign-in). Also returns the chosen eventbrite_organization, who connected it, " +
+        "last_checked_at, last_error, and page_url. Set test: true to check the connection with Eventbrite " +
+        "now (test_succeeded says whether it worked). Signing in to Eventbrite needs a browser, so to connect " +
+        "or reconnect, give the user page_url: the Connect > Eventbrite page in Makerble, where they press " +
+        "'Connect Eventbrite'. Only the Organisation's admins can use the Eventbrite tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          test: { type: "boolean", description: "Check the connection with Eventbrite now" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, test }) =>
+        test ? post("/eventbrite_connection/test", { charity_id }) : get("/eventbrite_connection", { charity_id }),
+    },
+
+    {
+      name: "makerble_choose_eventbrite_organization",
+      description:
+        "Choose which Eventbrite organisation an Organisation's Eventbrite connection uses, when " +
+        "makerble_get_eventbrite_connection reports status choosing_organisation. The ID must be one of its " +
+        "available_organizations. Returns the connection, now active.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          eventbrite_organization_id: { type: "string", description: "An id from available_organizations" },
+        },
+        required: ["charity_id", "eventbrite_organization_id"],
+      },
+      handler: ({ charity_id, eventbrite_organization_id }) =>
+        patch("/eventbrite_connection", { charity_id, eventbrite_connection: { eventbrite_organization_id } }),
+    },
+
+    {
+      name: "makerble_disconnect_eventbrite",
+      description:
+        "Disconnect an Organisation from Eventbrite. Makerble stops bringing in changes from Eventbrite; " +
+        "Events, Contacts and Stories already brought in stay, with their links to Eventbrite. Reconnecting " +
+        "needs the user to sign in to Eventbrite again on the page_url page, so confirm with the user first.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: async ({ charity_id }) => {
+        await del("/eventbrite_connection", { charity_id });
+        return { disconnected: true, charity_id };
+      },
+    },
+
+    {
+      name: "makerble_sync_eventbrite_now",
+      description:
+        "Bring the latest from an Organisation's Eventbrite account into Makerble now, instead of waiting for the " +
+        "catch-up every 3 hours (changes normally arrive within seconds by webhook). It runs in the background; " +
+        "makerble_get_eventbrite_connection shows syncing: true until it finishes and then last_synced_at. Check " +
+        "makerble_list_eventbrite_sync_log afterwards for what came in.",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => post("/eventbrite_connection/sync", { charity_id }),
+    },
+
+    {
+      name: "makerble_list_eventbrite_sync_log",
+      description:
+        "The Eventbrite sync log, newest first, kept 90 days: what Makerble brought in from Eventbrite, updated, " +
+        "skipped or removed, and why. Each entry has outcome (imported, updated, skipped, removed, needs_review, " +
+        "error), object_type (event, attendee = ticket holder, check_in, connection), message, the Eventbrite " +
+        "eventbrite_id and eventbrite_url, and record: the Makerble record it concerns ({type: Contact, Event or " +
+        "Story, id}). needs_review means a ticket holder's email matched existing Contacts unclearly; the Contacts " +
+        "are on the Suggested Merges list (makerble_list_suggested_merges, source eventbrite).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+          last_synced_datetime: { type: "string", description: "Only entries after this ISO 8601 time" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/eventbrite_connection/sync_log", p),
+    },
+
+    {
+      name: "makerble_update_eventbrite_settings",
+      description:
+        "Choose what an Organisation brings in from Eventbrite. project_id is the Workspace (Project) new Events " +
+        "are created in, and event_category_id one of its Event formats (Event Categories; list them with the " +
+        "Event format tools). import_mode is all_upcoming (every upcoming Eventbrite event, new ones included) " +
+        "or selected (only events picked with makerble_choose_eventbrite_events, drafts included). contact_project_id is the " +
+        "Workspace new Contacts (beneficiaries) from ticket holders go into (leave out to use each Event's " +
+        "Workspace); beneficiary_category_id their Contact Bio Form (Beneficiary Category), which must be one the " +
+        "Workspace for new Contacts uses for creating Contacts (set in the Workspace's Preferences). change_id is " +
+        "the engagement tracker and story_category_id the Event attendance survey (Story Category), which must be a " +
+        "survey running on the Workspace for new Events; together they record Eventbrite check-ins as attendance " +
+        "Stories. Only send the settings to change. Saving starts a sync. Nothing comes in from Eventbrite until " +
+        "project_id and event_category_id are set.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number" },
+          event_category_id: { type: "number" },
+          import_mode: { type: "string", enum: ["all_upcoming", "selected"] },
+          contact_project_id: { type: "number" },
+          beneficiary_category_id: { type: "number", description: "A Contact Bio Form (Beneficiary Category) ID" },
+          change_id: { type: "number", description: "An engagement tracker (participation Change) ID" },
+          story_category_id: { type: "number", description: "The Event attendance survey (Story Category) ID" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, ...eventbrite_connection }) =>
+        patch("/eventbrite_connection/settings", { charity_id, eventbrite_connection }),
+    },
+
+    {
+      name: "makerble_list_eventbrite_events",
+      description:
+        "List the upcoming events in an Organisation's Eventbrite organisation, to choose which to bring into " +
+        "Makerble. Each has the Eventbrite id, name, start (local time), status (live, started, ended, canceled, " +
+        "draft), url, selected (whether it is or would be brought in) and makerble_event_id (the Makerble Event " +
+        "it came in as, or null).",
+      inputSchema: {
+        type: "object",
+        properties: { charity_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id }) => get("/eventbrite_connection/events", { charity_id }),
+    },
+
+    {
+      name: "makerble_choose_eventbrite_events",
+      description:
+        "Pick the Eventbrite events to bring into Makerble, by their Eventbrite ids from " +
+        "makerble_list_eventbrite_events. This switches import_mode to selected, so only these come in (new " +
+        "Eventbrite events no longer come in automatically). Events already brought in stay.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          eventbrite_event_ids: { type: "array", items: { type: "string" } },
+        },
+        required: ["charity_id", "eventbrite_event_ids"],
+      },
+      handler: (p) => put("/eventbrite_connection/events", p),
+    },
+
+    {
+      name: "makerble_get_eventbrite_field_mapping",
+      description:
+        "Read which Makerble field each Eventbrite field is copied into. object_type event maps Eventbrite event " +
+        "fields onto the Makerble Event (and the Event format's custom fields); object_type attendee maps ticket " +
+        "holder fields and order form question answers (keys answer:<question>) onto the Contact (and the " +
+        "Contact type's custom fields and Dropdowns). Returns mappings, eventbrite_fields (each with " +
+        "compatible_makerble_fields) and makerble_fields. Set refresh: true (attendee only) to re-read the " +
+        "order form questions from Eventbrite first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          object_type: { type: "string", enum: ["event", "attendee"] },
+          refresh: { type: "boolean" },
+        },
+        required: ["charity_id", "object_type"],
+      },
+      handler: ({ charity_id, object_type, refresh }) =>
+        refresh && object_type === "attendee"
+          ? post("/eventbrite_connection/refresh_questions", { charity_id })
+          : get(`/eventbrite_connection/mappings/${object_type}`, { charity_id }),
+    },
+
+    {
+      name: "makerble_set_eventbrite_field_mapping",
+      description:
+        "Replace an Eventbrite field mapping (read it first with makerble_get_eventbrite_field_mapping). Each " +
+        "pair copies one eventbrite_field into one makerble_field; only compatible types pair up, a field can be " +
+        "in only one pair, and paused: true stops copying it for now. Eventbrite fields left out are not copied. " +
+        "For events Eventbrite's value replaces the Makerble one; for Contacts only blank fields are filled in.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          object_type: { type: "string", enum: ["event", "attendee"] },
+          mappings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                eventbrite_field: { type: "string" },
+                makerble_field: { type: "string" },
+                paused: { type: "boolean" },
+              },
+              required: ["eventbrite_field", "makerble_field"],
+            },
+          },
+        },
+        required: ["charity_id", "object_type", "mappings"],
+      },
+      handler: ({ charity_id, object_type, mappings }) =>
+        put(`/eventbrite_connection/mappings/${object_type}`, { charity_id, mappings }),
     },
 
     // ── Webhooks ──────────────────────────────────────────────────────────────
@@ -3565,7 +8217,11 @@ export function buildTools(api) {
       description:
         "Read one library item in full, to reuse it or copy it. Use the type and id from " +
         "makerble_search_library. A Survey returns its questions in order, each with the Metric, List, Field or " +
-        "Activity tracker behind it, plus section titles. A Metric returns metric_type, default_question, unit, " +
+        "Activity tracker behind it, plus section titles, its Shared Intervals (intervals) and, on a question " +
+        "reworded or hidden in them, by_interval entries {interval, respondent, question or hide}, and its Display " +
+        "If (display_if: [{question, answers}]) and Skip To (skip_to: [{answers, question}]) rules by question " +
+        "number, its Question Grids (question_grids: [{outcome_id, heading, questions}]) and its scoring " +
+        "({questions, verdicts: [{name, from, to}]}, when it is scored). A Metric returns metric_type, default_question, unit, " +
         "list with choices, success_direction and Outcomes. A List returns its choices in order. A Contact Form " +
         "or Case Form returns its fields in order. An Impact Framework returns its Outcomes, Activity trackers " +
         "and Metrics by stage. A Toolkit returns the Surveys, Forms, Frameworks, Metrics and Ideas in it. " +
@@ -3600,6 +8256,1792 @@ export function buildTools(api) {
         required: ["item_type", "id"],
       },
       handler: ({ item_type, id }) => get(`/library/${encodeURIComponent(item_type)}/${id}/usage`),
+    },
+
+    // ── Create library building blocks (CP-8888) ──────────────────────────────
+    {
+      name: "makerble_create_list",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a List " +
+        "(a Ratio Set): the answer choices for a multiple-choice question or a scale Metric, e.g. 'Agree - " +
+        "Disagree' with choices Strongly agree, Agree, Neutral, Disagree, Strongly disagree. The choices keep " +
+        "the order you give, at most 50. The List stays private to the organisation. If the organisation or " +
+        "the public library already has one with the same or a near-identical name (ignoring case, spacing " +
+        "and punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "List as makerble_get_library_item shows it (id, type 'list', name, owner, choices with their ids) " +
+        "and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The List's name, e.g. 'Agree - Disagree'" },
+          choices: { type: "array", items: { type: "string" }, description: "The answer choices in order, each different" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "choices"],
+      },
+      handler: (p) => post("/lists", p),
+    },
+
+    {
+      name: "makerble_create_unit",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Unit: " +
+        "the unit of measure shown beside a number answer, e.g. 'hours', 'km' or '\u00a3'. Units are shared by " +
+        "every organisation, so only Makerble staff may create one (anyone else gets 403); everyone else " +
+        "should reuse an existing Unit. A Unit that already exists is never changed. If the organisation or " +
+        "the public library already has one with the same or a near-identical name (ignoring case, spacing " +
+        "and punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "Unit (id, type 'unit', name, owner 'Makerble', alignment) and approved (true: every organisation can " +
+        "use it).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The Unit as it appears beside the number, e.g. 'hours'" },
+          alignment: { type: "string", enum: ["left", "right"], description: "Which side of the number it goes: left (e.g. £10) or right (e.g. 10 hours)" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["name", "alignment"],
+      },
+      handler: (p) => post("/units", p),
+    },
+
+    {
+      name: "makerble_create_field",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Field " +
+        "(a Custom Field): a question with a free answer rather than a Metric, e.g. 'Date of birth' (date), " +
+        "'Postcode' (text) or 'Number of children' (number), for use on a Survey or Contact Form. A " +
+        "section_title Field is a heading, with section_text shown under it. A video, audio or picture Field " +
+        "is a Video, Audio or Picture question on a Survey (Story Category): an Attachment (file) Field that " +
+        "asks for that kind of media, which the person answering can record or take there and then with their " +
+        "camera or microphone, or attach from their device. It is returned with field_type 'file' and " +
+        "capture_type 'video', 'audio' or 'picture'. If the organisation or the " +
+        "public library already has one with the same or a near-identical name (ignoring case, spacing and " +
+        "punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "Field (id, type 'field', name, owner, field_type, and capture_type for a video, audio or picture Field; " +
+        "a section_title Field has only id, type and name) " +
+        "and approved (always false: Fields are not shared in the public library).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          field_name: { type: "string", description: "The question as people see it, e.g. 'Date of birth'" },
+          field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "video", "audio", "picture", "section_title", "email_address", "telephone", "signature"], description: "The kind of answer. file is an Attachment for any file; video, audio and picture ask for that kind of media and let the person record or take it in the survey. A Weekly availability Field can only be made as part of a Contact Form (makerble_create_contact_form), not here" },
+          section_text: { type: "string", description: "For a section_title Field only: the text shown under the heading" },
+          private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["organisation_id", "field_name", "field_data_type"],
+      },
+      handler: (p) => post("/fields", p),
+    },
+
+    {
+      name: "makerble_create_outcome",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates an " +
+        "Outcome: a change an organisation wants to see in the people it works with, e.g. 'Improved " +
+        "confidence'. Metrics (Indicators) measure progress towards it. An Outcome you create stays " +
+        "unapproved and private to the organisation unless you are Makerble staff; approved, private and " +
+        "is_default are honoured for Makerble staff only and ignored for everyone else. If the organisation " +
+        "or the public library already has one with the same or a near-identical name (ignoring case, spacing " +
+        "and punctuation), nothing is created and you get a 409 error listing the duplicates (id, type, name, " +
+        "owner): reuse one of them, or call again with force: true only if none fits. Returns data: the new " +
+        "Outcome as makerble_get_library_item shows it (id, type 'outcome', name, owner, description) and " +
+        "approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          title: { type: "string", description: "The Outcome, e.g. 'Improved confidence'" },
+          stage: { type: "string", enum: ["Short-term outcomes", "Medium-term outcomes", "Long-term outcomes"], description: "When the change is expected" },
+          description: { type: "string", description: "What the Outcome means" },
+          instruction: { type: "string", description: "Guidance for staff recording it" },
+          department: { type: "string", description: "Optional cause area (Department) name, e.g. 'Health'" },
+          approved: { type: "boolean", description: "Makerble staff only: approve it for the public library" },
+          private: { type: "boolean", description: "Makerble staff only: false to share it in the public library" },
+          is_default: { type: "boolean", description: "Makerble staff only: offer it by default to every organisation" },
+          force: { type: "boolean", description: "True to create it even though a near-identical one exists (see the 409 response)" },
+        },
+        required: ["organisation_id", "title", "stage"],
+      },
+      handler: (p) => post("/outcomes", p),
+    },
+
+    {
+      name: "makerble_create_survey",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a Survey " +
+        "(a Story Category) with all its questions in one call, in the order given (at most 50). Each " +
+        "question either reuses an item by id (metric_id for a Metric / Indicator, field_id for a Field / " +
+        "Custom Field, activity_tracker_id for an Activity tracker / Change) or defines a new one: new_metric " +
+        "(name, metric_type scale, value or binary, default_question; a scale Metric also needs list_id for " +
+        "an existing List / Ratio Set or list {name, choices} for a new one; outcome_id for the Outcome it measures; optional unit_id, success_direction) or new_field (field_name, field_data_type; section_title makes a heading). Prefer " +
+        "reusing a Metric and List: results recorded against a copy don't add up with the original. Typical " +
+        "workflow: search the library for each question's Metric, List or Field, then call this once with the " +
+        "reused ids and only the missing items defined inline. Nothing is created unless everything is: an " +
+        "invalid question creates nothing and the error names it (e.g. 'Question 3: ...'). If a new Metric, " +
+        "List or Field has the same or a near-identical name (ignoring case, spacing and punctuation) to one " +
+        "in the organisation or the public library, nothing is created and you get a 409 error listing the " +
+        "duplicates with the question number each belongs to: reuse them, or call again with force: true only " +
+        "if none fits. The Survey stays visible only to the organisation unless you are Makerble staff and " +
+        "send approved: true. " +
+        "\nSurveys answered more than once (e.g. at the start and end of a programme): keep ONE Survey with the " +
+        "same Metrics and give its Shared Intervals in intervals, e.g. ['Baseline', 'Endpoint'], so Distance " +
+        "Travelled works; never make a second Survey with new Metrics for the end. A question can then be reworded " +
+        "or hidden in an Interval with by_interval (Adjust When), e.g. {interval: 'Endpoint', question: 'How " +
+        "confident do you feel now, after the course?'}, or for one kind of respondent (participant, colleague, " +
+        "observer, public); leave out interval for every Interval and respondent for everyone. Where two entries " +
+        "cover the same Interval and respondent, the one naming more wins; two naming the same amount are " +
+        "refused. only_in_intervals shows a question only in those Intervals (e.g. course satisfaction only at " +
+        "Endpoint). Projects the Survey is added to later use its Intervals. " +
+        "\nQuestions that only apply after a certain answer: display_if {question, answers} shows a question only " +
+        "when an earlier question (by number, counting section headings) is answered with one of answers. skip_to [{answers, question}] on a question jumps forward past the questions " +
+        "in between to a later question that isn't mandatory; each answer in one entry only. The question whose " +
+        "answer decides must be a scale Metric (one with a List): for yes/no use a scale Metric on a Yes - No List, " +
+        "not a binary Metric. A Survey can't skip to its end: end it with an optional question to skip to. " +
+        "\nQuestion Grids: several statements on one scale (e.g. Agree - Disagree) shown as one table. Give " +
+        "question_grids [{outcome_id, questions}]: the Outcome they all measure first (its title is the grid's " +
+        "heading) and their numbers. Every scale question of that Outcome in the Survey must be in the grid and use " +
+        "the same List; grid questions can't have display_if or skip_to. " +
+        "\nScoring and Verdicts (a score with bands such as Low / Medium / High): give each new scale Metric points " +
+        "for every answer on its List ({Never: 0, Sometimes: 1, Often: 2}), then scoring {questions, verdicts: " +
+        "[{name, from, to, description}]}: the questions whose points add up and the bands, lowest first. Only new " +
+        "Metrics can be given points (a reused Metric's points are shared by every Survey using it, so score a reused " +
+        "Metric only if it already has points). The bands must cover every possible total with no gaps or overlaps. " +
+        "Look for a published instrument with makerble_explore_surveys first. " +
+        "\nReturns data: the Survey as makerble_get_library_item shows it (id, type 'survey', name, owner, " +
+        "intervals, question_grids with each grid's heading, scoring, questions in order with the item behind each and any " +
+        "by_interval, display_if and skip_to) and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The Survey's name, e.g. 'Job readiness check-in'" },
+          description: { type: "string", description: "What the Survey is for" },
+          intro_message: { type: "string", description: "Shown to people before they start" },
+          departments: { type: "array", items: { type: "string" }, description: "Cause area (Department) names, e.g. ['Health']" },
+          causes: { type: "array", items: { type: "string" }, description: "Cause names, for the Explore filters" },
+          sub_causes: { type: "array", items: { type: "string" }, description: "Sub Cause names" },
+          intervals: {
+            type: "array",
+            items: { type: "string" },
+            description: "The Survey's Shared Intervals in order, when it is answered more than once, e.g. ['Baseline', 'Midpoint', 'Endpoint'] (at most 10)",
+          },
+          questions: {
+            type: "array",
+            description: "The questions in order. Each has exactly one of metric_id, field_id, activity_tracker_id, new_metric or new_field",
+            items: surveyQuestion,
+          },
+          scoring: {
+            type: "object",
+            description: "A scored Survey (Verdicts): the questions whose points add up, and the bands of totals",
+            properties: {
+              questions: { type: "array", items: { type: "number" }, description: "The numbers of the scale questions to add up" },
+              verdicts: {
+                type: "array",
+                description: "The bands, lowest first, covering every possible total with no gaps or overlaps",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "e.g. 'Low'" },
+                    from: { type: "number" },
+                    to: { type: "number" },
+                    description: { type: "string", description: "What this band means, shown with it" },
+                  },
+                  required: ["name", "from", "to"],
+                },
+              },
+            },
+            required: ["questions", "verdicts"],
+          },
+          question_grids: {
+            type: "array",
+            description: "Question Grids: scale questions measuring one Outcome first and sharing one List, shown as one table headed by the Outcome's title",
+            items: {
+              type: "object",
+              properties: {
+                outcome_id: { type: "number", description: "The Outcome the grid's questions all measure first; its title is the grid's heading" },
+                questions: { type: "array", items: { type: "number" }, description: "The question numbers in the grid: every scale question of that Outcome, at least two" },
+              },
+              required: ["outcome_id", "questions"],
+            },
+          },
+          approved: { type: "boolean", description: "Makerble staff only: show the Survey to every organisation and approve its new Metrics and Lists" },
+          force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "questions"],
+      },
+      handler: (p) => post("/surveys", p),
+    },
+
+    {
+      name: "makerble_add_survey_to_projects",
+      description:
+        "Add a Survey (Story Category) to Projects, as the 'Add survey to project(s)' popup on a Survey's page does, " +
+        "so people in those Projects can answer it and its results show there. Use it to put an existing Survey to " +
+        "work (one from makerble_search_library or makerble_list_surveys) or one you have just made with " +
+        "makerble_create_survey. The Survey must be one the user can see in their library (their organisation's or " +
+        "the public library), and the user must manage each Project or be an Admin of its organisation. A closed " +
+        "Project, or one whose Project Category doesn't allow other Surveys, can't take it. Every Project is " +
+        "checked first, so if one is refused (404 or 422, naming it) none is added. A Project that already uses " +
+        "the Survey is left as it is. Returns data: survey_id, added_project_ids and existing_project_ids (those " +
+        "that already used it).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          survey_id: { type: "number", description: "The Survey's (Story Category's) id" },
+          project_ids: { type: "array", items: { type: "number" }, description: "The Projects to add it to" },
+        },
+        required: ["survey_id", "project_ids"],
+      },
+      handler: ({ survey_id, project_ids }) => post(`/surveys/${survey_id}/projects`, { project_ids }),
+    },
+
+    {
+      name: "makerble_update_survey",
+      description:
+        "Changes an existing Survey (a Story Category): its name, description and intro message, and its " +
+        "questions. Use it after makerble_create_survey or makerble_get_library_item, when the user wants a " +
+        "Survey their organisation owns reworded, renamed, or with questions added, removed, replaced or " +
+        "reordered. Question numbers are as makerble_get_library_item lists the questions, starting at 1, and " +
+        "each change applies to the questions as the changes before it left them. A new question takes the " +
+        "same format as in makerble_create_survey: reuse a Metric, Field or Activity tracker by id, or define " +
+        "new_metric or new_field (search the library first). Removing a question deletes it from the Survey, " +
+        "not the Metric or Field behind it. No question changes are kept unless every one can be made. The " +
+        "name, description and intro message are saved first, so they stay changed if the question changes " +
+        "are then refused. To reword a " +
+        "question that reuses a Metric, use makerble_update_metric only if the organisation owns the Metric " +
+        "and nothing else should change; otherwise replace the question with a new Metric. Errors: 404 for a " +
+        "Survey the user can't see, 403 for one they may not edit (e.g. another organisation's public Survey), " +
+        "422 with the reason (e.g. 'Change 2: there is no question 5', a name the organisation already has, or " +
+        "a new item with the same name as one they could reuse; send force: true only if none fits). Returns " +
+        "data: the Survey as makerble_get_library_item shows it, with its questions in their new order.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Survey (Story Category) id" },
+          name: { type: "string", description: "A new name" },
+          description: { type: "string", description: "A new description" },
+          intro_message: { type: "string", description: "A new intro message, shown to people before they start" },
+          changes: {
+            type: "array",
+            description: "Question changes, in order",
+            items: {
+              type: "object",
+              properties: {
+                action: { type: "string", enum: ["add", "remove", "replace", "move"] },
+                number: { type: "number", description: "The question number: where to add (optional, default the end), or which to remove, replace or move" },
+                to: { type: "number", description: "move only: the number it moves to" },
+                question: { ...surveyQuestion, description: "add and replace only: the new question" },
+              },
+              required: ["action"],
+            },
+          },
+          force: { type: "boolean", description: "True to create new items in changes even though near-identical ones exist" },
+        },
+        required: ["id"],
+      },
+      handler: async ({ id, changes, force, ...details }) => {
+        let result;
+        if (Object.keys(details).length) result = await patch(`/surveys/${id}`, details);
+        if (changes?.length) result = await patch(`/surveys/${id}/questions`, { changes, force });
+        return result ?? { error: "Give name, description, intro_message or changes" };
+      },
+    },
+
+    {
+      name: "makerble_update_metric",
+      description:
+        "Renames a Metric (an Indicator) or rewords its question, the default question people see when it is " +
+        "asked in a Survey. Nothing else about the Metric changes. Only for a Metric the user's organisation " +
+        "owns: results already recorded stay against it, so only reword it when the meaning stays the same, " +
+        "and prefer a new Metric (makerble_update_survey with a replace change) when a Survey reuses a Metric " +
+        "that other Projects or Surveys use. Errors: 404 for a Metric the user can't see, 403 for one they may " +
+        "not edit, 422 when neither name nor default_question is given. Returns data: the Metric as " +
+        "makerble_get_library_item shows it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Metric (Indicator) id" },
+          name: { type: "string", description: "A new name" },
+          default_question: { type: "string", description: "New question wording, e.g. 'How confident do you feel about getting a job?'" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/indicators/${id}`, body),
+    },
+
+    {
+      name: "makerble_update_list",
+      description:
+        "Renames a List (a Ratio Set: the answer choices of a scale Metric or a dropdown) or changes its " +
+        "choices. Choices keep their place: the first choice sent renames the first choice, and so on; extra " +
+        "choices are added at the end, and saved choices past the last one sent are removed. Every Metric and " +
+        "Survey using the List sees the change, so check where it is used first (makerble_get_where_used) and " +
+        "prefer a new List (makerble_create_list) when other Surveys use it. Errors: 404 for a List the user " +
+        "can't see, 403 for one they may not edit, 422 for no choices or nothing to change. Returns data: the " +
+        "List as makerble_get_library_item shows it, with its choices.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The List (Ratio Set) id" },
+          name: { type: "string", description: "A new name" },
+          choices: { type: "array", items: { type: "string" }, description: "Every choice, in order, e.g. ['Very', 'A bit', 'Not at all']" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...body }) => patch(`/lists/${id}`, body),
+    },
+
+    {
+      name: "makerble_create_contact_form",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates a " +
+        "Contact Form (a Beneficiary Category) with all its fields in one call, in the order given (at most " +
+        "50): the form an organisation fills in about each Contact of one kind, e.g. 'Young person " +
+        "registration'. Each field either reuses an item by id (field_id for a Field / Custom Field, list_id " +
+        "for a List / Ratio Set of answer choices) or defines a new one: new_field (field_name, " +
+        "field_data_type; section_title makes a heading) or new_list (name, choices). Only organisations that " +
+        "use Contact Forms can have one (otherwise 403). Nothing is created unless everything is: an invalid " +
+        "field creates nothing and the error names it ('Question 2: ...'). If a new Field or List has the " +
+        "same or a near-identical name to one in the organisation or the public library, nothing is created " +
+        "and you get a 409 error listing the duplicates with the question number each belongs to: reuse them, " +
+        "or call again with force: true only if none fits. Only the organisation uses the form unless you are " +
+        "Makerble staff and send approved: true. Returns data: the form as makerble_get_library_item shows it " +
+        "(id, type 'contact_form', name, owner, fields in order) and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The form's name, e.g. 'Young person registration'" },
+          department: { type: "string", enum: ["Personal", "Professional", "Public Impact"], description: "Which area of a Contact's life it covers" },
+          contact_role: { type: "string", description: "What the Contacts are to the organisation, e.g. 'Participant', 'Student', 'Client'" },
+          contact_type: { type: "string", description: "'Person' (default), 'Organisation', 'Animal' or 'Object'" },
+          questions: {
+            type: "array",
+            description: "The fields in order. Each has exactly one of field_id, list_id, new_field or new_list",
+            items: {
+              type: "object",
+              properties: {
+                field_id: { type: "number", description: "Reuse this Field (Custom Field)" },
+                list_id: { type: "number", description: "Reuse this List (Ratio Set) of answer choices" },
+                new_field: {
+                  type: "object",
+                  properties: {
+                    field_name: { type: "string" },
+                    field_data_type: { type: "string", enum: ["text", "number", "date", "time", "file", "section_title", "email_address", "telephone", "signature", "weekly_availability"], description: "weekly_availability asks for the days and times a Contact can usually attend (Contact Forms only)" },
+                    section_text: { type: "string", description: "section_title only: the text under the heading" },
+                    private: { type: "boolean", description: "True if only the organisation's staff may see the answers" },
+                  },
+                  required: ["field_name", "field_data_type"],
+                },
+                new_list: {
+                  type: "object",
+                  properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+                  required: ["name", "choices"],
+                },
+                is_mandatory: { type: "boolean" },
+                choice: { type: "string", enum: ["single_choice", "unlimited_choice", "limited_choice"], description: "Lists: how many answers may be picked (default single_choice)" },
+                choice_value: { type: "number", description: "With limited_choice: how many" },
+                layout: { type: "string", enum: ["compact", "expanded"], description: "Lists: chosen for you if left out" },
+                external_description: { type: "string", description: "Help text shown to the person filling it in" },
+              },
+            },
+          },
+          approved: { type: "boolean", description: "Makerble staff only: let every organisation use the form, and approve its new Lists" },
+          force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "department", "contact_role", "questions"],
+      },
+      handler: (p) => post("/contact_forms", p),
+    },
+
+    {
+      name: "makerble_add_contact_form_to_projects",
+      description:
+        "Add a Contact Form (Beneficiary Category) to projects, as the 'Add form to project' popup on a Contact " +
+        "Form's page does, so staff in those projects use it when they add or edit Contacts. Use it to put a form " +
+        "to work: one the organisation already has (from makerble_search_library or makerble_get_library_item) " +
+        "or one you have just made with makerble_create_contact_form. use says how each project uses it: 'full' " +
+        "(the default) to create new Contacts and edit existing ones, 'create' to create new Contacts only (e.g. " +
+        "a Referral form), or 'edit' to edit existing Contacts only (e.g. an intake assessment staff fill in " +
+        "later). Organisation Admins and Project Managers may then edit what it holds. Only the project's " +
+        "Contact Form settings change. Each project must belong to the form's organisation, and the user must " +
+        "be able to change its Project Preferences (an Organisation Admin, or the project's manager). Every " +
+        "project is checked first, so if one is refused (404 or 422, naming it) none is changed. A project that " +
+        "already uses the form that way is left as it is. Returns data: contact_form_id, use, added_project_ids " +
+        "and existing_project_ids (those that already used it).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_form_id: { type: "number", description: "The Contact Form's (Beneficiary Category's) id" },
+          project_ids: { type: "array", items: { type: "number" }, description: "The projects to add it to" },
+          use: { type: "string", enum: ["full", "create", "edit"], description: "How the projects use it (default full)" },
+        },
+        required: ["contact_form_id", "project_ids"],
+      },
+      handler: ({ contact_form_id, ...body }) => post(`/contact_forms/${contact_form_id}/projects`, body),
+    },
+
+    {
+      name: "makerble_create_impact_framework",
+      description:
+        "Call makerble_search_library first and reuse what fits; only create what's missing. Creates an " +
+        "Impact Framework (a Template): an organisation's theory of change, from the activities it delivers " +
+        "to the outcomes it wants, in one call. Give its entries in order, each with its stage and exactly " +
+        "one item: activity_tracker_id or new_activity_tracker {name, category (a cause area such as " +
+        "'Education' or 'Health'), description} for an Activity or Attendance tracker (a Change) in 'Activity " +
+        "outputs' or 'Participation outputs'; or outcome_id or new_outcome {title, description} for an " +
+        "Outcome in 'Short-term outcomes', 'Medium-term outcomes' or 'Long-term outcomes'. An Outcome entry " +
+        "can also have new_metrics: Metrics (Indicators) measuring it, each {name, metric_type scale, value " +
+        "or binary, default_question; a scale Metric needs list_id or list {name, choices}}. At most 50 " +
+        "entries and new Metrics together. Nothing is created unless everything is: an invalid entry creates " +
+        "nothing and the error names it ('Entry 2: ...'). If a new tracker, Outcome, Metric or List has the " +
+        "same or a near-identical name to one in the organisation or the public library, nothing is created " +
+        "and you get a 409 error listing the duplicates with the entry number each belongs to: reuse them, or " +
+        "call again with force: true only if none fits. It stays private to the organisation unless you are " +
+        "Makerble staff and send approved: true. Returns data: the framework as makerble_get_library_item " +
+        "shows it (id, type 'impact_framework', name, owner, stages with their Activity trackers and " +
+        "Outcomes) and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The id of the organisation (Charity) that will own it: one the user is an editor of" },
+          name: { type: "string", description: "The Impact Framework's name, e.g. 'Youth employment'" },
+          description: { type: "string", description: "What the Impact Framework is for" },
+          color: { type: "string", description: "Optional colour as a hex code, e.g. '#2a9d8f'" },
+          causes: { type: "array", items: { type: "string" }, description: "Cause names, e.g. ['Education']" },
+          department: { type: "string", description: "Optional cause area (Department) name" },
+          entries: {
+            type: "array",
+            description: "In order. Each has a stage and exactly one of activity_tracker_id, new_activity_tracker, outcome_id or new_outcome",
+            items: {
+              type: "object",
+              properties: {
+                stage: { type: "string", enum: ["Activity outputs", "Participation outputs", "Short-term outcomes", "Medium-term outcomes", "Long-term outcomes"] },
+                activity_tracker_id: { type: "number", description: "Reuse this Activity or Attendance tracker (Change)" },
+                new_activity_tracker: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "What is counted, e.g. 'Workshops delivered'" },
+                    category: { type: "string", description: "The cause area it belongs to, e.g. 'Education', 'Health', 'Poverty'" },
+                    description: { type: "string" },
+                    instruction: { type: "string", description: "Guidance for staff recording it" },
+                  },
+                  required: ["name", "category"],
+                },
+                outcome_id: { type: "number", description: "Reuse this Outcome" },
+                new_outcome: {
+                  type: "object",
+                  properties: { title: { type: "string" }, description: { type: "string" }, instruction: { type: "string" } },
+                  required: ["title"],
+                },
+                new_metrics: {
+                  type: "array",
+                  description: "Outcome entries only: new Metrics (Indicators) measuring this Outcome",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      metric_type: { type: "string", enum: ["scale", "value", "binary"] },
+                      default_question: { type: "string" },
+                      list_id: { type: "number", description: "Scale only: an existing List (Ratio Set)" },
+                      list: {
+                        type: "object",
+                        description: "Scale only: a new List instead of list_id",
+                        properties: { name: { type: "string" }, choices: { type: "array", items: { type: "string" } } },
+                        required: ["name", "choices"],
+                      },
+                      unit_id: { type: "number", description: "Value only (optional)" },
+                      success_direction: { type: "string", enum: ["top to bottom", "bottom to top", "none"] },
+                      description: { type: "string" },
+                    },
+                    required: ["name", "metric_type", "default_question"],
+                  },
+                },
+              },
+              required: ["stage"],
+            },
+          },
+          approved: { type: "boolean", description: "Makerble staff only: share it in the public library and approve its new items" },
+          force: { type: "boolean", description: "True to create new items even though near-identical ones exist (see the 409 response)" },
+        },
+        required: ["organisation_id", "name", "entries"],
+      },
+      handler: (p) => post("/impact_frameworks", p),
+    },
+
+    {
+      name: "makerble_copy_impact_framework",
+      description:
+        "Copies an Impact Framework (a Template, the organisation's theory of change) so it can be adapted " +
+        "without changing the original. Use it when the user wants a framework like one they already have, " +
+        "or wants to start from an ImpactStore framework or from a project's own Theory of Change. The copy is " +
+        "named 'Copy of <name>' and keeps the original's stages, its metrics (Activity and Attendance trackers " +
+        "(Changes), Outcomes and the trackers placed on it), causes, description and colour, but none of its " +
+        "projects: it is not added to any project. It belongs to the user, private and unapproved, in the " +
+        "original's organisation if the user belongs to it, otherwise among the user's own frameworks. The " +
+        "user may copy their own frameworks, any framework of an organisation they belong to, a Theory of " +
+        "Change of a project they edit, and approved ImpactStore frameworks; anything else answers 404. " +
+        "Returns data: the copy as makerble_get_library_item shows it (id, type 'impact_framework', name, owner, " +
+        "stages). To add metrics to the copy or remove them, use the copy's id with the Impact Framework tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template) to copy" },
+        },
+        required: ["id"],
+      },
+      handler: (p) => post(`/impact_frameworks/${p.id}/copy`, {}),
+    },
+
+    {
+      name: "makerble_add_impact_framework",
+      description:
+        "Adds an Impact Framework's (a Template's) metrics to Projects and to other Impact Frameworks, as the " +
+        "'Add to projects' page and the 'Add metrics from another project or framework' box on Edit metrics do. " +
+        "Use it when the user wants a framework's metrics (Activity and Attendance trackers (Changes), Outcomes and " +
+        "the trackers placed on it) on a Project, or merged into another framework. Adding to a Project adds the " +
+        "metrics to that Project's own Theory of Change (its default framework); adding to a framework " +
+        "(framework_ids) adds them to that framework. The framework itself is not copied: each metric goes into " +
+        "the same stage, a metric already there in that stage is skipped, and Makerble records that the framework " +
+        "was added, by whom and when (see makerble_list_impact_framework_additions). Adding the same framework again " +
+        "only adds metrics it has gained since. The user must be able to edit each Project's or framework's metrics; " +
+        "a Project or framework they can't edit, or that doesn't exist, is listed in refused and the rest are still " +
+        "added. Give project_ids, framework_ids or both. Returns data: impact_framework_id, added (each with " +
+        "receiving_framework_id and project_id, null for a framework that isn't a Project's) and refused (each with " +
+        "project_id or framework_id and error: forbidden, not-found or same_framework).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template) whose metrics to add" },
+          project_ids: { type: "array", items: { type: "number" }, description: "Projects to add the metrics to" },
+          framework_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "Other Impact Frameworks (Templates) to add the metrics to",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, project_ids, framework_ids }) =>
+        post(`/impact_frameworks/${id}/additions`, { project_ids, framework_ids }),
+    },
+
+    {
+      name: "makerble_list_impact_framework_additions",
+      description:
+        "Lists where an Impact Framework (a Template) has been added: the Projects and other Impact Frameworks its " +
+        "metrics were added to, by whom and when. Use it to answer 'which projects use this framework?', or before " +
+        "changing a framework, to see which Projects and frameworks the change might need copying to. Only " +
+        "Projects and frameworks of the user's organisations, and frameworks the user made, are listed. Returns " +
+        "the {page, page_size, page_count, total_count, data} envelope; each item has id, impact_framework_id, " +
+        "receiving_framework {id, name}, project {id, name} (null when the receiving framework isn't a Project's " +
+        "Theory of Change), added_by {id, name} (null for additions made before Makerble recorded who added them), " +
+        "added_at and updated_at.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template)" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Results per page (default 10, max 200)" },
+          last_synced_datetime: {
+            type: "string",
+            description: "ISO 8601 datetime; only additions changed after it are listed",
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/impact_frameworks/${id}/additions`, params),
+    },
+
+    {
+      name: "makerble_list_missing_framework_metrics",
+      description:
+        "Lists the metrics of an Impact Framework (a Template, the organisation's theory of change) that a project's or an " +
+        "album's Results Canvas can't show, because they aren't used on the project, or aren't used on one or more of the " +
+        "album's (Bundle's) open projects. When the Results Canvas is viewed through an Impact Framework (its Metrics dropdown), " +
+        "it only shows the framework's metrics that are already on the project, so use this to explain why a framework metric " +
+        "is missing from the canvas, or to find what to add after metrics were added to the framework. " +
+        "A metric here is an Activity or Attendance tracker (metric_type 'Change') or an Outcome (metric_type 'Outcome'); " +
+        "an Outcome brings its Indicators with it. Give project_id or album_id. The project must be one the user can open, " +
+        "the album one they can view, and the framework one the canvas's Metrics dropdown offers them (their organisation's " +
+        "or their own); anything else answers 404. " +
+        "Returns {impact_framework: {id, name}, project_id, album_id, page, page_size, page_count, total_count, data: [{metric_type, " +
+        "metric_id, name, stage, stage_id, projects: [{id, name, can_add}]}]}, in the framework's column order, where projects are " +
+        "the ones lacking the metric and can_add says whether the user may add it there. " +
+        "Workflow to add them: for each metric and each project with can_add true, call makerble_add_metric_to with " +
+        "metric_type 'change' or 'outcome', metric_id, destination 'projects' and target_id the project's id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The id of the Impact Framework (Template)" },
+          project_id: { type: "number", description: "The project whose Results Canvas to check" },
+          album_id: { type: "number", description: "The album (Bundle) whose Results Canvas to check, instead of a project" },
+          page: { type: "number", description: "Page number (default 1)" },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/impact_frameworks/${id}/missing_metrics`, params),
+    },
+
+    {
+      name: "makerble_search_impact_store",
+      description:
+        "Search the Makerble ImpactStore (the Explore pages) for a ready-made, well-tested Survey (Story " +
+        "Category), Contact Form (Beneficiary Category), Case Form (Custom Form for cases), Impact Framework " +
+        "(Template), Report Template, Toolkit (Collection) or Project Type published for any organisation to " +
+        "reuse. Use it before making one of these from scratch: " +
+        "reusing an ImpactStore item is faster, usually better, and lets organisations compare results. Only " +
+        "published items are searched, and withdrawn ones never appear. Pass the key words of what the user " +
+        "wants (e.g. 'wellbeing young people'), not a whole sentence: items matching more of the words come " +
+        "first and items matching none are left out. Optionally narrow by item_type and by cause (a cause or " +
+        "subcause name from the Explore page, e.g. 'Health' or 'Mental health'). Returns the {page, page_size, " +
+        "page_count, total_count, data} envelope; each item has id, type, type_label, name, a one-line " +
+        "description, causes, used_by_count (how many organisations use it), explore_url (its Explore page, to " +
+        "show the user; null for a Project Type) and matched_words (how many of your words it matched; an item matching only one of " +
+        "several words is probably not a good match). Typical workflow: search with per_page 3, show the user " +
+        "the good matches with their explore_url, and if they want one, read it in full with " +
+        "makerble_get_library_item using the same type and id (Report Templates excepted).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The key words of what the user wants, e.g. 'wellbeing survey young people'" },
+          item_type: {
+            type: "string",
+            enum: ["survey", "contact_form", "case_form", "impact_framework", "report_template", "toolkit", "project_type"],
+            description: "Only this kind of item (default every kind): survey (Survey), contact_form (Contact Form), case_form (Case Form), impact_framework (Impact Framework), report_template (Report Template), toolkit (Toolkit), project_type (Project Type)",
+          },
+          cause: { type: "string", description: "Only items tagged with this cause or subcause, e.g. 'Mental health'" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Results per page (default 10, max 200); 3 is enough to offer the user a choice" },
+          last_synced_datetime: { type: "string", description: "ISO 8601; only items updated after this time" },
+        },
+        required: ["query"],
+      },
+      handler: (p) => get("/impact_store/search", p),
+    },
+
+    // ── Explore Surveys (CP-8869) ─────────────────────────────────────────────
+    {
+      name: "makerble_explore_surveys",
+      description:
+        "Find a ready-made Survey (Story Category) in the Makerble ImpactStore: the Surveys other organisations " +
+        "and Makerble have published for everyone, as the Explore Surveys page lists them. Use it when the user " +
+        "wants a validated scale or a tried-and-tested questionnaire, e.g. 'a wellbeing survey for children' or " +
+        "'a short feedback form for an event'. Filter by theme (mental_health_and_wellbeing, " +
+        "children_and_young_people, employment_and_skills, community_and_culture, health, organisational), " +
+        "audience, i.e. who answers it (children_under_16, young_people_16_to_25, adults, staff_and_volunteers), " +
+        "time to complete (under_5, 5_to_15, over_15 minutes) and feature (validated: an industry-recognised " +
+        "scale; verdicts: classifies each respondent automatically; repeats: meant to be asked at intervals). " +
+        "Several options in one filter match any of them; different filters must all match. Returns a page of " +
+        "Surveys, each with id, name, description, shared_by, question_count, estimated_minutes, themes, " +
+        "audiences, contact_mode (one_contact: each response is About One Contact; several_contacts: Several Or " +
+        "No Contacts, recorded for a group), libraries_count (how many organisations use it), yours and " +
+        "added_to_a_project, plus facets: " +
+        "each filter option with how many Surveys it would return. Then call makerble_get_explore_survey to read " +
+        "a Survey's sections and questions before suggesting it. To search every kind of ImpactStore item by " +
+        "words at once, use makerble_search_impact_store; to search the user's own organisation's Surveys, use " +
+        "makerble_search_library.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Survey's name or description, e.g. 'wellbeing'" },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational"] } },
+          audience: { type: "array", items: { type: "string", enum: ["children_under_16", "young_people_16_to_25", "adults", "staff_and_volunteers"] }, description: "Who answers it" },
+          time: { type: "array", items: { type: "string", enum: ["under_5", "5_to_15", "over_15"] }, description: "Time to complete, in minutes" },
+          feature: { type: "array", items: { type: "string", enum: ["validated", "verdicts", "repeats"] } },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (most organisations using it first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Surveys per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/surveys", p),
+    },
+
+    {
+      name: "makerble_get_explore_survey",
+      description:
+        "Preview one ImpactStore Survey (Story Category) from makerble_explore_surveys, as its Preview panel on " +
+        "Explore Surveys shows it: the same fields plus sections, each with its title (null for questions before " +
+        "the first section header) and its question titles in order. Use it to check a Survey asks what the " +
+        "user needs before suggesting they add it to a project, which they do in Makerble with Add to a project " +
+        "on Explore Surveys. Returns 404 for a Survey that isn't published to the ImpactStore.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Survey's id from makerble_explore_surveys" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/surveys/${id}`),
+    },
+
+    // ── Explore Report Templates (CP-8870) ────────────────────────────────────
+    {
+      name: "makerble_explore_report_templates",
+      description:
+        "Find a ready-made Report Template in the Makerble ImpactStore: the question sets for funder reports, " +
+        "trustee updates, contract monitoring returns and other reports that organisations and Makerble have " +
+        "published for everyone, as the Explore Report Templates page lists them. Use it when the user has a " +
+        "report to write and wants a template rather than starting from scratch, e.g. 'an end of grant report " +
+        "for a funder' or 'a quarterly update for our trustees'. Filter by recipient, i.e. who it's for (funder, " +
+        "trustees, local_authority: a commissioner or contract, corporate_partner, internal), theme " +
+        "(children_and_young_people, community, employment, governance, health_and_wellbeing, volunteering) and " +
+        "output, the answer formats its questions ask for (narrative, number, chart). Several options in one " +
+        "filter match any of them; different filters must all match. Returns a page of Report Templates, each " +
+        "with id, slug, name, description, recipient, theme, question_count, answer_formats, shared_by, " +
+        "libraries_count (how many organisations have it in their library), yours and in_your_library, plus " +
+        "facets: each filter option with how many Report Templates it would return. Then call " +
+        "makerble_get_explore_report_template to read its questions before suggesting it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the name or description, or who it's for or its theme, e.g. 'end of grant'" },
+          recipient: { type: "array", items: { type: "string", enum: ["funder", "trustees", "local_authority", "corporate_partner", "internal"] }, description: "Who it's for" },
+          theme: { type: "array", items: { type: "string", enum: ["children_and_young_people", "community", "employment", "governance", "health_and_wellbeing", "volunteering"] } },
+          output: { type: "array", items: { type: "string", enum: ["narrative", "number", "chart"] }, description: "Answer formats any of its questions ask for" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (in the most organisations' libraries first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Report Templates per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/report_templates", p),
+    },
+
+    {
+      name: "makerble_get_explore_report_template",
+      description:
+        "Preview one ImpactStore Report Template from makerble_explore_report_templates, as its Preview panel on " +
+        "Explore Report Templates shows it: the same fields plus questions, each with its title and the answer " +
+        "formats it asks for (narrative, number, chart), in order. Use it to check a template asks what the " +
+        "user's funder or board needs before suggesting it. The user adds it to their organisation's library " +
+        "in Makerble with Add to your library on Explore Report Templates. Returns 404 for a Report Template " +
+        "that isn't in the ImpactStore.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Report Template's id from makerble_explore_report_templates" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/report_templates/${id}`),
+    },
+
+    // ── Explore Dropdowns (CP-8870) ───────────────────────────────────────────
+    {
+      name: "makerble_explore_dropdowns",
+      description:
+        "Find a ready-made Dropdown (an answer-choice list, Ratio Set) in the Makerble ImpactStore: the scales " +
+        "and category lists other organisations and Makerble have shared, as the Explore Dropdowns page lists " +
+        "them. Use it before creating a list of answer choices, so the user's data lines up with other " +
+        "organisations', e.g. 'a 5-point agreement scale' or 'standard ethnicity categories'. Filter by " +
+        "designed_for (surveys_and_trackers, or forms: bio, event and project forms), choices, the number of " +
+        "answer choices (up_to_10, 11_to_100, over_100) and theme (scales, demographics). Several options in one " +
+        "filter match any of them; different filters must all match. Returns a page of Dropdowns, each with id, " +
+        "title, choice_count, designed_for, themes, shared_by, used_in_count (how many surveys, trackers and forms " +
+        "use it) and yours, plus facets: each filter option with how many Dropdowns it would return. Then call " +
+        "makerble_get_explore_dropdown to read its answer choices. The user copies one into their organisation " +
+        "in Makerble with Add to organisation on Explore Dropdowns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Dropdown's title or any answer choice, e.g. 'ethnicity'" },
+          designed_for: { type: "array", items: { type: "string", enum: ["surveys_and_trackers", "forms"] } },
+          choices: { type: "array", items: { type: "string", enum: ["up_to_10", "11_to_100", "over_100"] }, description: "Number of answer choices" },
+          theme: { type: "array", items: { type: "string", enum: ["scales", "demographics"] } },
+          chip: { type: "string", enum: ["Scales", "Demographics", "Equality monitoring"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (used in the most surveys, trackers and forms first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Dropdowns per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/dropdowns", p),
+    },
+
+    {
+      name: "makerble_get_explore_dropdown",
+      description:
+        "Read one ImpactStore Dropdown (Ratio Set) from makerble_explore_dropdowns: the same fields plus every " +
+        "answer choice, in order. Use it to check the choices suit the user's survey, tracker or form before " +
+        "suggesting it. Returns 404 for a Dropdown that isn't shared to the ImpactStore and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Dropdown's id from makerble_explore_dropdowns" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/dropdowns/${id}`),
+    },
+
+    // ── Explore Impact Frameworks (CP-8870) ───────────────────────────────────
+    {
+      name: "makerble_explore_impact_frameworks",
+      description:
+        "Find a ready-made Impact Framework (Template) in the Makerble ImpactStore: sets of outcomes and progress " +
+        "trackers across the stages of change, shared for everyone by Makerble and other organisations, as the " +
+        "Explore Impact Frameworks page lists them. Use it when the user wants to decide what to measure, e.g. " +
+        "'outcomes for a youth employability programme' or 'the SDG 4 framework'. Filter by theme, by set (a " +
+        "platform-wide Framework Set's id from the facets, such as the UN Sustainable Development Goals, or 'none' " +
+        "for frameworks in no set) and by size, the number of outcomes (up_to_5, 6_to_10, over_10). Several " +
+        "options in one filter match any of them; different filters must all match. Returns a page of Impact " +
+        "Frameworks, each with id, name, description, themes, framework_sets (with each set's short code, e.g. " +
+        "'SDG 4'), outcome_count, progress_tracker_count, shared_by, libraries_count (how many organisations use " +
+        "it on a project) and yours, plus facets: each filter option with how many it would return. Then call " +
+        "makerble_get_explore_impact_framework to read its outcomes before suggesting it. The user adds one to " +
+        "projects in Makerble with Add to projects on Explore Impact Frameworks.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Impact Framework's name or description, e.g. 'inclusion'" },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational", "global_goals", "inclusion", "education_and_training", "leadership"] } },
+          set: { type: "array", items: { type: "string" }, description: "Framework Set ids from the facets, or 'none'" },
+          size: { type: "array", items: { type: "string", enum: ["up_to_5", "6_to_10", "over_10"] }, description: "Number of outcomes" },
+          chip: { type: "string", enum: ["SDGs", "Inclusion", "Employment", "Wellbeing"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (on the most organisations' projects first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Impact Frameworks per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/impact_frameworks", p),
+    },
+
+    {
+      name: "makerble_get_explore_impact_framework",
+      description:
+        "Preview one ImpactStore Impact Framework (Template) from makerble_explore_impact_frameworks, as its " +
+        "Preview panel shows it: the same fields plus stages, each stage of change (Activities, Engagement, " +
+        "Ability, Behaviour or Effect) with the outcomes and progress trackers in it. Use it to check the " +
+        "framework measures what the user's programme sets out to change before suggesting it. Returns 404 " +
+        "for an Impact Framework that isn't public and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Impact Framework's id from makerble_explore_impact_frameworks" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/impact_frameworks/${id}`),
+    },
+
+    // ── Explore Ideas (CP-8870) ───────────────────────────────────────────────
+    {
+      name: "makerble_explore_ideas",
+      description:
+        "Find Ideas (Tips) in the Makerble ImpactStore: short write-ups of an approach other organisations have " +
+        "tried, what happened and what they would change, as the Explore Ideas page lists them. Use it when the " +
+        "user wants to learn from others' practice, e.g. 'ideas for measuring community cohesion' or 'what have " +
+        "my colleagues shared?'. Filter by shared_by, relative to the user (anyone, colleagues: colleagues in " +
+        "their organisations and projects, following: people they follow, me), theme, audience (public_impact, " +
+        "personal, professional) and person (user ids of colleagues or people they follow; others are ignored). " +
+        "Several options in one filter match any of them; different filters must all match. Returns a page of " +
+        "Ideas, each with id, title, themes, reading_minutes, shared_by, saved_count (how many collections it is " +
+        "saved to) and yours, plus facets: each filter option with how many Ideas it would return. Then call " +
+        "makerble_get_explore_idea to read one. The user saves one in Makerble with Save idea on Explore Ideas.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the Idea's title or text, e.g. 'cohesion'" },
+          shared_by: { type: "array", items: { type: "string", enum: ["anyone", "colleagues", "following", "me"] } },
+          theme: { type: "array", items: { type: "string", enum: ["mental_health_and_wellbeing", "children_and_young_people", "employment_and_skills", "community_and_culture", "health", "organisational", "global_goals", "inclusion", "education_and_training", "leadership"] } },
+          audience: { type: "array", items: { type: "string", enum: ["public_impact", "personal", "professional"] } },
+          person: { type: "array", items: { type: "string" }, description: "User ids of colleagues or people the user follows" },
+          chip: { type: "string", enum: ["Community", "Young people", "Training", "Leadership"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (saved to the most collections first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Ideas per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/ideas", p),
+    },
+
+    {
+      name: "makerble_get_explore_idea",
+      description:
+        "Read one Idea (Tip) from makerble_explore_ideas: the same fields plus its full text, without formatting. " +
+        "Use it to summarise what another organisation tried before suggesting the user saves or follows it. " +
+        "Returns 404 for an Idea that isn't approved and shared with everyone.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Idea's id from makerble_explore_ideas" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/ideas/${id}`),
+    },
+
+    // ── Explore Metrics (CP-8870) ─────────────────────────────────────────────
+    {
+      name: "makerble_explore_metrics",
+      description:
+        "Find ready-made metrics in the Makerble ImpactStore across the stages of change, as the Explore Metrics " +
+        "page lists them: progress trackers (kind 'change': Activities and Engagement, which count deliveries " +
+        "and attendance), outcome indicators (kind 'indicator': Ability, Behaviour and Effect, each a Choice " +
+        "tracker (a scale), an Achievement tracker (yes or no) or a Numerical tracker (a value)) and Financial " +
+        "Values (kind 'financial_value', a £ value on an outcome). Use it before creating a metric, e.g. 'a " +
+        "confidence scale' or 'how to count session attendance'. Filter by stage (activities, engagement, " +
+        "ability, behaviour, effect, financial_values), answer_format (count, scale, yes_no, value), audience " +
+        "(public_impact, personal, professional) and shared_by (makerble, others). Several options in one " +
+        "filter match any of them; different filters must all match. Returns a page of metrics, each with kind, " +
+        "id, name, stage, whats_inside (e.g. '5-level scale'), shared_by, libraries_count (how many organisations " +
+        "use it on a project) and yours, plus facets. Then call makerble_get_explore_metric for its details and " +
+        "answer choices. The user adds a tracker or indicator to a project in Makerble with Add to a project on " +
+        "Explore Metrics, or makerble_add_metric_to.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the metric's name or description, e.g. 'confidence'" },
+          stage: { type: "array", items: { type: "string", enum: ["activities", "engagement", "ability", "behaviour", "effect", "financial_values"] }, description: "Stage of change" },
+          answer_format: { type: "array", items: { type: "string", enum: ["count", "scale", "yes_no", "value"] } },
+          audience: { type: "array", items: { type: "string", enum: ["public_impact", "personal", "professional"] } },
+          shared_by: { type: "array", items: { type: "string", enum: ["makerble", "others"] } },
+          chip: { type: "string", enum: ["Wellbeing", "Employment", "Housing", "Attendance", "SDGs"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (on the most organisations' projects first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Metrics per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/metrics", p),
+    },
+
+    {
+      name: "makerble_get_explore_metric",
+      description:
+        "Preview one metric from makerble_explore_metrics, as its Preview panel on Explore Metrics shows it: the " +
+        "same fields plus its description, details (its key facts by label, such as the Outcomes an indicator " +
+        "sits under, or a Financial Value's amount, year and source) and the answer choices of a scale or yes-or-no " +
+        "indicator. Use it to check a metric measures what the user needs before suggesting it. Returns 404 for a " +
+        "metric that isn't published and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["change", "indicator", "financial_value"], description: "The metric's kind from makerble_explore_metrics" },
+          id: { type: "number", description: "The metric's id from makerble_explore_metrics" },
+        },
+        required: ["kind", "id"],
+      },
+      handler: ({ kind, id }) => get(`/explore/metrics/${kind}/${id}`),
+    },
+
+    // ── Seats (CP-8881) ───────────────────────────────────────────────────────
+    {
+      name: "makerble_list_seats",
+      description:
+        "List an Organisation's (Charity's) seats per colleague: the Seats per Colleague page under Our Account › " +
+        "Seats in Makerble. Use it to answer 'who has which seat', 'are we over our seat count' or 'who still needs " +
+        "a seat'. Each Contract (what the Organisation has bought, e.g. Makerble CRM · Standard) comes with its seats " +
+        "bought, assigned and over, per Billing Role (Organiser, Practitioner or Helper) on Role-based Pricing, or one " +
+        "line in all on Flat Pricing; default_for_new_colleagues marks the Contract new colleagues are given seats on " +
+        "automatically. data is a page of colleagues: their roles in words, lowest_seat_allowed (the Billing Role their " +
+        "roles need), status (covered, no_seat, seat_too_low, or no_seat_needed for someone still holding a seat they " +
+        "no longer need), and the seat they hold on each Contract. Nobody loses access because of their seat. Only " +
+        "the Organisation's admins (Organisation Admins / Charity Editors) can read this; anyone else gets not-found.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Colleagues per page, up to 200 (default 10)" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/seats`, params),
+    },
+
+    {
+      name: "makerble_change_seat",
+      description:
+        "Give a colleague a seat on one of their Organisation's current Contracts, change it, or take it away. Call " +
+        "makerble_list_seats first to get the contract_id, the Billing Role ids (from a Contract's lines) and the " +
+        "colleague's user_id, and to see whether the Contract uses Role-based or Flat Pricing. On Role-based Pricing " +
+        "send billing_role_id (e.g. the Helper seat's id), or billing_role_id: null to take the seat away. On Flat " +
+        "Pricing send has_seat: true or false instead, and no billing_role_id. A seat below the colleague's " +
+        "lowest_seat_allowed shows as 'Seat too low'; going over the seats bought is allowed and shows as over count, so " +
+        "warn the user before doing either. The old seat stays in Seat History. Only the Organisation's admins can " +
+        "change seats. Returns the colleague with their seats after the change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          user_id: { type: "number", description: "The colleague's user id, from makerble_list_seats" },
+          contract_id: { type: "number", description: "One of the Organisation's current Contracts, from makerble_list_seats" },
+          billing_role_id: {
+            type: ["number", "null"],
+            description: "Role-based Pricing only: the Billing Role (seat) to give, or null to take the seat away",
+          },
+          has_seat: { type: "boolean", description: "Flat Pricing only: true gives a seat, false takes it away" },
+        },
+        required: ["organisation_id", "user_id", "contract_id"],
+      },
+      handler: ({ organisation_id, user_id, ...body }) => put(`/organisations/${organisation_id}/seats/${user_id}`, body),
+    },
+
+    // ── Usage (CP-8987) ───────────────────────────────────────────────────────
+    {
+      name: "makerble_get_usage",
+      description:
+        "Get an Organisation's (Charity's) usage against the allowances in its plan: the Usage page under Our Account › " +
+        "Usage in Makerble. Use it to answer 'are we close to any of our allowances', 'what will our usage bill be this " +
+        "month' or 'how much did we use last month'. Covers what an Organisation is charged for when it goes over an " +
+        "allowance: Contacts, Stories (survey responses), automation runs, API and integration runs, file storage " +
+        "uploaded (in GB), SMS and email. For this calendar month it returns, per usage type, quantity used so far, " +
+        "allowance (0 means charged from the first one), percent_used, status (within, near = 80% or more, over, " +
+        "waived), expected_quantity by month end at the current rate, the price over the allowance (unit_price per " +
+        "per_quantity, or the bundle tier_min to tier_max the expected total falls in), and charge_so_far and " +
+        "expected_charge; plus the totals charge_so_far and expected_charge, in the Organisation's billing currency, " +
+        "before VAT. A null charge means no price is set (unpriced is then true). File storage counts what was uploaded " +
+        "this month, not what is stored; Contacts are the current total including archived ones, and their bundle is " +
+        "charged every month the total is over the allowance. Set include_history to also get the previous 12 months " +
+        "(history), each with its usage, allowance and charge after any waivers. Going over an allowance never stops " +
+        "anyone working. Only the Organisation's admins (Organisation Admins / Charity Editors) can read this; anyone " +
+        "else gets not-found.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          include_history: { type: "boolean", description: "Also return the previous 12 months (default false)" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: async ({ organisation_id, include_history }) => {
+        const month = await get(`/organisations/${organisation_id}/usage`);
+        if (!include_history) return month;
+
+        const history = await get(`/organisations/${organisation_id}/usage/history`);
+        return { ...month, history: history.data };
+      },
+    },
+
+    // ── Setup guide (CP-9056) ─────────────────────────────────────────────────
+    {
+      name: "makerble_get_setup_guide",
+      description:
+        "Get an Organisation's (Charity's) Setup guide: the main things to set up in Makerble, how far each has got and " +
+        "whether it is done. It is the Setup guide page in Makerble (Help › Setup guide, or the card at the bottom of the " +
+        "left sidebar). Use it to answer 'what should we set up next' or 'how far through setup are we'. Returns " +
+        "done_count of total_count (items marked not relevant leave the total), finished (true once every item is done " +
+        "or not relevant), and data: each item's key, title, section (e.g. 'Automate your reporting', or null), progress " +
+        "in words (e.g. '3 of 5 workspaces'), done_when (what counts as done), done and not_relevant. Items (key): teams " +
+        "(Create your teams; only for Organisations with 11 or more staff), workspaces (Projects), welcome_tour, " +
+        "checklists (a Checklist on each open workspace), reporting_requirements (Reporting Cycles with a Report " +
+        "Template), demographics (the Demographics tab of Contacts with 2 Ratio Sets) and metrics (an Engagement " +
+        "Tracker and an Indicator on each open workspace). Makerble ticks items off itself, and once done an item stays " +
+        "done. Only the Organisation's Organisation Admins (Charity Editors) and Makerble staff can read it, and only " +
+        "while the Setup guide is switched on for the Organisation; anyone else gets a 403 error.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id }) => get(`/organisations/${organisation_id}/setup_guide`),
+    },
+    {
+      name: "makerble_set_setup_guide_item",
+      description:
+        "Mark one item of an Organisation's (Charity's) Setup guide as 'Not relevant to us', or undo that. An item marked " +
+        "not relevant leaves the guide's total, so the Organisation can finish its Setup guide without it; Makerble " +
+        "records who chose it and when. This never ticks an item as done: Makerble does that itself when it sees the " +
+        "work done. Get the item keys from makerble_get_setup_guide (teams, workspaces, welcome_tour, checklists, " +
+        "reporting_requirements, demographics, metrics). Returns the whole Setup guide after the change. Only the " +
+        "Organisation's Organisation Admins (Charity Editors) and Makerble staff can do this.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          item_key: {
+            type: "string",
+            enum: ["teams", "workspaces", "welcome_tour", "checklists", "reporting_requirements", "demographics", "metrics"],
+            description: "The item's key, from makerble_get_setup_guide",
+          },
+          not_relevant: { type: "boolean", description: "true marks it Not relevant to us; false is Undo" },
+        },
+        required: ["organisation_id", "item_key", "not_relevant"],
+      },
+      handler: ({ organisation_id, item_key, not_relevant }) =>
+        patch(`/organisations/${organisation_id}/setup_guide/items/${encodeURIComponent(item_key)}`, { not_relevant }),
+    },
+
+    // ── Age bands (CP-8902) ───────────────────────────────────────────────────
+    {
+      name: "makerble_get_age_bands",
+      description:
+        "Get the age bands an Organisation (Charity), Album (Portfolio / Bundle) or Project uses to group Contacts " +
+        "(Beneficiaries) by age. Ages are worked out from each Contact's Date of Birth as of today. Bands are stored as " +
+        "the age each starts at: starts [0, 13, 18, 25] means the bands 0–12, 13–17, 18–24 and 25 and over (returned " +
+        "in words as bands). Every Organisation has bands (by default those four); an Album or Project can have its " +
+        "own and otherwise uses its Organisation's. source says whose bands they are: 'organisation', 'album' or " +
+        "'project'. Anyone in the Organisation (or who can see the Album) can read them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["organisation", "album", "project"], description: "Whose age bands to get" },
+          id: { type: "number", description: "The Organisation's, Album's or Project's ID" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id }) => get(`/${{ organisation: "organisations", album: "albums", project: "projects" }[owner_type]}/${id}/age_bands`),
+    },
+
+    {
+      name: "makerble_set_age_bands",
+      description:
+        "Change the age bands of an Organisation (Charity), Album (Portfolio / Bundle) or Project: the Age bands " +
+        "section of its Preferences page. Send starts, the age each band starts at (whole numbers 0 to 120, in any " +
+        "order; Makerble sorts them and drops duplicates): e.g. a youth programme might use [10, 14, 18, 22] for " +
+        "10–13, 14–17, 18–21 and 22 and over. For an Album or Project, send use_organisation_bands: true instead to " +
+        "remove its own bands so it follows its Organisation's. Changing an Organisation's bands changes them for " +
+        "every Album and Project without bands of its own. Only the Organisation's admins can change its bands, an " +
+        "Album's managers the Album's, and Project Managers or Organisation Admins a Project's. Returns the bands " +
+        "after the change, as makerble_get_age_bands does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["organisation", "album", "project"], description: "Whose age bands to change" },
+          id: { type: "number", description: "The Organisation's, Album's or Project's ID" },
+          starts: { type: "array", items: { type: "number" }, description: "The age each band starts at" },
+          use_organisation_bands: { type: "boolean", description: "Albums and Projects only: true goes back to the Organisation's bands" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id, ...body }) => put(`/${{ organisation: "organisations", album: "albums", project: "projects" }[owner_type]}/${id}/age_bands`, body),
+    },
+
+    {
+      name: "makerble_count_contacts_by_age_band",
+      description:
+        "Count an Organisation's Contacts (Beneficiaries) in each age band: what the Age band card on the " +
+        "Demographics tab of Manage Contacts shows. Use it to answer 'how many young people do we work with' or 'what " +
+        "is the age breakdown of this project'. Give album_id or project_id to count only that Album's or Project's " +
+        "Contacts, by its own age bands if it has them (source says whose bands were used). data lists each band " +
+        "with its number of contacts; 'Under X' appears only if someone is younger than the first band, 'Date of " +
+        "birth in the future' only if someone's Date of Birth is after today (a data-entry error the user may want " +
+        "to fix), and 'No date of birth' only if someone has none. Bands with fewer Contacts than the Organisation's Minimum Results " +
+        "Threshold have contacts: null and are added up under 'Below Threshold'; don't try to work out the hidden " +
+        "numbers. total_count is every Contact counted. Ages are as of today.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          album_id: { type: "number", description: "Optional: count only this Album's Contacts" },
+          project_id: { type: "number", description: "Optional: count only this Project's Contacts" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...params }) => get(`/organisations/${organisation_id}/age_band_counts`, params),
+    },
+
+    // ── Snapshot (CP-8903) ────────────────────────────────────────────────────
+    {
+      name: "makerble_get_snapshot_settings",
+      description:
+        "Get what an Album's (Portfolio / Bundle) or Project's Snapshot shows, and every choice there is: the " +
+        "Snapshot tab of its Preferences. The Snapshot (under Today in the sidebar) is a one-page summary with three " +
+        "sections. 'Who we're working with' (panels): how its Contacts (Beneficiaries) split by a Ratio Set such as " +
+        "Gender, by Age band (from Date of Birth) and, on an Album, by Project. 'How the work is going' (tiles): one " +
+        "headline number per Results Canvas column (activities, engagement, potential, behaviour, growth; " +
+        "column_label is the name the canvas shows). 'Workload': up to three Workflow, Cohort or Formula Trackers. " +
+        "Returns panels in display order, tiles (choice null = hidden), workload, and under choices the panels, the " +
+        "metrics in each column (Progress Trackers (Changes), Indicators and filtered versions) and the trackers, " +
+        "which can go on any tile. Each has a key to pass to makerble_set_snapshot_settings. customised is false " +
+        "while the defaults apply (Age band and the first two Ratio Sets; the first metric in each column; no " +
+        "Workload). Anyone in the Organisation (or who can see the Album) can read it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["album", "project"], description: "Whose Snapshot" },
+          id: { type: "number", description: "The Album's or Project's ID" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id }) => get(`/${owner_type}s/${id}/snapshot_settings`),
+    },
+
+    {
+      name: "makerble_set_snapshot_settings",
+      description:
+        "Choose what an Album's (Portfolio / Bundle) or Project's Snapshot shows: the Snapshot tab of its " +
+        "Preferences. Call makerble_get_snapshot_settings first and use the keys it lists under choices. Send any of: " +
+        "panels, the panel keys in display order (e.g. ['age_band', 'ratio_set:12']; 'split_by_project' is for " +
+        "Albums only; [] shows none); tiles, an object of Results Canvas column => key, using a metric from that " +
+        "column or any tracker, or null to hide the tile (e.g. { activities: 'Change:31', engagement: null }); " +
+        "workload, up to three tracker keys or nulls. Whatever you leave out stays as it is. Only the Album's " +
+        "managers, or a Project's Project Managers and Organisation Admins, can change it. Returns the settings after " +
+        "the change, as makerble_get_snapshot_settings does; a key that can't go where you put it is refused with " +
+        "an error naming it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner_type: { type: "string", enum: ["album", "project"], description: "Whose Snapshot" },
+          id: { type: "number", description: "The Album's or Project's ID" },
+          panels: { type: "array", items: { type: "string" }, description: "Panel keys in display order" },
+          tiles: {
+            type: "object",
+            description: "Results Canvas column => metric or tracker key, or null to hide that tile",
+            properties: Object.fromEntries(["activities", "engagement", "potential", "behaviour", "growth"].map((column) => [column, { type: ["string", "null"] }])),
+            additionalProperties: false,
+          },
+          workload: { type: "array", maxItems: 3, items: { type: ["string", "null"] }, description: "Up to three tracker keys; null hides a tile" },
+        },
+        required: ["owner_type", "id"],
+      },
+      handler: ({ owner_type, id, ...body }) => put(`/${owner_type}s/${id}/snapshot_settings`, body),
+    },
+
+    {
+      name: "makerble_get_snapshot",
+      description:
+        "Get an Album's (Portfolio / Bundle) or Project's Snapshot: the headline numbers Today › Snapshot shows on " +
+        "one page. Use it for questions like 'give me a summary of this programme' or 'what's the gender split of " +
+        "the young people we work with'. Give album_id or project_id; with neither, you get the user's pinned " +
+        "Album or Project, or else the last one they viewed (404 when there's neither). panels ('Who we're working " +
+        "with') count the Contacts (Beneficiaries) the user can view by Ratio Set (e.g. Gender), age band and, on " +
+        "an Album, Project, by the Demographics tab's rules: 'No Data' / 'No date of birth' for Contacts without a " +
+        "value, and groups below the Organisation's Minimum Results Threshold come back with contacts: null and are " +
+        "added up under 'Below Threshold' (don't try to work out the hidden numbers). percent is of contacts_count. " +
+        "tiles ('How the work is going', one per Results Canvas column) and workload give each chosen metric's or " +
+        "tracker's result for the Results Canvas's current period (from the day after the last deadline to the next), " +
+        "or all time when there are no deadlines; timeframe says which and gives the dates. value is null for a " +
+        "tracker with no single number. The Album's or Project's editors choose what appears with makerble_set_snapshot_settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (params) => get("/snapshot", params),
+    },
+
+    {
+      name: "makerble_pin_snapshot",
+      description:
+        "Pin an Album (Portfolio / Bundle) or Project as the user's own Snapshot, as the Pin as my Snapshot button " +
+        "on Today › Snapshot does, so the Snapshot (and makerble_get_snapshot without an id) opens it. Only changes " +
+        "the user's own Snapshot. Give album_id or project_id. Returns what is now pinned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (body) => put("/snapshot/pin", body),
+    },
+
+    {
+      name: "makerble_share_snapshot",
+      description:
+        "Share an Album's (Portfolio / Bundle) or Project's Snapshot: get a read-only link to its headline numbers " +
+        "that the user can send to someone without a Makerble account (a funder or trustee, say), as the Share " +
+        "button on Today › Snapshot does. Returns the user's existing working link if they already have one, " +
+        "otherwise makes one. The link shows the Snapshot as the user sees it (only Contacts they can view are " +
+        "counted; groups below the Minimum Results Threshold stay hidden) and stops working if they turn it off " +
+        "with makerble_stop_sharing_snapshot or can no longer see the Album or Project. Give album_id or " +
+        "project_id. Returns share_link {url, created_at, showing {type, id, name}}. Only share a Snapshot when " +
+        "the user asks to: anyone with the link can open it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: (body) => post("/snapshot/share_link", body),
+    },
+
+    {
+      name: "makerble_stop_sharing_snapshot",
+      description:
+        "Turn off the user's read-only share link to an Album's (Portfolio / Bundle) or Project's Snapshot, as Turn " +
+        "off link on Today › Snapshot does, so anyone who opens it is told it isn't working. Only turns off the " +
+        "user's own link. Give album_id or project_id. Returns {disabled: true}; 404 when they have no working link " +
+        "to it. A new link made later with makerble_share_snapshot has a different address.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          album_id: { type: "number", description: "The Album's ID" },
+          project_id: { type: "number", description: "The Project's ID" },
+        },
+      },
+      handler: ({ album_id, project_id }) => del(`/snapshot/share_link${query({ album_id, project_id })}`),
+    },
+
+    // ─── Suggested merges and merge rules (CP-6834) ─────────────────────────
+
+    {
+      name: "makerble_list_suggested_merges",
+      description:
+        "List Suggested Merges: sets of two or more Contacts (Beneficiaries) in an Organisation that Makerble " +
+        "thinks are the same person and that are waiting for someone to review them. They come from Merge Rules " +
+        "set to Suggest mode (source 'merge_rule') and from contacts with similar names (source 'name_scan'). " +
+        "Returns only suggestions where the user can see every Contact: id, status, source, merge_rule {id, name}, " +
+        "match_strength ('high' or 'medium'), matched_fields, contacts [{id, name, created_at, created_by}], " +
+        "reviewed_by and reviewed_at, High first then newest. Pass beneficiary_id to see the suggestions for one " +
+        "Contact, e.g. after an import. status defaults to 'pending' (waiting for review); 'merged', 'rejected' " +
+        "(marked Not duplicates) and 'stale' (a Contact was deleted) show past decisions. Listing merges nothing. " +
+        "To act on one, use makerble_review_suggested_merge.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          beneficiary_id: { type: "number", description: "Only suggestions that include this Contact" },
+          status: { type: "string", enum: ["pending", "merged", "rejected", "stale"] },
+          source: { type: "string", enum: ["merge_rule", "name_scan"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/suggested_merges", p),
+    },
+
+    {
+      name: "makerble_review_suggested_merge",
+      description:
+        "Decide a Suggested Merge from makerble_list_suggested_merges. decision 'merge' merges its Contacts into " +
+        "one, keeping the Contact created first unless you give winner_contact_id (one of its Contacts); the others " +
+        "are merged into it within a few minutes, and someone can undo it with Unmerge on the Merge Contacts page. " +
+        "decision 'not_duplicates' records that they are different people, so they are not suggested together " +
+        "again from any source. ALWAYS show the user the Contacts and get their confirmation in the chat before " +
+        "merging; never merge on your own initiative. Returns the suggested merge with its new status, and for a " +
+        "merge the ids of the merge requests created.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Suggested Merge ID" },
+          decision: { type: "string", enum: ["merge", "not_duplicates"] },
+          winner_contact_id: { type: "number", description: "When merging, the Contact to keep" },
+        },
+        required: ["id", "decision"],
+      },
+      handler: ({ id, decision, winner_contact_id }) =>
+        decision === "merge"
+          ? post(`/suggested_merges/${id}/merge`, { winner_id: winner_contact_id })
+          : post(`/suggested_merges/${id}/reject`, {}),
+    },
+
+    // ─── Scan for duplicate contacts (CP-6010) ──────────────────────────────
+
+    {
+      name: "makerble_find_duplicate_contacts",
+      description:
+        "Find sets of Contacts (Beneficiaries) in an Organisation that look like the same person, as the Duplicate " +
+        "Contacts page (Scan for duplicate contacts) does. match 'similar' (the default) ignores titles (Mr, Mrs, " +
+        "Dr), capital letters, punctuation, word order and small spelling differences; match 'exact' finds only " +
+        "names spelt exactly the same. Each set has contacts [{id, name, created_at, created_by}], match_strength " +
+        "('high': same name once normalised, or a shared date of birth, email or mobile; 'medium': otherwise) and " +
+        "reasons (similar_name, same_name, same_date_of_birth, same_email, same_mobile). Only Contacts the user " +
+        "could merge are scanned, and sets someone marked as not duplicates are left out. A similar-name scan of a " +
+        "large Organisation runs in the background: if the result has status 'running', wait retry_after seconds " +
+        "and call this tool again with the same arguments. Show the sets to the user; to act on one, use " +
+        "makerble_review_duplicate_contacts, and only after the user confirms. Finding merges nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          match: { type: "string", enum: ["similar", "exact"], description: "Default 'similar'" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/duplicate_contacts", p),
+    },
+
+    {
+      name: "makerble_review_duplicate_contacts",
+      description:
+        "Decide a set of Contacts found by makerble_find_duplicate_contacts. decision 'merge' merges them into one, " +
+        "keeping the Contact created first unless you give winner_contact_id (one of contact_ids); the others are " +
+        "merged into it within a few minutes, and someone can undo it with Unmerge on the Merge Contacts page. " +
+        "decision 'not_duplicates' records that they are different people, so they are never suggested together " +
+        "again, by the scan, the background check of new Contacts or a Merge Rule. ALWAYS show the user the " +
+        "Contacts and get their confirmation in the chat before merging; never merge on your own initiative. " +
+        "Returns a message, and for a merge the Contact kept and the ids of the merge requests created.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_ids: { type: "array", items: { type: "number" }, description: "The Contacts in the set, at least two" },
+          decision: { type: "string", enum: ["merge", "not_duplicates"] },
+          winner_contact_id: { type: "number", description: "When merging, the Contact to keep" },
+          match_strength: { type: "string", enum: ["high", "medium"], description: "When marking not duplicates, the set's Match strength" },
+        },
+        required: ["contact_ids", "decision"],
+      },
+      handler: ({ contact_ids, decision, winner_contact_id, match_strength }) =>
+        decision === "merge"
+          ? post("/duplicate_contacts/merge", { contact_ids, winner_id: winner_contact_id })
+          : post("/duplicate_contacts/not_duplicates", { contact_ids, match_strength }),
+    },
+
+    {
+      name: "makerble_duplicate_suggestion_setting",
+      description:
+        "Read or change an Organisation's 'Suggest possible duplicates when contacts are created' setting on the " +
+        "Merge Contacts page. When it is on (the default), every Contact created is compared with the " +
+        "Organisation's existing Contacts each hour, and similar names appear in Suggested Merges " +
+        "(makerble_list_suggested_merges) for someone to review; nothing is merged automatically. Leave out " +
+        "suggest_on_create to read the setting; pass true or false to change it, which only Organisation Admins " +
+        "(editors) can do. Returns {charity_id, suggest_on_create}.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          suggest_on_create: { type: "boolean", description: "Leave out to read the setting" },
+        },
+        required: ["charity_id"],
+      },
+      handler: ({ charity_id, suggest_on_create }) =>
+        suggest_on_create === undefined
+          ? get("/duplicate_contacts/settings", { charity_id })
+          : patch("/duplicate_contacts/settings", { charity_id, suggest_on_create }),
+    },
+
+    {
+      name: "makerble_list_merge_rules",
+      description:
+        "List an Organisation's Merge Rules (custom rules that find duplicate Contacts). Each has id, name, " +
+        "conditions [{id, field_name}] (the Contact fields that must be identical), match_type ('and': every " +
+        "condition must match; 'or': any one), merge_mode ('automatic': matching Contacts are merged within 2 hours, " +
+        "keeping the one created first; 'suggest': matches go to Suggested Merges for someone to review) and status " +
+        "('Active' or 'Inactive'). Organisation Admins and Creators (editors and reporters) can see them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+          last_synced_datetime: { type: "string" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/merge_rules", p),
+    },
+
+    {
+      name: "makerble_save_merge_rule",
+      description:
+        "Create a Merge Rule (give charity_id, name, conditions and merge_mode) or change one (give its id and only " +
+        "what changes). conditions are Contact field ids (Current Fields of the Organisation's Contact forms; see " +
+        "makerble_list_merge_rules for ones already in use). match_type 'and' needs every condition to be identical, " +
+        "'or' any one. merge_mode 'suggest' is the safe choice: matches appear in Suggested Merges and nothing is " +
+        "merged until someone reviews them; 'automatic' merges matching Contacts within 2 hours without asking, so " +
+        "confirm with the user before choosing it. status 'Inactive' turns a rule off. Returns the saved rule.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Merge Rule ID, to change an existing rule" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID, to create a rule" },
+          name: { type: "string" },
+          conditions: { type: "array", items: { type: "number" }, description: "Contact field (Current Field) ids" },
+          match_type: { type: "string", enum: ["and", "or"] },
+          merge_mode: { type: "string", enum: ["automatic", "suggest"] },
+          status: { type: "string", enum: ["Active", "Inactive"] },
+        },
+      },
+      handler: ({ id, ...body }) => (id ? patch(`/merge_rules/${id}`, body) : post("/merge_rules", body)),
+    },
+
+    // ─── Field Visibility (CP-8788) ───────────────────────────────────────────
+
+    {
+      name: "makerble_list_field_visibility",
+      description:
+        "List who can see each Contact field in an Organisation (the Field Visibility settings page). Each Contact " +
+        "(Beneficiary) bio field comes back once, whichever Contact forms it is on: field_class_name and field_key " +
+        "identify it ('CustomField' or 'RatioSet' with its id for a form field or dropdown, 'BeneficiaryColumn' with " +
+        "the column name for a built-in field such as date_of_birth, 'CustomFieldDefinition' with its id for a Custom " +
+        "Forms field), name, forms (the Contact forms it is on), visibility ('default' = everyone who can view the " +
+        "Contact; 'restricted' = only users in one of its teams OR a colleague, in any role, on one of its projects; " +
+        "Organisation Admins get no exception), teams and projects [{id, name}], and visible_to_guests (whether " +
+        "external guest users added through a Contact's Override see it). Restrictions never give anyone access to " +
+        "a Contact they can't already view. Filter with search (field name), form (a form name) or visibility. Only " +
+        "Organisation Admins can see these settings.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          search: { type: "string", description: "Part of the field name, e.g. 'NHS'" },
+          form: { type: "string", description: "Only fields on this Contact form (its name)" },
+          visibility: { type: "string", enum: ["default", "restricted"] },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+        required: ["charity_id"],
+      },
+      handler: (p) => get("/field_visibility_rules", p),
+    },
+
+    {
+      name: "makerble_set_field_visibility",
+      description:
+        "Change who can see one or more Contact fields (Field Visibility). First call makerble_list_field_visibility " +
+        "to get each field's field_class_name and field_key, and the Organisation's teams and projects. For each field " +
+        "give visibility 'restricted' with team_ids and/or project_ids (at least one is required; a user in ANY of " +
+        "the teams OR on ANY of the projects can then see the field's value, everyone else sees it as Restricted), or " +
+        "'default' to let everyone who can view the Contact see it again. visible_to_guests true/false shows or hides " +
+        "the field from external guest users. Leave a key out to leave that setting unchanged. All the changes are " +
+        "saved together or not at all; errors name the field. Restricting a field hides it from people, including " +
+        "Organisation Admins not in those teams or projects, so confirm the teams and projects with the user first. " +
+        "Only Organisation Admins can change these settings. Returns the changed fields.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          rules: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                field_class_name: { type: "string", enum: ["CustomField", "RatioSet", "BeneficiaryColumn", "CustomFieldDefinition"] },
+                field_key: { type: "string", description: "The field id, or the column name for a BeneficiaryColumn" },
+                visibility: { type: "string", enum: ["default", "restricted"] },
+                team_ids: { type: "array", items: { type: "number" }, description: "Teams whose members can see the field" },
+                project_ids: { type: "array", items: { type: "number" }, description: "Projects whose colleagues can see the field" },
+                visible_to_guests: { type: "boolean" },
+              },
+              required: ["field_class_name", "field_key"],
+            },
+          },
+        },
+        required: ["charity_id", "rules"],
+      },
+      handler: (body) => patch("/field_visibility_rules", body),
+    },
+
+    // ─── Automations (CP-8842) ────────────────────────────────────────────────
+
+    {
+      name: "makerble_list_automations",
+      description:
+        "List an Organisation's automations, to look before you make one: suggest switching on or copying an " +
+        "existing automation rather than making a near-duplicate. Three kinds: 'contact' = Contact Automations " +
+        "(AlertTrigger): when Contacts in a Project meet a criteria (e.g. enrolled for 60 minutes, a Survey " +
+        "verdict), do actions (send a Survey, in-app alert, change status, add Flags); 'project' = Project " +
+        "Automations: settings copied onto every new or edited Project that matches a saved project filter; " +
+        "'template' = Automation Templates: saved Contact Automations that can be applied to other Projects " +
+        "(makerble_apply_automation_template). Leave kind out to get all three. Each item has active (false = " +
+        "paused). Organisation editors and observers can see them; Contact Automations also show to Project " +
+        "Managers of their Project. To find which automations add a particular Flag to Contacts (as the Manage " +
+        "Flags page's 'Automations that add this flag automatically' column does), give flag_id: only Contact " +
+        "Automations are returned. Flag ids are in makerble_get_automation_options kind 'contact'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["contact", "project", "template"], description: "Leave out for all three" },
+          charity_id: { type: "number", description: "The Organisation (Charity) ID (filters Project Automations and Templates)" },
+          project_id: { type: "number", description: "Only Contact Automations on this Project" },
+          flag_id: { type: "number", description: "Only Contact Automations whose actions add this Flag (implies kind 'contact')" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, at most 200" },
+        },
+      },
+      handler: async ({ kind, charity_id, project_id, flag_id, page, per_page }) => {
+        const paging = { page, per_page };
+        const lists = {
+          contact: () => get("/contact_automations", { project_id, flag_id, ...paging }),
+          project: () => get("/project_automations", { charity_id, ...paging }),
+          template: () => get("/automation_templates", { charity_id, ...paging }),
+        };
+        if (flag_id) return lists.contact();
+        if (kind) return lists[kind]();
+        const [contact_automations, project_automations, automation_templates] = await Promise.all(
+          [lists.contact(), lists.project(), lists.template()]
+        );
+        return { contact_automations, project_automations, automation_templates };
+      },
+    },
+
+    {
+      name: "makerble_get_automation_options",
+      description:
+        "What a new automation can use, so you never guess a field name, condition or id. kind 'contact' (give " +
+        "project_id): the criteria fields of a Contact Automation on that Project (contact_fields and survey_fields " +
+        "by current_field_id, each with its conditions and, for a Ratio Set or scale Indicator, its states; " +
+        "other_fields by key, e.g. 'minutes_since_contact_enrolled', with value_unit; relationships; event_states) " +
+        "and its actions' choices (surveys with their verdicts, statuses, flags, colleagues, in_app_alert_recipients). " +
+        "kind 'project' (give charity_id): a Project Automation's saved_filters, contact_forms, surveys, " +
+        "event_formats, colleagues, contact_automation_templates, setting names and default_story_privacy_values.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["contact", "project"] },
+          project_id: { type: "number", description: "For kind 'contact'" },
+          charity_id: { type: "number", description: "For kind 'project'" },
+        },
+        required: ["kind"],
+      },
+      handler: ({ kind, project_id, charity_id }) =>
+        kind === "contact"
+          ? get("/contact_automations/options", { project_id })
+          : get("/project_automations/options", { charity_id }),
+    },
+
+    {
+      name: "makerble_create_contact_automation",
+      description:
+        "Create a Contact Automation (AlertTrigger) on a Project: when its Contacts meet the criteria, the actions " +
+        "run (it is checked regularly, and acts once per Contact until that alert is resolved). It is the same as " +
+        "one made on the Contact Automations page. Automations can email and send Surveys to many Contacts, so " +
+        "confirm with the user first and say how many Contacts match. criteria (choose one field): field (an " +
+        "other_fields key), current_field_id, relationship_category_id or event_state_id; then condition (a key " +
+        "from that field's conditions) and value (minutes for the 'Amount of time' fields), or state_ids (Ratio Set " +
+        "states), or text. For field 'survey_verdict_is' give survey_id and verdict_ids. actions (any of): " +
+        "send_survey {survey_id, via_email, via_sms, email_message, sms_message, expire}; in_app_alert {message (up " +
+        "to 40 characters), recipients, user_ids}; change_status [{status_id or 'removed'}] on this Project; flags " +
+        "[{flag_id, description}]. Every id must come from makerble_get_automation_options. active defaults to " +
+        "true; send false to save it paused. Requires an editor of the Organisation or of the Project." +
+        "\nWorkflow: (1) makerble_list_automations to look for an existing one. (2) makerble_get_automation_options " +
+        "kind 'contact'. (3) makerble_create_contact_automation with active false. (4) makerble_preview_automation " +
+        "to see who it would act on. (5) After the user approves, makerble_set_automation_active to switch it on.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project_id: { type: "number" },
+          active: { type: "boolean", description: "Default true; false saves it paused" },
+          criteria: {
+            type: "object",
+            properties: {
+              field: { type: "string", description: "An other_fields key, e.g. 'minutes_since_contact_enrolled'" },
+              current_field_id: { type: "number" },
+              relationship_category_id: { type: "number" },
+              event_state_id: { type: "number" },
+              condition: { type: "string" },
+              value: { type: "number" },
+              state_ids: { type: "array", items: { type: "number" } },
+              text: { type: "string" },
+              survey_id: { type: "number", description: "For field 'survey_verdict_is'" },
+              verdict_ids: { type: "array", items: { type: "number" } },
+            },
+            required: ["condition"],
+          },
+          actions: {
+            type: "object",
+            properties: {
+              send_survey: {
+                type: "object",
+                properties: {
+                  survey_id: { type: "number" }, via_email: { type: "boolean" }, via_sms: { type: "boolean" },
+                  email_message: { type: "string" }, sms_message: { type: "string" },
+                  expire: { type: "boolean", description: "Default true: the link works once" },
+                },
+                required: ["survey_id"],
+              },
+              in_app_alert: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  recipients: { type: "array", items: { type: "string", enum: ["beneficiary_workers", "project_editors", "charity_editors", "charity_relationships"] } },
+                  user_ids: { type: "array", items: { type: "number" } },
+                },
+              },
+              change_status: { type: "array", items: { type: "object", properties: { status_id: { type: ["number", "string"] } } } },
+              flags: { type: "array", items: { type: "object", properties: { flag_id: { type: "number" }, description: { type: "string" } } } },
+            },
+          },
+        },
+        required: ["project_id", "criteria"],
+      },
+      handler: (body) => post("/contact_automations", body),
+    },
+
+    {
+      name: "makerble_preview_automation",
+      description:
+        "List the Contacts a Contact Automation would act on if it ran now, paginated (only Contacts you can see). " +
+        "It leaves out Contacts it has already acted on and not resolved. Works on a paused automation, so create " +
+        "one with active false, preview it, and show the user how many match before switching it on.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Contact Automation ID" },
+          page: { type: "number" },
+          per_page: { type: "number" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, ...params }) => get(`/contact_automations/${id}/matching_contacts`, params),
+    },
+
+    {
+      name: "makerble_set_automation_active",
+      description:
+        "Pause or resume an automation. kind 'contact' (a Contact Automation: paused, it acts on nobody) or " +
+        "'project' (a Project Automation: paused, new and edited Projects skip it). Resuming a Contact Automation " +
+        "lets it send Surveys and messages to every Contact it matches, so confirm with the user first. Requires " +
+        "an editor of the Organisation (or, for a Contact Automation, of its Project).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["contact", "project"] },
+          id: { type: "number" },
+          active: { type: "boolean" },
+        },
+        required: ["kind", "id", "active"],
+      },
+      handler: ({ kind, id, active }) =>
+        post(`/${kind === "contact" ? "contact_automations" : "project_automations"}/${id}/${active ? "resume" : "pause"}`),
+    },
+
+    {
+      name: "makerble_create_project_automation",
+      description:
+        "Create a Project Automation: whenever a Project matching its saved project filter is created or edited, " +
+        "these settings are copied onto it (Contact forms, statuses, baseline Surveys, Event Formats, Cases, " +
+        "default privacy). It is the same as one made on the Project Automations page and goes last in priority. " +
+        "saved_filter_id comes from makerble_get_automation_options kind 'project' (a user saves project filters " +
+        "on the Projects page). settings: true/false for any of the setting names listed there (any left out take " +
+        "the page's own defaults: statuses, Events, Timesheets, Cases and the Survey Progress Board on), " +
+        "default_story_privacy, and id lists: contact_form_ids, edit_contact_form_ids, custom_field_category_ids " +
+        "(Contact Forms); enrolled_state_baseline_survey_ids, waiting_list_state_baseline_survey_ids, " +
+        "alumni_state_baseline_survey_ids, declined_state_baseline_survey_ids, required_story_category_ids, " +
+        "required_case_story_category_ids (Surveys); event_category_ids (Event Formats); event_creator_ids " +
+        "(colleagues); contact_automation_template_ids. An unknown setting is refused. active defaults to true. " +
+        "Requires an editor of the Organisation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          name: { type: "string" },
+          saved_filter_id: { type: "number" },
+          active: { type: "boolean", description: "Default true; false saves it paused" },
+          settings: { type: "object", description: "See the description" },
+        },
+        required: ["charity_id", "name", "saved_filter_id"],
+      },
+      handler: (body) => post("/project_automations", body),
+    },
+
+    {
+      name: "makerble_apply_automation_template",
+      description:
+        "Apply an Automation Template to a Project: copies its Contact Automation onto the Project, the same as " +
+        "'+ Add to Project' on the Automation Templates page. Template IDs from makerble_list_automations kind " +
+        "'template'. If the Project hasn't got the template's Survey, or (for an Event criteria) Events switched " +
+        "on and its Event Format, it is refused with what to add first. A template can be applied to a Project " +
+        "once. active defaults to true; send false to add it paused. Returns the new Contact Automation. Requires " +
+        "an editor of the Organisation or the Project, and a Project in the template's Organisation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Automation Template ID" },
+          project_id: { type: "number" },
+          active: { type: "boolean", description: "Default true; false adds it paused" },
+        },
+        required: ["id", "project_id"],
+      },
+      handler: ({ id, ...body }) => post(`/automation_templates/${id}/apply`, body),
     },
   ];
 }
