@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 351 Makerble MCP tool definitions.
+ * All 353 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3270,6 +3270,56 @@ export function buildTools(api) {
         required: ["start_page"],
       },
       handler: ({ start_page }) => patch("/start_page", { start_page }),
+    },
+
+    {
+      name: "makerble_list_training_tours",
+      description:
+        "List the guided tours a user can take in Makerble, as on Helpdesk › Training materials. kind 'picked' lists " +
+        "the Welcome Tours picked for the signed-in user in one organisation (Charity): its default tour and the tour " +
+        "of each of their teams there, each with team (null for the organisation-wide tour), stop_count and status " +
+        "('not_started', 'started' or 'finished'); organisation_id is required. kind 'all' lists every feature tour " +
+        "(short tours introducing one feature), each with stop_count and status 'ready_to_watch', 'started' (begun but " +
+        "not finished) or 'completed'; status narrows the list to one of those. Returns the paginated envelope " +
+        "{page, page_size, page_count, total_count, data}. Use makerble_start_training_tour to start or restart one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["picked", "all"], description: "'picked' for Welcome Tours picked for the user, 'all' for every feature tour" },
+          organisation_id: { type: "integer", description: "The organisation (Charity) id; required for kind 'picked'" },
+          status: { type: "string", enum: ["ready_to_watch", "started", "completed"], description: "kind 'all' only: list only the tours with this status" },
+          page: { type: "integer", description: "Page number (default 1)" },
+          per_page: { type: "integer", description: "Results per page (default 10, max 200)" },
+        },
+        required: ["kind"],
+      },
+      handler: ({ kind, organisation_id, status, page, per_page }) =>
+        kind === "picked"
+          ? get(`/organisations/${organisation_id}/picked_tours`, { page, per_page })
+          : get("/training_tours", { status, page, per_page }),
+    },
+
+    {
+      name: "makerble_start_training_tour",
+      description:
+        "Start a guided tour for the signed-in user from its first stop, as the buttons on Helpdesk › Training " +
+        "materials do, even one they have finished: it runs in their browser the next time they open a Makerble page. " +
+        "kind 'picked' restarts a Welcome Tour picked for them (needs organisation_id; a tour not picked for them is " +
+        "refused); kind 'all' starts a feature tour. Get ids from makerble_list_training_tours. Returns {id, status: " +
+        "'started', url}, where url is the page the tour's first stop opens (null when it starts on any page).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["picked", "all"], description: "'picked' for a Welcome Tour, 'all' for a feature tour" },
+          id: { type: "integer", description: "The tour's id" },
+          organisation_id: { type: "integer", description: "The organisation (Charity) id; required for kind 'picked'" },
+        },
+        required: ["kind", "id"],
+      },
+      handler: ({ kind, id, organisation_id }) =>
+        kind === "picked"
+          ? post(`/organisations/${organisation_id}/picked_tours/${id}/restart`)
+          : post(`/training_tours/${id}/start`),
     },
 
     {
