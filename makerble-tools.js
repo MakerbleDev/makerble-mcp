@@ -677,7 +677,8 @@ export function buildTools(api) {
         "Project Type), and a Checklist (participant journey) that every contact in the area's workspaces gets. " +
         "spacing says how the area is split into workspaces: 'facilitator' (one per coach, mentor or practitioner), " +
         "'site' (one per location), 'cohort' (one per intake of a group or class) or 'single' (only one workspace, " +
-        "named after the area of work when workspace_names is empty). Up to 50 workspace_names. Use " +
+        "named after the area of work when workspace_names is empty). Up to 50 workspace_names, each with an " +
+        "optional colour in workspace_colours (same order, six-digit hex such as '#22B573'). Use " +
         "makerble_list_toolkits to find toolkit_id and makerble_list_onboarding_extras for extra_ids. Needs a " +
         "Charity Editor or Charity Reporter of the organisation. The workspaces are made in the background: this " +
         "returns the set-up with status 'building'; call makerble_get_area_of_work_setup until status is " +
@@ -690,6 +691,7 @@ export function buildTools(api) {
           toolkit_id: { type: "integer", description: "The listed Toolkit (Collection) to install into each workspace" },
           spacing: { type: "string", enum: ["facilitator", "site", "cohort", "single"], description: "How the area is split into workspaces" },
           workspace_names: { type: "array", items: { type: "string" }, description: "One name per workspace (up to 100 characters each)" },
+          workspace_colours: { type: "array", items: { type: "string" }, description: "Each workspace's colour, in the same order as workspace_names, as a six-digit hex colour; a missing one gets the next Makerble brand colour" },
           extra_ids: { type: "array", items: { type: "integer" }, description: "Extras from makerble_list_onboarding_extras" },
         },
         required: ["organisation_id", "area_of_work", "toolkit_id", "spacing"],
@@ -701,7 +703,8 @@ export function buildTools(api) {
       name: "makerble_get_area_of_work_setup",
       description:
         "Get an area of work set up with makerble_set_up_area_of_work (an onboarding journey): its status " +
-        "('building', 'completed' or 'failed'), area_of_work, toolkit_id, spacing, workspace_names and extra_ids, " +
+        "('building', 'completed' or 'failed'), area_of_work, toolkit_id, spacing, workspace_names, " +
+        "workspace_colours and extra_ids, " +
         "and once completed the workspace_ids (Projects) it made, the area's own first then the extras', and the " +
         "checklist_id of its Checklist. Only the person who set it up can see it.",
       inputSchema: {
@@ -717,7 +720,8 @@ export function buildTools(api) {
       description:
         "List the extra workspaces an area of work can be set up with (Referrals, Parents, Referees, Volunteers, " +
         "Fundraising and any others Makerble offers), as on the onboarding journey's Add extras step. Returns each " +
-        "one's id, name, description and the Project Type its workspace gets (project_type_id, project_type_name), " +
+        "one's id, name, description, the Project Type its workspace gets (project_type_id, project_type_name) and " +
+        "the name of the icon it is shown with (icon, or null), " +
         "in the paginated envelope {page, page_size, page_count, total_count, data}. Pass ids as extra_ids to " +
         "makerble_set_up_area_of_work.",
       inputSchema: {
