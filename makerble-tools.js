@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 361 Makerble MCP tool definitions.
+ * All 362 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -659,7 +659,8 @@ export function buildTools(api) {
       name: "makerble_get_toolkit",
       description:
         "Get one Toolkit (Collection) by id: its name, toolkit_number, strapline, description, approval, thumbnail " +
-        "and cover image URLs, the cover image's alt text, darkening settings, and the url of its page. A Toolkit the user can't see returns not found.",
+        "and cover image URLs, the cover image's alt text, darkening settings, the url of its page, and its " +
+        "checklist_templates and story_labels (each id and name). A Toolkit the user can't see returns not found.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number", description: "The Toolkit's id." } },
@@ -766,6 +767,39 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/toolkits/${id}`, body),
+    },
+
+    {
+      name: "makerble_change_toolkit_items",
+      description:
+        "Add a Checklist Template or a story Label to a Toolkit (Collection), or take one out, as Available Fields " +
+        "does on the Create/Edit Collection page. A Toolkit bundles the Surveys, Contact Forms, story Labels and " +
+        "metrics for a type of programme; a Checklist Template in the same Toolkit is its \"how to run it\" " +
+        "companion, and its steps can count the Toolkit's own Surveys, Contact Forms and story Labels as done, so " +
+        "they arrive already set up when the Toolkit is installed. " +
+        "action is 'add' or 'remove'. item_type is checklist_template (a Checklist Template, from My Checklist " +
+        "Templates: makerble_list_checklist_templates) or story_label (a Label that tags stories; ask the user for " +
+        "its id if you don't have it). The item must belong to one of the user's organisations (a story " +
+        "Label may also be the user's own), and the user must be able to edit the Toolkit. Adding an item the " +
+        "Toolkit already has changes nothing; removing leaves the item itself as it is. " +
+        "Returns the item's type, id and name when added. Check the result with makerble_get_toolkit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Toolkit's id (makerble_list_toolkits)." },
+          action: { type: "string", enum: ["add", "remove"], description: "Add the item to the Toolkit, or take it out." },
+          item_type: { type: "string", enum: ["checklist_template", "story_label"], description: "A Checklist Template or a story Label." },
+          item_id: { type: "number", description: "The Checklist Template's or story Label's id." },
+        },
+        required: ["id", "action", "item_type", "item_id"],
+      },
+      handler: async ({ id, action, item_type, item_id }) => {
+        if (action === "remove") {
+          await del(`/toolkits/${id}/items`, { item_type, item_id });
+          return { removed: true, item_type, item_id };
+        }
+        return post(`/toolkits/${id}/items`, { item_type, item_id });
+      },
     },
 
     {
