@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 353 Makerble MCP tool definitions.
+ * All 356 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -666,6 +666,68 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/toolkits/${id}`),
+    },
+
+    {
+      name: "makerble_set_up_area_of_work",
+      description:
+        "Set up an organisation's (Charity's) area of work, such as a programme or service, from a Toolkit, as the " +
+        "onboarding journey's \"Start from a toolkit\" path does: one workspace (Project) per name with the Toolkit " +
+        "installed, an extra workspace for each extra chosen (Referrals, Volunteers and so on, each with its own " +
+        "Project Type), and a Checklist (participant journey) that every contact in the area's workspaces gets. " +
+        "spacing says how the area is split into workspaces: 'facilitator' (one per coach, mentor or practitioner), " +
+        "'site' (one per location), 'cohort' (one per intake of a group or class) or 'single' (only one workspace, " +
+        "named after the area of work when workspace_names is empty). Up to 50 workspace_names. Use " +
+        "makerble_list_toolkits to find toolkit_id and makerble_list_onboarding_extras for extra_ids. Needs a " +
+        "Charity Editor or Charity Reporter of the organisation. The workspaces are made in the background: this " +
+        "returns the set-up with status 'building'; call makerble_get_area_of_work_setup until status is " +
+        "'completed' (workspace_ids and checklist_id are then filled in) or 'failed' (nothing was made; set it up again).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "integer", description: "The organisation (Charity) id" },
+          area_of_work: { type: "string", description: "The area of work's name, e.g. 'Youth mentoring' (up to 100 characters)" },
+          toolkit_id: { type: "integer", description: "The listed Toolkit (Collection) to install into each workspace" },
+          spacing: { type: "string", enum: ["facilitator", "site", "cohort", "single"], description: "How the area is split into workspaces" },
+          workspace_names: { type: "array", items: { type: "string" }, description: "One name per workspace (up to 100 characters each)" },
+          extra_ids: { type: "array", items: { type: "integer" }, description: "Extras from makerble_list_onboarding_extras" },
+        },
+        required: ["organisation_id", "area_of_work", "toolkit_id", "spacing"],
+      },
+      handler: ({ organisation_id, ...body }) => post(`/organisations/${organisation_id}/onboarding_journeys`, body),
+    },
+
+    {
+      name: "makerble_get_area_of_work_setup",
+      description:
+        "Get an area of work set up with makerble_set_up_area_of_work (an onboarding journey): its status " +
+        "('building', 'completed' or 'failed'), area_of_work, toolkit_id, spacing, workspace_names and extra_ids, " +
+        "and once completed the workspace_ids (Projects) it made, the area's own first then the extras', and the " +
+        "checklist_id of its Checklist. Only the person who set it up can see it.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "integer", description: "The set-up's id, returned by makerble_set_up_area_of_work" } },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/onboarding_journeys/${id}`),
+    },
+
+    {
+      name: "makerble_list_onboarding_extras",
+      description:
+        "List the extra workspaces an area of work can be set up with (Referrals, Parents, Referees, Volunteers, " +
+        "Fundraising and any others Makerble offers), as on the onboarding journey's Add extras step. Returns each " +
+        "one's id, name, description and the Project Type its workspace gets (project_type_id, project_type_name), " +
+        "in the paginated envelope {page, page_size, page_count, total_count, data}. Pass ids as extra_ids to " +
+        "makerble_set_up_area_of_work.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "integer", description: "Page number (default 1)" },
+          per_page: { type: "integer", description: "Results per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/onboarding_extras", p),
     },
 
     {
