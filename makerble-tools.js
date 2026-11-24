@@ -675,6 +675,15 @@ export function buildTools(api) {
         "onboarding journey's \"Start from a toolkit\" path does: one workspace (Project) per name with the Toolkit " +
         "installed, an extra workspace for each extra chosen (Referrals, Volunteers and so on, each with its own " +
         "Project Type), and a Checklist (participant journey) that every contact in the area's workspaces gets. " +
+        "Or, instead of toolkit_id, give stages: the stages of the organisation's own process, as the onboarding " +
+        "journey's \"Personalise the platform to my organisation\" path does. Each stage is {name, action} and " +
+        "becomes one step of the same name in the Checklist; action is what happens at that stage, one of " +
+        "complete_form_external (the contact fills in a form), complete_form_internal (a colleague fills it in), " +
+        "complete_survey, add_to_project, add_flag, invite_to_event, add_observer, add_relationship, add_role " +
+        "(add to an audience), add_skill (add a specialist need), add_to_group, complete_form_for_relative, " +
+        "complete_survey_for_relative, create_case, create_task, invite_to_participate, send_sms, send_email, " +
+        "receive_sms, receive_email, send_survey, send_360_survey or create_labelled_story. Content for the stages " +
+        "(forms, surveys, flags and so on) is not set up this way; add it in Makerble afterwards. " +
         "spacing says how the area is split into workspaces: 'facilitator' (one per coach, mentor or practitioner), " +
         "'site' (one per location), 'cohort' (one per intake of a group or class) or 'single' (only one workspace, " +
         "named after the area of work when workspace_names is empty). Up to 50 workspace_names, each with an " +
@@ -688,13 +697,25 @@ export function buildTools(api) {
         properties: {
           organisation_id: { type: "integer", description: "The organisation (Charity) id" },
           area_of_work: { type: "string", description: "The area of work's name, e.g. 'Youth mentoring' (up to 100 characters)" },
-          toolkit_id: { type: "integer", description: "The listed Toolkit (Collection) to install into each workspace" },
+          toolkit_id: { type: "integer", description: "The listed Toolkit (Collection) to install into each workspace. Leave out when giving stages." },
+          stages: {
+            type: "array",
+            description: "Instead of toolkit_id: the stages of the organisation's process, in order (1 to 20)",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "The stage's name, e.g. 'Assessment' (up to 100 characters)" },
+                action: { type: "string", description: "What happens at the stage, e.g. 'complete_survey' (see the tool description)" },
+              },
+              required: ["name", "action"],
+            },
+          },
           spacing: { type: "string", enum: ["facilitator", "site", "cohort", "single"], description: "How the area is split into workspaces" },
           workspace_names: { type: "array", items: { type: "string" }, description: "One name per workspace (up to 100 characters each)" },
           workspace_colours: { type: "array", items: { type: "string" }, description: "Each workspace's colour, in the same order as workspace_names, as a six-digit hex colour; a missing one gets the next Makerble brand colour" },
           extra_ids: { type: "array", items: { type: "integer" }, description: "Extras from makerble_list_onboarding_extras" },
         },
-        required: ["organisation_id", "area_of_work", "toolkit_id", "spacing"],
+        required: ["organisation_id", "area_of_work", "spacing"],
       },
       handler: ({ organisation_id, ...body }) => post(`/organisations/${organisation_id}/onboarding_journeys`, body),
     },
@@ -703,7 +724,8 @@ export function buildTools(api) {
       name: "makerble_get_area_of_work_setup",
       description:
         "Get an area of work set up with makerble_set_up_area_of_work (an onboarding journey): its status " +
-        "('building', 'completed' or 'failed'), area_of_work, toolkit_id, spacing, workspace_names, " +
+        "('building', 'completed' or 'failed'), area_of_work, path ('toolkit' or 'personalise'), toolkit_id, " +
+        "stages (each {name, action}, on the personalise path), spacing, workspace_names, " +
         "workspace_colours and extra_ids, " +
         "and once completed the workspace_ids (Projects) it made, the area's own first then the extras', and the " +
         "checklist_id of its Checklist. Only the person who set it up can see it.",
