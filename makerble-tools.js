@@ -2899,7 +2899,7 @@ export function buildTools(api) {
     {
       name: "makerble_list_checklist_action_types",
       description:
-        "List the actions a Checklist can contain (e.g. add_role 'Add a role', complete_survey 'Complete a " +
+        "List the actions a Checklist can contain (e.g. add_role 'Add to an audience' = add a Role (Audience), complete_survey 'Complete a " +
         "survey', invite_to_event 'Invite to an event') and, for each, the criteria_keys that say what " +
         "counts as done. Call this before makerble_create_checklist. Criteria values are strings: IDs " +
         "(beneficiary_role_ids, skill_ids, group_ids, flag_ids, beneficiary_category_ids = Contact Forms, " +
