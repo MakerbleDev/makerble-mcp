@@ -2033,12 +2033,13 @@ export function buildTools(api) {
       name: "makerble_list_stories",
       description:
         "List all Stories visible to the authenticated user. " +
+        "Returns up to 200 Stories per page; page through larger sets with page. " +
         "Timestamps: actual_created_at=Date Posted, created_at=Date Happened, updated_at=Date Edited.",
       inputSchema: {
         type: "object",
         properties: {
           page: { type: "number" },
-          per_page: { type: "number" },
+          per_page: { type: "number", description: "Default 10, max 200. Above 200 returns an error." },
           last_synced_datetime: { type: "string" },
         },
       },
