@@ -2723,12 +2723,14 @@ export function buildTools(api) {
         "expects to be done for each Contact (beneficiary), e.g. 'give them a Role', 'complete the Alpha " +
         "Contact Form', 'invite them to an induction event'. Returns each Checklist's id, name, description " +
         "and actions_count. Organisation editors and reporters, and its Project Managers, can see them. " +
-        "With project_id, lists only the Checklists added to that Project, as its profile page's Checklist panel does.",
+        "With project_id, lists only the Checklists added to that Project, as its profile page's Checklist panel does; " +
+        "with album_id, only those added to that Album's (Bundle's) Projects.",
       inputSchema: {
         type: "object",
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
           project_id: { type: "number", description: "Optional: only the Checklists added to this Project of the Organisation" },
+          album_id: { type: "number", description: "Optional: only the Checklists added to this Album's (Bundle's) Projects" },
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
@@ -2765,7 +2767,9 @@ export function buildTools(api) {
         "through each step. Use it to answer questions like 'which projects are behind on the Intake checklist?' or " +
         "'who is responsible for the project with the lowest consent-form completion?'. A Checklist is a list of steps " +
         "(actions) an organisation expects to be done for each Contact (Beneficiary), e.g. 'Consent form', 'Enrol'. " +
-        "Only Organisation Admins, Team Leaders and Album Editors can use this; others get 403. " +
+        "Only Organisation Admins, Team Leaders, Album Editors and Project Editors can use this; others get 403. " +
+        "With album_id it covers that Album's (Bundle's) Projects instead, for anyone who can see the Album, as the " +
+        "Summary tab of the Checklist panel on the Album's profile page does; a Checklist none of them uses is not found. " +
         "Workflow: 1) find the checklist_id with makerble_list_checklists (or from a Checklist the user names); " +
         "2) call this tool; 3) to rank projects by a step, pass sort 'step_<n>' (n = the step number from the steps list) " +
         "and direction 'asc' to find the furthest behind. " +
@@ -2777,6 +2781,7 @@ export function buildTools(api) {
         type: "object",
         properties: {
           checklist_id: { type: "number", description: "ID of the Checklist to summarise" },
+          album_id: { type: "number", description: "Optional: summarise only this Album's (Bundle's) Projects that use the Checklist" },
           sort: {
             type: "string",
             description: "Column to sort projects by: 'project' (default, by name), 'managed_by', 'colleagues', or 'step_<number>' to sort by the share of Contacts who have done that step (1 = first step)",
@@ -2804,12 +2809,14 @@ export function buildTools(api) {
         "colleague logged starting a later action first) and responsible (who is responsible for that action). Also " +
         "returns overdue_count and complete (the first Contacts with every action done). Pass project_id to count only " +
         "Contacts in one of the Projects the Checklist is added to (see makerble_get_checklist's projects), and " +
-        "responsible to count only Contacts whose waiting action a person or Team is responsible for.",
+        "responsible to count only Contacts whose waiting action a person or Team is responsible for. Pass album_id " +
+        "to count only Contacts in an Album's (Bundle's) Projects; project_id must then be one of them.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "Checklist ID" },
           project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          album_id: { type: "number", description: "Optional: only the Contacts in this Album's (Bundle's) Projects, as the Checklist panel on the Album's profile page counts them" },
           responsible: {
             type: "string",
             description: "Optional: 'me' (the signed-in user, directly or through one of their Teams), 'user:<user id>' " +
@@ -2832,7 +2839,7 @@ export function buildTools(api) {
         "it, longest waiting first) or 'complete' (everyone with every action done; no action_id). Get action ids from " +
         "makerble_get_checklist_progress's actions. Returns {page, page_size, page_count, total_count, data}, each " +
         "Contact {beneficiary_id, name, actions_done}; in the waiting and board lists each also has days_waiting, " +
-        "overdue, skipped_a_step and responsible. Takes the same project_id and responsible filters as " +
+        "overdue, skipped_a_step and responsible. Takes the same project_id, album_id and responsible filters as " +
         "makerble_get_checklist_progress. Only Contacts the user can see are counted.",
       inputSchema: {
         type: "object",
@@ -2841,6 +2848,7 @@ export function buildTools(api) {
           list: { type: "string", enum: ["completed", "furthest", "waiting", "board", "complete"], description: "Which list" },
           action_id: { type: "number", description: "The action whose list it is. Required for every list but 'complete'" },
           project_id: { type: "number", description: "Optional: only Contacts in this Project, which must be one the Checklist is added to" },
+          album_id: { type: "number", description: "Optional: only the Contacts in this Album's (Bundle's) Projects, as the Checklist panel on the Album's profile page counts them" },
           responsible: { type: "string", description: "Optional: 'me', 'user:<user id>' or 'team:<team id>'" },
           page: { type: "number", description: "Page number (default 1)" },
           per_page: { type: "number", description: "Contacts per page (default 10, max 200)" },
@@ -2863,12 +2871,13 @@ export function buildTools(api) {
         "describe or present an Organisation's participant journey; for who is waiting where, use " +
         "makerble_get_checklist_progress. To add or change stages, use makerble_update_checklist. With project_id " +
         "(one of the Projects the Checklist is added to), counts only that Project's Contacts, as the Checklist panel " +
-        "on the Project's profile page does.",
+        "on the Project's profile page does; with album_id, only the Contacts in that Album's (Bundle's) Projects.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "Checklist ID" },
           project_id: { type: "number", description: "Optional: count only the Contacts in this Project (one the Checklist is added to)" },
+          album_id: { type: "number", description: "Optional: only the Contacts in this Album's (Bundle's) Projects, as the Checklist panel on the Album's profile page counts them" },
         },
         required: ["id"],
       },
