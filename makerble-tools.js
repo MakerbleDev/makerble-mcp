@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 362 Makerble MCP tool definitions.
+ * All 364 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -1164,6 +1164,41 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/users", p),
+    },
+
+    {
+      name: "makerble_get_notification_settings",
+      description:
+        "Get the signed-in user's own email notification settings, as on the Notifications tab of User Settings in " +
+        "Makerble: which emails they get, e.g. when a guest at one of their events cancels (event_guest_cancelled), " +
+        "when someone tags them, or when an event is deleted from a project they manage. Only the user's own " +
+        "settings; there is no way to read a colleague's. Returns { data: [{ key, label, enabled }] }, where label is " +
+        "the wording on the Notifications tab. Use the keys with makerble_update_notification_settings.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/users/notification_settings"),
+    },
+
+    {
+      name: "makerble_update_notification_settings",
+      description:
+        "Turn the signed-in user's own email notifications on or off, as ticking or unticking them on the " +
+        "Notifications tab of User Settings does. Only the settings sent change. For example, " +
+        "{ event_guest_cancelled: false } stops the email they get when a guest at an event where they are an Event " +
+        "Manager or Worker cancels. Get the keys from makerble_get_notification_settings. An unknown key or a value " +
+        "that isn't true or false returns 422 with errors, and nothing changes. Returns all their settings, after the " +
+        "change, as makerble_get_notification_settings does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            additionalProperties: { type: "boolean" },
+            description: "Setting keys and true (send these emails) or false (don't), e.g. { \"event_guest_cancelled\": false }",
+          },
+        },
+        required: ["settings"],
+      },
+      handler: ({ settings }) => patch("/users/notification_settings", { settings }),
     },
 
     {
