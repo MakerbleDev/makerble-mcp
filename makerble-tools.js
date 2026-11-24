@@ -2785,11 +2785,13 @@ export function buildTools(api) {
         "List an Organisation's Checklists. A Checklist is an ordered list of actions the Organisation " +
         "expects to be done for each Contact (beneficiary), e.g. 'give them a Role', 'complete the Alpha " +
         "Contact Form', 'invite them to an induction event'. Returns each Checklist's id, name, description " +
-        "and actions_count. Organisation editors and reporters, and its Project Managers, can see them.",
+        "and actions_count. Organisation editors and reporters, and its Project Managers, can see them. " +
+        "With project_id, lists only the Checklists added to that Project, as its profile page's Checklist panel does.",
       inputSchema: {
         type: "object",
         properties: {
           charity_id: { type: "number", description: "The Organisation (Charity) ID" },
+          project_id: { type: "number", description: "Optional: only the Checklists added to this Project of the Organisation" },
           page: { type: "number" },
           per_page: { type: "number" },
           last_synced_datetime: { type: "string" },
@@ -2922,13 +2924,18 @@ export function buildTools(api) {
         "a null stage_id. Each step also has done_count (Contacts who have done it) and waiting_count (Contacts for whom " +
         "it is the first step not done), out of contacts_count, counting only Contacts the user can see. Use it to " +
         "describe or present an Organisation's participant journey; for who is waiting where, use " +
-        "makerble_get_checklist_progress. To add or change stages, use makerble_update_checklist.",
+        "makerble_get_checklist_progress. To add or change stages, use makerble_update_checklist. With project_id " +
+        "(one of the Projects the Checklist is added to), counts only that Project's Contacts, as the Checklist panel " +
+        "on the Project's profile page does.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "number", description: "Checklist ID" } },
+        properties: {
+          id: { type: "number", description: "Checklist ID" },
+          project_id: { type: "number", description: "Optional: count only the Contacts in this Project (one the Checklist is added to)" },
+        },
         required: ["id"],
       },
-      handler: ({ id }) => get(`/checklists/${id}/journey`),
+      handler: ({ id, ...p }) => get(`/checklists/${id}/journey`, p),
     },
 
     {
