@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 361 Makerble MCP tool definitions.
+ * All 362 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -6187,6 +6187,30 @@ export function buildTools(api) {
         required: ["id", "contact_id"],
       },
       handler: ({ id, contact_id, ...p }) => patch(`/events/${id}/guests/${contact_id}`, p),
+    },
+
+    {
+      name: "makerble_get_event_guest_calendar_links",
+      description:
+        "Get the links a guest (Contact) uses to add an event to their own calendar, the same ones their Personal " +
+        "Portal and the 'Add to Calendar' email give them: google_calendar_url, outlook_url (Outlook.com) and " +
+        "office365_url (Microsoft 365) each open a new, filled-in calendar event to save; ics_url is the event as an " +
+        ".ics file for Apple Calendar or any other calendar app; cancel_url is the page where the guest can cancel " +
+        "their booking, or null when the event's Event Format (event category) doesn't let guests cancel. Use it when " +
+        "a colleague wants to send a guest a way to put the event in their calendar. The ics_url and cancel_url work " +
+        "without signing in and belong to that one guest, so only give them to that guest. Anyone who can open the " +
+        "event page can call it; a Contact who isn't a guest of the event returns 404. Find guests with " +
+        "makerble_list_event_guests. Returns { event_id, contact_id, google_calendar_url, outlook_url, office365_url, " +
+        "ics_url, cancel_url }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          contact_id: { type: "number", description: "The guest's Contact (beneficiary) id" },
+        },
+        required: ["id", "contact_id"],
+      },
+      handler: ({ id, contact_id }) => get(`/events/${id}/guests/${contact_id}/calendar_links`),
     },
 
     {
