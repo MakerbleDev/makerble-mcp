@@ -9501,8 +9501,16 @@ export function buildTools(api) {
         "colleagues and Teams responsible for a step are saved as nobody in particular. share: 'organisation' " +
         "keeps it to the organisation (or stops sharing it), 'impact_store' publishes it: it then waits for " +
         "Makerble's approval before other organisations can see it, and it needs a hint on every step that needs " +
-        "one (otherwise the response is 422 with errors and missing_hint_step_ids). Returns the template with its " +
-        "stages and steps.",
+        "one (otherwise the response is 422 with errors and missing_hint_step_ids). " +
+        "In a Toolkit (Collection) that holds this template, a survey, form or story label step can also count one " +
+        "of the Toolkit's own Surveys (Story Categories), Contact Forms (Beneficiary Categories) or story Labels as " +
+        "done, so installing the Toolkit sets that step up with no mapping. To choose them, change the template " +
+        "with toolkit_id and toolkit_items: template step id -> \"<type>:<id>\" (e.g. \"StoryCategory:12\", " +
+        "\"BeneficiaryCategory:5\", \"Label:7\"), or \"\" to go back to the hint alone. Use the Toolkit's items " +
+        "from makerble_get_toolkit and the steps' toolkit_item_kind (StoryCategory, BeneficiaryCategory or Label; " +
+        "null for a step that can't point at one). Keep each step's hint too: it is used when the item isn't " +
+        "installed. Needs a user who can edit both the Toolkit and the template. Returns the template with its " +
+        "stages and steps, each step with its toolkit_item ({type, id, name} or null).",
       inputSchema: {
         type: "object",
         properties: {
@@ -9514,9 +9522,18 @@ export function buildTools(api) {
           journey_part: { type: "string", enum: ["referral", "enrolment", "safeguarding", "exit_and_alumni"], description: "Part of the journey" },
           hints: { type: "object", additionalProperties: { type: "string" }, description: "Step id → hint" },
           share: { type: "string", enum: ["organisation", "impact_store"], description: "Who can use it" },
+          toolkit_id: { type: "number", description: "When changing a template: the Toolkit whose own items toolkit_items picks from" },
+          toolkit_items: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Template step id -> \"<type>:<id>\" of one of the Toolkit's items, or \"\" for the hint alone (needs toolkit_id)",
+          },
         },
       },
       handler: ({ id, ...body }) => {
+        if (body.toolkit_items && !(id && body.toolkit_id)) {
+          throw new McpError(ErrorCode.InvalidParams, "toolkit_items needs id (the template) and toolkit_id (the Toolkit).");
+        }
         if (id) return patch(`/checklist_templates/${id}`, body);
         if (!body.checklist_id) {
           throw new McpError(ErrorCode.InvalidParams, "Pass checklist_id to save a Checklist as a template, or id to change one.");
