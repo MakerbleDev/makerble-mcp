@@ -6314,7 +6314,7 @@ export function buildTools(api) {
         "organisation can read it (others get 403; another organisation's returns 404). Find the id with " +
         "makerble_list_event_formats. Use it to check whether a format is a one-to-one or group appointment " +
         "and how long its appointments last. " +
-        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes, and the Add to Calendar email settings send_add_to_calendar_email, allow_guests_to_cancel and cancellation_guest_status_id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6333,9 +6333,13 @@ export function buildTools(api) {
         "Admin of charity_id can create one (others get 403). Give it a name and the organisation's Guest " +
         "Statuses its events use (guest_status_ids, in order). To make it an appointment, set appointment_type " +
         "('one_to_one' or 'group'), and optionally default_length_minutes and the preparation and debrief time " +
-        "a colleague needs either side. To use it in a Project afterwards, add it to the Project in Makerble. " +
+        "a colleague needs either side. Leave out guest_status_ids to give it the organisation's Invited then Cancelled " +
+        "Guest Statuses. To email guests an 'Add to Calendar' confirmation when they are added to its events, set " +
+        "send_add_to_calendar_email; to let them cancel from that email, also set allow_guests_to_cancel and " +
+        "cancellation_guest_status_id (one of its Guest Statuses, usually Cancelled). " +
+        "To use it in a Project afterwards, add it to the Project in Makerble. " +
         "Invalid settings return 422 with errors listing each problem. " +
-        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes, and the Add to Calendar email settings send_add_to_calendar_email, allow_guests_to_cancel and cancellation_guest_status_id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6352,6 +6356,9 @@ export function buildTools(api) {
           default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
           preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
           debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+          send_add_to_calendar_email: { type: "boolean", description: "Email each guest (Contact) added to an event of this format, confirming the booking with links to add it to Google Calendar or their own calendar. The organisation must have email messaging turned on (422 otherwise)" },
+          allow_guests_to_cancel: { type: "boolean", description: "Add a link to that email that lets the guest cancel. Only kept while send_add_to_calendar_email is true" },
+          cancellation_guest_status_id: { type: ["number", "null"], description: "The Guest Status (event state) a guest who cancels is moved to, usually the organisation's 'Cancelled'. Required when allow_guests_to_cancel is true, and must be one of this Event Format's Guest Statuses" },
         },
         required: ["charity_id", "name"],
       },
@@ -6365,9 +6372,11 @@ export function buildTools(api) {
         "Event Formats page. Only the settings you send change. Only an Organisation Admin of its organisation " +
         "can edit it (others get 403; another organisation's returns 404). Use it to rename a format, change " +
         "its Guest Statuses, or set whether it is a one-to-one or group appointment (appointment_type; null " +
-        "for Not an appointment), its default length, and the preparation and debrief time either side. " +
+        "for Not an appointment), its default length, and the preparation and debrief time either side, or turn " +
+        "on the 'Add to Calendar' email to guests and whether they can cancel from it. Remove the cancellation " +
+        "Guest Status from guest_status_ids only after setting allow_guests_to_cancel to false. " +
         "Invalid settings return 422 with errors, e.g. a default length not in 5-minute steps. " +
-        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes, and the Add to Calendar email settings send_add_to_calendar_email, allow_guests_to_cancel and cancellation_guest_status_id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6384,6 +6393,9 @@ export function buildTools(api) {
           default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
           preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
           debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+          send_add_to_calendar_email: { type: "boolean", description: "Email each guest (Contact) added to an event of this format, confirming the booking with links to add it to Google Calendar or their own calendar. The organisation must have email messaging turned on (422 otherwise)" },
+          allow_guests_to_cancel: { type: "boolean", description: "Add a link to that email that lets the guest cancel. Only kept while send_add_to_calendar_email is true" },
+          cancellation_guest_status_id: { type: ["number", "null"], description: "The Guest Status (event state) a guest who cancels is moved to, usually the organisation's 'Cancelled'. Required when allow_guests_to_cancel is true, and must be one of this Event Format's Guest Statuses" },
         },
         required: ["id"],
       },
