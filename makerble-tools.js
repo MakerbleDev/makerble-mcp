@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 356 Makerble MCP tool definitions.
+ * All 361 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -9407,6 +9407,162 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/dropdowns/${id}`),
+    },
+
+    // ── Checklist Templates (CP-8908) ─────────────────────────────────────────
+    // A Checklist Template is a ready-made Checklist without an organisation's own content. Each step
+    // carries a hint for what counts as done, matched to the using organisation's content when it is used.
+    {
+      name: "makerble_explore_checklist_templates",
+      description:
+        "Find a ready-made Checklist Template in the Makerble ImpactStore, as the Explore Checklist Templates page " +
+        "lists them. A Checklist Template is a ready-made Checklist (a participant journey: the steps every Contact " +
+        "should go through, e.g. referral, safeguarding checks, enrolment, moving on to alumni) without an " +
+        "organisation's own content. Each step carries a hint for what counts as done, such as 'a baseline wellbeing " +
+        "survey', which is matched to the user's own Surveys, forms, roles and statuses when they use it. Filter by " +
+        "designed_for (young_people, adults, families, volunteers, everyone), journey_part (referral, enrolment, " +
+        "safeguarding, exit_and_alumni), shape (with_stages, without_stages) and shared_by (makerble, others). " +
+        "Several options in one filter match any of them; different filters must all match. Returns a page of " +
+        "templates, each with id, name, description, steps_count, stages_count, designed_for, journey_part, " +
+        "shared_by, used_by (how many organisations have made a Checklist from it), published_at and yours (it " +
+        "belongs to one of the user's organisations), plus facets. Then call makerble_get_explore_checklist_template " +
+        "to see its steps and hints, and makerble_use_checklist_template to set it up for the user.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the template's name, description, or its steps' titles and hints, e.g. 'safeguarding'" },
+          designed_for: { type: "array", items: { type: "string", enum: ["young_people", "adults", "families", "volunteers", "everyone"] } },
+          journey_part: { type: "array", items: { type: "string", enum: ["referral", "enrolment", "safeguarding", "exit_and_alumni"] }, description: "Part of the journey" },
+          shape: { type: "array", items: { type: "string", enum: ["with_stages", "without_stages"] } },
+          shared_by: { type: "array", items: { type: "string", enum: ["makerble", "others"] } },
+          chip: { type: "string", enum: ["Referral", "Safeguarding", "Enrolment", "Volunteers", "Bursary"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["used", "new", "az", "steps"], description: "used (most used first, the default), new, az or steps (fewest steps first)" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Templates per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/checklist_templates", p),
+    },
+
+    {
+      name: "makerble_get_explore_checklist_template",
+      description:
+        "Read one ImpactStore Checklist Template from makerble_explore_checklist_templates, as its preview shows it: " +
+        "the same fields plus its stages (name, icon) and steps (title, action type, and the hint for what counts as " +
+        "done, where the step needs one). Use it to check a template suits the user before suggesting it. Returns 404 " +
+        "for a template that isn't shared to the ImpactStore and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The template's id from makerble_explore_checklist_templates" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/checklist_templates/${id}`),
+    },
+
+    {
+      name: "makerble_list_checklist_templates",
+      description:
+        "List the user's organisations' own Checklist Templates (My Checklist Templates, the Templates tab of Manage " +
+        "Checklists), shared or not. A Checklist Template is a ready-made Checklist without the organisation's own " +
+        "content; each step carries a hint for what counts as done. Returns each template's id, name, designed_for, " +
+        "journey_part, sharing (organisation: only the organisation can use it; waiting_for_approval: published to " +
+        "the ImpactStore and waiting for Makerble to approve it; published: listed in the ImpactStore), " +
+        "saved_from_checklist, steps_count, stages_count, hints_needed and hints_set, used_by_checklists and " +
+        "used_by_organisations. Pass charity_id to list one organisation's.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          charity_id: { type: "number", description: "One of the user's organisations" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Templates per page (default 10, max 200)" },
+          last_synced_datetime: { type: "string", description: "Only templates changed after this ISO 8601 time" },
+        },
+      },
+      handler: (p) => get("/checklist_templates", p),
+    },
+
+    {
+      name: "makerble_save_checklist_template",
+      description:
+        "Save one of the organisation's Checklists as a Checklist Template, or change a saved template's name, " +
+        "Designed for, part of the journey and hints, publish it to the Makerble ImpactStore or stop sharing it. " +
+        "Only Organisation Admins can. To save a Checklist, pass checklist_id (from makerble_list_checklists). To " +
+        "change a template, pass id (from makerble_list_checklist_templates). hints maps step ids to a short hint " +
+        "for what counts as done: on saving, the Checklist's step (action) ids; on changing, the template's step " +
+        "ids (from the template's steps). Write each hint in plain front-end words another organisation would " +
+        "recognise, such as 'a baseline wellbeing survey' or 'a caregiver relationship', never a model or " +
+        "database name. Steps left out of hints start from the names of what the Checklist counted. Named " +
+        "colleagues and Teams responsible for a step are saved as nobody in particular. share: 'organisation' " +
+        "keeps it to the organisation (or stops sharing it), 'impact_store' publishes it: it then waits for " +
+        "Makerble's approval before other organisations can see it, and it needs a hint on every step that needs " +
+        "one (otherwise the response is 422 with errors and missing_hint_step_ids). Returns the template with its " +
+        "stages and steps.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "A saved template to change" },
+          checklist_id: { type: "number", description: "A Checklist to save as a new template" },
+          name: { type: "string" },
+          description: { type: "string" },
+          designed_for: { type: "string", enum: ["young_people", "adults", "families", "volunteers", "everyone"] },
+          journey_part: { type: "string", enum: ["referral", "enrolment", "safeguarding", "exit_and_alumni"], description: "Part of the journey" },
+          hints: { type: "object", additionalProperties: { type: "string" }, description: "Step id → hint" },
+          share: { type: "string", enum: ["organisation", "impact_store"], description: "Who can use it" },
+        },
+      },
+      handler: ({ id, ...body }) => {
+        if (id) return patch(`/checklist_templates/${id}`, body);
+        if (!body.checklist_id) {
+          throw new McpError(ErrorCode.InvalidParams, "Pass checklist_id to save a Checklist as a template, or id to change one.");
+        }
+        return post("/checklist_templates", body);
+      },
+    },
+
+    {
+      name: "makerble_use_checklist_template",
+      description:
+        "Set up a Checklist from a Checklist Template, from the ImpactStore (makerble_explore_checklist_templates) or " +
+        "the organisation's own (makerble_list_checklist_templates). It takes two calls. First call it WITHOUT " +
+        "mapping: it returns, for each step, the hint, the organisation's options (each with an id and name), the " +
+        "suggested match, what the original Checklist used (for the organisation's own template), whether a new one " +
+        "can be created, and the default choice (suggested, original, leave or none). Show the person this mapping " +
+        "and ask them to confirm or change each step. Then call it WITH mapping to create the Checklist: one entry " +
+        "per step, { step_id, item_id } with an option id (or 'original'), { step_id, create: '<name>' } to create a " +
+        "new role, specialist need, group or story label, or { step_id, leave: true } to set it up later. Steps left " +
+        "out take their default. Never choose 'Any' for a step on the person's behalf, and when nothing fits, leave " +
+        "the step for later rather than guess: it shows as Needs setting up and doesn't tick off until someone " +
+        "chooses what counts. charity_id picks which of the user's organisations it is for. Returns the new " +
+        "Checklist and the steps that still need setting up.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The template's id" },
+          charity_id: { type: "number", description: "The organisation using it (default: the template's own, else the user's first)" },
+          name: { type: "string", description: "The new Checklist's name (default: the template's)" },
+          mapping: {
+            type: "array",
+            description: "Omit to get the suggested mapping; give it to create the Checklist",
+            items: {
+              type: "object",
+              properties: {
+                step_id: { type: "number" },
+                item_id: { type: "string", description: "An option id from the mapping, or 'original'" },
+                create: { type: "string", description: "Name of a new role, specialist need, group or story label" },
+                leave: { type: "boolean", description: "Set this step up later" },
+              },
+              required: ["step_id"],
+            },
+          },
+        },
+        required: ["id"],
+      },
+      handler: ({ id, charity_id, name, mapping }) => {
+        if (!mapping) return get(`/checklist_templates/${id}/mapping`, charity_id ? { charity_id } : null);
+        return post(`/checklist_templates/${id}/use`, { charity_id, name, mapping });
+      },
     },
 
     // ── Explore Impact Frameworks (CP-8870) ───────────────────────────────────
