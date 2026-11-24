@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 349 Makerble MCP tool definitions.
+ * All 351 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -3270,6 +3270,35 @@ export function buildTools(api) {
         required: ["start_page"],
       },
       handler: ({ start_page }) => patch("/start_page", { start_page }),
+    },
+
+    {
+      name: "makerble_get_my_apps_menu",
+      description:
+        "Get whether the My Apps button shows in the signed-in user's top menu, as chosen under Personal " +
+        "Settings › Preferences › Show My Apps in the top menu. Colleagues who joined before the setting existed " +
+        "have it on; new colleagues start with it off, since the Project Toolbar and sidebar reach the same pages. " +
+        "Returns {offered, shown}: offered is false for Contacts with a login (beneficiaries who sign in) and Survey " +
+        "Portal users, who have no My Apps menu. Use it before makerble_set_my_apps_menu.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/my_apps_menu"),
+    },
+
+    {
+      name: "makerble_set_my_apps_menu",
+      description:
+        "Show or hide the My Apps button in the signed-in user's top menu, as Personal Settings › Preferences › " +
+        "Show My Apps in the top menu does, e.g. when they want a tidier top menu. Saved for this user only; it " +
+        "takes effect the next time a page loads in full. Refused for Contacts with a login and Survey Portal " +
+        "users, who have no My Apps menu. Returns {offered, shown}, as makerble_get_my_apps_menu does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          shown: { type: "boolean", description: "true to show My Apps in the top menu, false to hide it" },
+        },
+        required: ["shown"],
+      },
+      handler: ({ shown }) => patch("/my_apps_menu", { shown }),
     },
 
     {
