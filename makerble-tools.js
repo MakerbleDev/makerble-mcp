@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 367 Makerble MCP tool definitions.
+ * All 368 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -7076,7 +7076,8 @@ export function buildTools(api) {
             type: "object",
             description:
               "For storyboard (Makerble's own only): the announcement's own animation, {archetype, loop_seconds, alt, " +
-              "steps}, with the same rules as an Intro's storyboard. Use only when the Intro's animation doesn't fit.",
+              "steps}, with the same rules as an Intro's storyboard, including illustration storyboards (CP-9348), which " +
+              "an announcement plays without their crop. Use only when the Intro's animation doesn't fit.",
           },
           image_alt: {
             type: "string",
@@ -8112,6 +8113,26 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_list_illustrations",
+      description:
+        "List the flat illustrations an Intro or announcement animation can play (CP-9348): drawings of a " +
+        "feature's screens, in Makerble's purple, blue and navy, that an illustration storyboard animates (see " +
+        "makerble_update_guidance_panel). They are added to Makerble by developers, not through the API. Returns " +
+        "each illustration's name (use it as the storyboard's illustration, or a scene step's), view_box ([x, y, " +
+        "width, height], the units a crop is given in), and parts: each part's name, which steps target, and its " +
+        "kind: field (type and swap fill it in), scroll (a scroll step scrolls it) or part. Only Makerble staff " +
+        "with System Access can use it; anyone else gets 403.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          page: { type: "number" },
+          per_page: { type: "number", description: "Up to 200" },
+        },
+      },
+      handler: (p) => get("/guidance_panels/illustrations", p),
+    },
+
+    {
       name: "makerble_get_guidance_panel",
       description:
         "Get one Guidance Panel (the Show/Hide Guidance introduction at the top of a Manage page) by its key, " +
@@ -8175,6 +8196,23 @@ export function buildTools(api) {
         "people who turn off motion see only its last scene. Use the feature's real button and page " +
         "names in sentence case. A chip, card or row shows a tick box only if a check step ticks it, so " +
         "chips work as plain labels. Up to 8,000 characters of JSON.\n\n" +
+        "Illustration storyboards (CP-9348) play a feature's flat illustration instead of blocks, following the " +
+        "visitor through the feature: set illustration to the name of one from makerble_list_illustrations, and " +
+        "steps work on its named parts. appear takes part and an optional motion (fade, rise, lift (the default) or " +
+        "pop); parts that no appear step names are there from the start. move_cursor (with optional seconds, 0.2 to " +
+        "3), click, highlight and zoom take target, a part on the stage. type and swap take target, a part of kind " +
+        "field, and text. scroll takes target, a part of kind scroll, to (0 the top, 1 the bottom) and optional " +
+        "seconds (0.2 to 10). scene starts a new scene with another illustration: {type: scene, illustration, " +
+        "transition: cut, fade (the default) or slide}; a slide also needs moving, a part both illustrations have " +
+        "(e.g. content), which slides out left and in from the right while everything else, like the page header, " +
+        "stays put. Optional top-level keys: hold_seconds (2 to 8, how long the finished picture holds; default 2.5), " +
+        "camera (push: a slow 2.5% zoom across each loop), and crop ([x, y, width, height] inside the first " +
+        "illustration's view_box: what the small Intro panel shows; announcements play it uncropped). Any storyboard " +
+        "may time its steps with at (seconds from the start of the loop, to one decimal place, in order, on every " +
+        "step or on none). Illustration storyboards allow loop_seconds up to 40, 40 steps and 12,000 characters. " +
+        "Cursor, typing and the slide are drawn by the player, so tell the story in steps: e.g. the page rises, " +
+        "cards lift in one by one, the cursor clicks one, the next page fades in and scrolls, Book now is clicked, " +
+        "the page slides to the form, the form types itself in and the confirmation pops in.\n\n" +
         "feature_tour_id chooses the feature tour (from makerble_list_feature_tours) that the Intro's \"Take the " +
         "tour\" offers, or null for none. It points that tour's page_key at this Intro and unlinks any other " +
         "tour that pointed here; the response's notices names it (e.g. \"Checklists is no longer offered " +
@@ -8211,18 +8249,28 @@ export function buildTools(api) {
             description: "The Intro's animation (see the rules above), or null to remove it",
             properties: {
               archetype: { type: "string", enum: ["assemble", "flow", "journey", "concept"] },
-              loop_seconds: { type: "integer", minimum: 4, maximum: 20 },
+              loop_seconds: { type: "integer", minimum: 4, maximum: 40, description: "Up to 20 for blocks, 40 for an illustration" },
               alt: { type: "string", description: "What the animation shows, 10 to 250 characters" },
+              illustration: { type: "string", description: "For an illustration storyboard: its first illustration, from makerble_list_illustrations" },
+              hold_seconds: { type: "number", minimum: 2, maximum: 8, description: "How long the finished picture holds; default 2.5" },
+              camera: { type: "string", enum: ["push"], description: "Illustrations only: a slow zoom in across each loop" },
+              crop: {
+                type: "array",
+                items: { type: "number" },
+                minItems: 4,
+                maxItems: 4,
+                description: "Illustrations only: [x, y, width, height] of the first illustration, shown in the small Intro panel",
+              },
               steps: {
                 type: "array",
                 minItems: 1,
-                maxItems: 24,
+                maxItems: 40,
                 items: {
                   type: "object",
                   properties: {
                     type: {
                       type: "string",
-                      enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut", "frame", "carry", "zoom"],
+                      enum: ["appear", "move_cursor", "click", "type", "highlight", "check", "swap", "cut", "frame", "carry", "zoom", "scroll", "scene"],
                     },
                     block: {
                       type: "string",
@@ -8242,7 +8290,17 @@ export function buildTools(api) {
                       description: "For an icon block (required there, and only there): the icon it shows",
                     },
                     frame: { type: "string", enum: ["register", "profile", "table", "web_page", "calendar", "compare"] },
-                    to: { type: "string", description: "For carry: the id of the block it lands on after the next cut" },
+                    to: {
+                      type: ["string", "number"],
+                      description: "For carry: the id of the block it lands on after the next cut. For scroll: 0 (the top) to 1 (the bottom)",
+                    },
+                    at: { type: "number", minimum: 0, description: "Seconds from the start of the loop, on every step or none" },
+                    part: { type: "string", description: "Illustrations: for appear, the part that appears" },
+                    motion: { type: "string", enum: ["fade", "rise", "lift", "pop"], description: "Illustrations: how an appearing part arrives" },
+                    seconds: { type: "number", description: "Illustrations: how long move_cursor (0.2 to 3) or scroll (0.2 to 10) takes" },
+                    illustration: { type: "string", description: "For scene: the next scene's illustration" },
+                    transition: { type: "string", enum: ["cut", "fade", "slide"], description: "For scene; default fade" },
+                    moving: { type: "string", description: "For a slide: the part that slides, in both illustrations" },
                   },
                   required: ["type"],
                 },
