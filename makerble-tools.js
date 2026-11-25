@@ -7651,6 +7651,8 @@ export function buildTools(api) {
       description:
         "Get one feature launch by id: its name, tier, short and email descriptions, links, email visual (with the " +
         "uploaded image's, GIF's and still frame's addresses once there are any), email links, Jira keys, " +
+        "video_url (an MP4 of the feature's animation, once one is made with makerble_save_feature_launch's " +
+        "make_video), " +
         "released_on and the ids of the announcements for it. Makerble staff only.",
       inputSchema: {
         type: "object",
@@ -7678,7 +7680,13 @@ export function buildTools(api) {
         "must have that link; text links are up to two, not repeating the main button.\n\n" +
         "Workflow: search makerble_list_feature_launches by name first and update the launch if it exists. To link " +
         "an announcement to it, set feature_launch_id with makerble_save_announcement. When a blog post is " +
-        "published, set blog_url and add blog to email_text_links if there is room.",
+        "published, set blog_url and add blog to email_text_links if there is room.\n\n" +
+        "Video: send make_video: true to make an MP4 of the feature's animation (the one its email GIF is made " +
+        "from: its Intro's, or else its newest announcement's) for Vimeo, the website and social posts: 1920 by " +
+        "1080 (or an illustration storyboard's crop at 1920 wide), 30 frames a second, the finished picture's " +
+        "hold and then one loop. It is made in the background and takes a few minutes. The response's notices " +
+        "says whether it is being made or why it can't be (no animation); check video_url with " +
+        "makerble_get_feature_launch afterwards. Making it again replaces the last one.",
       inputSchema: {
         type: "object",
         properties: {
@@ -7708,6 +7716,7 @@ export function buildTools(api) {
           },
           jira_keys: { type: "array", items: { type: "string" }, description: "Jira keys such as CP-9271" },
           released_on: { type: ["string", "null"], description: "The day it reached production (YYYY-MM-DD)" },
+          make_video: { type: "boolean", description: "true to make an MP4 of the feature's animation in the background" },
         },
       },
       handler: ({ id, ...body }) => (id ? patch(`/feature_launches/${id}`, body) : post("/feature_launches", body)),
