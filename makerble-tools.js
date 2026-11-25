@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 364 Makerble MCP tool definitions.
+ * All 365 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -659,7 +659,8 @@ export function buildTools(api) {
       name: "makerble_get_toolkit",
       description:
         "Get one Toolkit (Collection) by id: its name, toolkit_number, strapline, description, approval, thumbnail " +
-        "and cover image URLs, the cover image's alt text, darkening settings, and the url of its page. A Toolkit the user can't see returns not found.",
+        "and cover image URLs, the cover image's alt text, darkening settings, the url of its page, and its " +
+        "checklist_templates and story_labels (each id and name). A Toolkit the user can't see returns not found.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "number", description: "The Toolkit's id." } },
@@ -788,6 +789,39 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/toolkits/${id}`, body),
+    },
+
+    {
+      name: "makerble_change_toolkit_items",
+      description:
+        "Add a Checklist Template or a story Label to a Toolkit (Collection), or take one out, as Available Fields " +
+        "does on the Create/Edit Collection page. A Toolkit bundles the Surveys, Contact Forms, story Labels and " +
+        "metrics for a type of programme; a Checklist Template in the same Toolkit is its \"how to run it\" " +
+        "companion, and its steps can count the Toolkit's own Surveys, Contact Forms and story Labels as done, so " +
+        "they arrive already set up when the Toolkit is installed. " +
+        "action is 'add' or 'remove'. item_type is checklist_template (a Checklist Template, from My Checklist " +
+        "Templates: makerble_list_checklist_templates) or story_label (a Label that tags stories; ask the user for " +
+        "its id if you don't have it). The item must belong to one of the user's organisations (a story " +
+        "Label may also be the user's own), and the user must be able to edit the Toolkit. Adding an item the " +
+        "Toolkit already has changes nothing; removing leaves the item itself as it is. " +
+        "Returns the item's type, id and name when added. Check the result with makerble_get_toolkit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The Toolkit's id (makerble_list_toolkits)." },
+          action: { type: "string", enum: ["add", "remove"], description: "Add the item to the Toolkit, or take it out." },
+          item_type: { type: "string", enum: ["checklist_template", "story_label"], description: "A Checklist Template or a story Label." },
+          item_id: { type: "number", description: "The Checklist Template's or story Label's id." },
+        },
+        required: ["id", "action", "item_type", "item_id"],
+      },
+      handler: async ({ id, action, item_type, item_id }) => {
+        if (action === "remove") {
+          await del(`/toolkits/${id}/items`, { item_type, item_id });
+          return { removed: true, item_type, item_id };
+        }
+        return post(`/toolkits/${id}/items`, { item_type, item_id });
+      },
     },
 
     {
@@ -9606,8 +9640,16 @@ export function buildTools(api) {
         "colleagues and Teams responsible for a step are saved as nobody in particular. share: 'organisation' " +
         "keeps it to the organisation (or stops sharing it), 'impact_store' publishes it: it then waits for " +
         "Makerble's approval before other organisations can see it, and it needs a hint on every step that needs " +
-        "one (otherwise the response is 422 with errors and missing_hint_step_ids). Returns the template with its " +
-        "stages and steps.",
+        "one (otherwise the response is 422 with errors and missing_hint_step_ids). " +
+        "In a Toolkit (Collection) that holds this template, a survey, form or story label step can also count one " +
+        "of the Toolkit's own Surveys (Story Categories), Contact Forms (Beneficiary Categories) or story Labels as " +
+        "done, so installing the Toolkit sets that step up with no mapping. To choose them, change the template " +
+        "with toolkit_id and toolkit_items: template step id -> \"<type>:<id>\" (e.g. \"StoryCategory:12\", " +
+        "\"BeneficiaryCategory:5\", \"Label:7\"), or \"\" to go back to the hint alone. Use the Toolkit's items " +
+        "from makerble_get_toolkit and the steps' toolkit_item_kind (StoryCategory, BeneficiaryCategory or Label; " +
+        "null for a step that can't point at one). Keep each step's hint too: it is used when the item isn't " +
+        "installed. Needs a user who can edit both the Toolkit and the template. Returns the template with its " +
+        "stages and steps, each step with its toolkit_item ({type, id, name} or null).",
       inputSchema: {
         type: "object",
         properties: {
@@ -9619,9 +9661,18 @@ export function buildTools(api) {
           journey_part: { type: "string", enum: ["referral", "enrolment", "safeguarding", "exit_and_alumni"], description: "Part of the journey" },
           hints: { type: "object", additionalProperties: { type: "string" }, description: "Step id → hint" },
           share: { type: "string", enum: ["organisation", "impact_store"], description: "Who can use it" },
+          toolkit_id: { type: "number", description: "When changing a template: the Toolkit whose own items toolkit_items picks from" },
+          toolkit_items: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Template step id -> \"<type>:<id>\" of one of the Toolkit's items, or \"\" for the hint alone (needs toolkit_id)",
+          },
         },
       },
       handler: ({ id, ...body }) => {
+        if (body.toolkit_items && !(id && body.toolkit_id)) {
+          throw new McpError(ErrorCode.InvalidParams, "toolkit_items needs id (the template) and toolkit_id (the Toolkit).");
+        }
         if (id) return patch(`/checklist_templates/${id}`, body);
         if (!body.checklist_id) {
           throw new McpError(ErrorCode.InvalidParams, "Pass checklist_id to save a Checklist as a template, or id to change one.");
@@ -9644,12 +9695,20 @@ export function buildTools(api) {
         "out take their default. Never choose 'Any' for a step on the person's behalf, and when nothing fits, leave " +
         "the step for later rather than guess: it shows as Needs setting up and doesn't tick off until someone " +
         "chooses what counts. charity_id picks which of the user's organisations it is for. Returns the new " +
-        "Checklist and the steps that still need setting up.",
+        "Checklist and the steps that still need setting up.\n" +
+        "Installing a Toolkit (Collection) that holds checklists: first install the Toolkit (Explore Toolkits, or " +
+        "makerble_set_up_area_of_work), then call this for each of the Toolkit's checklist_templates " +
+        "(makerble_get_toolkit) with toolkit_id. Steps that point at the Toolkit's own Surveys, Contact Forms and " +
+        "story Labels then default to 'toolkit', the copies the install added (shown as Installed with this " +
+        "Toolkit, with the item's name under toolkit); keep item_id 'toolkit' for them. A step whose Toolkit item " +
+        "wasn't installed falls back to its hint and is mapped as usual. Any template in a Toolkit the user can see " +
+        "can be used this way, even one that isn't published to the ImpactStore.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The template's id" },
           charity_id: { type: "number", description: "The organisation using it (default: the template's own, else the user's first)" },
+          toolkit_id: { type: "number", description: "When installing a Toolkit: the Toolkit holding this template" },
           name: { type: "string", description: "The new Checklist's name (default: the template's)" },
           mapping: {
             type: "array",
@@ -9658,7 +9717,7 @@ export function buildTools(api) {
               type: "object",
               properties: {
                 step_id: { type: "number" },
-                item_id: { type: "string", description: "An option id from the mapping, or 'original'" },
+                item_id: { type: "string", description: "An option id from the mapping, 'original', or 'toolkit' (with toolkit_id)" },
                 create: { type: "string", description: "Name of a new role, specialist need, group or story label" },
                 leave: { type: "boolean", description: "Set this step up later" },
               },
@@ -9668,9 +9727,12 @@ export function buildTools(api) {
         },
         required: ["id"],
       },
-      handler: ({ id, charity_id, name, mapping }) => {
-        if (!mapping) return get(`/checklist_templates/${id}/mapping`, charity_id ? { charity_id } : null);
-        return post(`/checklist_templates/${id}/use`, { charity_id, name, mapping });
+      handler: ({ id, charity_id, toolkit_id, name, mapping }) => {
+        if (!mapping) {
+          const params = Object.fromEntries(Object.entries({ charity_id, toolkit_id }).filter(([, value]) => value));
+          return get(`/checklist_templates/${id}/mapping`, Object.keys(params).length ? params : null);
+        }
+        return post(`/checklist_templates/${id}/use`, { charity_id, toolkit_id, name, mapping });
       },
     },
 
