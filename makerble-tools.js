@@ -9683,12 +9683,20 @@ export function buildTools(api) {
         "out take their default. Never choose 'Any' for a step on the person's behalf, and when nothing fits, leave " +
         "the step for later rather than guess: it shows as Needs setting up and doesn't tick off until someone " +
         "chooses what counts. charity_id picks which of the user's organisations it is for. Returns the new " +
-        "Checklist and the steps that still need setting up.",
+        "Checklist and the steps that still need setting up.\n" +
+        "Installing a Toolkit (Collection) that holds checklists: first install the Toolkit (Explore Toolkits, or " +
+        "makerble_set_up_area_of_work), then call this for each of the Toolkit's checklist_templates " +
+        "(makerble_get_toolkit) with toolkit_id. Steps that point at the Toolkit's own Surveys, Contact Forms and " +
+        "story Labels then default to 'toolkit', the copies the install added (shown as Installed with this " +
+        "Toolkit, with the item's name under toolkit); keep item_id 'toolkit' for them. A step whose Toolkit item " +
+        "wasn't installed falls back to its hint and is mapped as usual. Any template in a Toolkit the user can see " +
+        "can be used this way, even one that isn't published to the ImpactStore.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "number", description: "The template's id" },
           charity_id: { type: "number", description: "The organisation using it (default: the template's own, else the user's first)" },
+          toolkit_id: { type: "number", description: "When installing a Toolkit: the Toolkit holding this template" },
           name: { type: "string", description: "The new Checklist's name (default: the template's)" },
           mapping: {
             type: "array",
@@ -9697,7 +9705,7 @@ export function buildTools(api) {
               type: "object",
               properties: {
                 step_id: { type: "number" },
-                item_id: { type: "string", description: "An option id from the mapping, or 'original'" },
+                item_id: { type: "string", description: "An option id from the mapping, 'original', or 'toolkit' (with toolkit_id)" },
                 create: { type: "string", description: "Name of a new role, specialist need, group or story label" },
                 leave: { type: "boolean", description: "Set this step up later" },
               },
@@ -9707,9 +9715,12 @@ export function buildTools(api) {
         },
         required: ["id"],
       },
-      handler: ({ id, charity_id, name, mapping }) => {
-        if (!mapping) return get(`/checklist_templates/${id}/mapping`, charity_id ? { charity_id } : null);
-        return post(`/checklist_templates/${id}/use`, { charity_id, name, mapping });
+      handler: ({ id, charity_id, toolkit_id, name, mapping }) => {
+        if (!mapping) {
+          const params = Object.fromEntries(Object.entries({ charity_id, toolkit_id }).filter(([, value]) => value));
+          return get(`/checklist_templates/${id}/mapping`, Object.keys(params).length ? params : null);
+        }
+        return post(`/checklist_templates/${id}/use`, { charity_id, toolkit_id, name, mapping });
       },
     },
 
