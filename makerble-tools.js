@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 365 Makerble MCP tool definitions.
+ * All 367 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -293,6 +293,73 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id, ...body }) => patch(`/charities/${id}`, body),
+    },
+
+    {
+      name: "makerble_get_supplementary_details",
+      description:
+        "Get an Organisation's (Charity's) Supplementary Details: the details about the organisation and the person who " +
+        "represents it that Twilio, Makerble's SMS partner, needs before the Organisation can send SMS messages " +
+        "(the Supplementary details page). Returns {organisation_id, country, country_iso_code, " +
+        "registration_identifier_automatic, verification_status (not_started, pending_review, in_review, twilio_rejected, " +
+        "twilio_approved), editable, missing_fields, and every field: website_url, business_type, business_industry, " +
+        "business_registration_identifier, other_registration_identifier, business_registration_number, " +
+        "business_regions_of_operation, address_friendly_name, street, street_secondary, city, region, postal_code, " +
+        "representative_first_name, representative_last_name, representative_business_title, representative_job_position, " +
+        "representative_other_job_position, representative_email, representative_phone_number}. " +
+        "Use missing_fields to see what Twilio still needs, then makerble_update_supplementary_details. " +
+        "Only an Organisation Admin (Charity Editor); anyone else gets forbidden.",
+      inputSchema: {
+        type: "object",
+        properties: { organisation_id: { type: "number", description: "The Organisation (Charity) ID" } },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id }) => get(`/organisations/${organisation_id}/supplementary_details`),
+    },
+
+    {
+      name: "makerble_update_supplementary_details",
+      description:
+        "Fill in or change an Organisation's (Charity's) Supplementary Details for Twilio, as on the Supplementary details " +
+        "page. Send only the fields to change; they can be saved part-filled. Refused while Twilio is checking them or once " +
+        "it has approved them (editable false). Fixed lists use Twilio's values: business_type is one of Sole Proprietorship, " +
+        "Partnership, Limited Liability Corporation, Co-operative, Non-profit Corporation, Corporation; business_industry e.g. " +
+        "NOT_FOR_PROFIT, EDUCATION, HEALTHCARE; business_registration_identifier is EIN, CBN, CN, ACN, CIN, VAT, VATRN, RN or " +
+        "Other (ignored when registration_identifier_automatic is true, as the country decides it); " +
+        "business_regions_of_operation is AFRICA, ASIA, EUROPE, LATIN_AMERICA, USA_AND_CANADA or AUSTRALIA; " +
+        "representative_job_position is Director, GM, VP, CEO, CFO, General Counsel or Other. website_url starts with " +
+        "http:// or https://; representative_phone_number is international, e.g. +447700900123. Send country_id only when " +
+        "the Organisation has no country. Typical flow: makerble_get_supplementary_details, then send the missing_fields. " +
+        "Only an Organisation Admin (Charity Editor).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
+          country_id: { type: "number", description: "Sets the Organisation's country when it has none" },
+          website_url: { type: "string" },
+          business_type: { type: "string" },
+          business_industry: { type: "string" },
+          business_registration_identifier: { type: "string" },
+          other_registration_identifier: { type: "string", description: "Name of the registration type, when it is Other" },
+          business_registration_number: { type: "string" },
+          business_regions_of_operation: { type: "string" },
+          address_friendly_name: { type: "string", description: "e.g. Headquarters" },
+          street: { type: "string" },
+          street_secondary: { type: "string" },
+          city: { type: "string" },
+          region: { type: "string", description: "State, province or region" },
+          postal_code: { type: "string" },
+          representative_first_name: { type: "string" },
+          representative_last_name: { type: "string" },
+          representative_business_title: { type: "string", description: "Job title" },
+          representative_job_position: { type: "string" },
+          representative_other_job_position: { type: "string", description: "The job position, when it is Other" },
+          representative_email: { type: "string" },
+          representative_phone_number: { type: "string" },
+        },
+        required: ["organisation_id"],
+      },
+      handler: ({ organisation_id, ...body }) => patch(`/organisations/${organisation_id}/supplementary_details`, body),
     },
 
     // ── Projects ──────────────────────────────────────────────────────────────
