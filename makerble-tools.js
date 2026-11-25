@@ -9985,7 +9985,12 @@ export function buildTools(api) {
         "done_count of total_count (items marked not relevant leave the total), finished (true once every item is done " +
         "or not relevant), and data: each item's key, title, section (e.g. 'Automate your reporting', or null), progress " +
         "in words (e.g. '3 of 5 workspaces'), done_when (what counts as done), done and not_relevant. Items (key): teams " +
-        "(Create your teams; only for Organisations with 11 or more staff), workspaces (Projects), welcome_tour, " +
+        "(Create your teams; only for Organisations with 11 or more staff), workspaces (Projects), another_area (Set up " +
+        "another area of work: done once an area of work started from the Setup guide or the Create menu is built; " +
+        "only while the onboarding journey is on), welcome_tour, welcome_journey (Go through the Welcome Journey; only " +
+        "shown to the person who created the Organisation, so it depends on whose token is used), specialisms (Link " +
+        "your Specialisms to Ratio Sets; shown once a Specialism (Skill) is not linked to answers of a Ratio Set on the " +
+        "Contact forms, done when all are), " +
         "checklists (a Checklist on each open workspace), reporting_requirements (Reporting Cycles with a Report " +
         "Template), demographics (the Demographics tab of Contacts with 2 Ratio Sets) and metrics (an Engagement " +
         "Tracker and an Indicator on each open workspace). Makerble ticks items off itself, and once done an item stays " +
@@ -10006,8 +10011,8 @@ export function buildTools(api) {
         "Mark one item of an Organisation's (Charity's) Setup guide as 'Not relevant to us', or undo that. An item marked " +
         "not relevant leaves the guide's total, so the Organisation can finish its Setup guide without it; Makerble " +
         "records who chose it and when. This never ticks an item as done: Makerble does that itself when it sees the " +
-        "work done. Get the item keys from makerble_get_setup_guide (teams, workspaces, welcome_tour, checklists, " +
-        "reporting_requirements, demographics, metrics). Returns the whole Setup guide after the change. Only the " +
+        "work done. Get the item keys from makerble_get_setup_guide (teams, workspaces, another_area, welcome_tour, " +
+        "welcome_journey, specialisms, checklists, reporting_requirements, demographics, metrics). Returns the whole Setup guide after the change. Only the " +
         "Organisation's Organisation Admins (Charity Editors) and Makerble staff can do this.",
       inputSchema: {
         type: "object",
@@ -10015,7 +10020,8 @@ export function buildTools(api) {
           organisation_id: { type: "number", description: "The Organisation (Charity) ID" },
           item_key: {
             type: "string",
-            enum: ["teams", "workspaces", "welcome_tour", "checklists", "reporting_requirements", "demographics", "metrics"],
+            enum: ["teams", "workspaces", "another_area", "welcome_tour", "welcome_journey", "specialisms", "checklists",
+                   "reporting_requirements", "demographics", "metrics"],
             description: "The item's key, from makerble_get_setup_guide",
           },
           not_relevant: { type: "boolean", description: "true marks it Not relevant to us; false is Undo" },
