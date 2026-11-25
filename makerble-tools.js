@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 365 Makerble MCP tool definitions.
+ * All 367 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -9550,6 +9550,57 @@ export function buildTools(api) {
         required: ["id"],
       },
       handler: ({ id }) => get(`/explore/dropdowns/${id}`),
+    },
+
+    // ── Explore Forms (CP-8871) ───────────────────────────────────────────────
+    {
+      name: "makerble_explore_forms",
+      description:
+        "Find a ready-made form in the Makerble ImpactStore: the Contact Forms (bio forms, Beneficiary " +
+        "Categories), Case Forms, Custom Forms for Contacts (both Custom Field Categories), Event Forms (Event " +
+        "Categories) and Project Forms (Project Categories) other organisations and Makerble have published and " +
+        "Makerble has approved, as the Explore Forms page lists them. Use it before building a form from scratch, " +
+        "e.g. 'a referral form' or 'an equality monitoring form'. Filter by type (contact_form, case_form, " +
+        "custom_contact_form, event_form, project_form), theme (referral_and_intake, equality_monitoring, " +
+        "safeguarding, events, project_information), fields, the number of fields (up_to_10, 11_to_25, over_25), " +
+        "and includes (consent: a consent question; standard_dropdowns: dropdowns from the ImpactStore; address: " +
+        "an address or postcode field). Several options in one filter match any of them; different filters must " +
+        "all match. Returns a page of forms, each with id (a key such as 'case-5', naming its type and number), " +
+        "name, type, field_count, uses_standard_dropdowns, themes, shared_by, used_by_count (how many " +
+        "organisations use it), yours and public_url (Contact Forms and Case Forms only), plus facets: each filter " +
+        "option with how many forms it would return. Then call makerble_get_explore_form to read its fields. The " +
+        "user adds one to their organisation in Makerble with Add to organisation on Explore Forms.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words in the form's name (or a Contact Form's description), e.g. 'referral'" },
+          type: { type: "array", items: { type: "string", enum: ["contact_form", "case_form", "custom_contact_form", "event_form", "project_form"] }, description: "Type of form" },
+          theme: { type: "array", items: { type: "string", enum: ["referral_and_intake", "equality_monitoring", "safeguarding", "events", "project_information"] } },
+          fields: { type: "array", items: { type: "string", enum: ["up_to_10", "11_to_25", "over_25"] }, description: "Number of fields" },
+          includes: { type: "array", items: { type: "string", enum: ["consent", "standard_dropdowns", "address"] }, description: "What the form includes" },
+          chip: { type: "string", enum: ["Referral", "Equality monitoring", "Safeguarding", "Registration"], description: "One of the page's Popular chips" },
+          sort: { type: "string", enum: ["added", "new", "az"], description: "added (used by the most organisations first, the default), new or az" },
+          page: { type: "number" },
+          per_page: { type: "number", description: "Forms per page (default 10, max 200)" },
+        },
+      },
+      handler: (p) => get("/explore/forms", p),
+    },
+
+    {
+      name: "makerble_get_explore_form",
+      description:
+        "Read one ImpactStore form from makerble_explore_forms: the same fields plus the name of every field it " +
+        "asks, in order (built-in fields and section headings are left out). Use it to check a form suits the " +
+        "user before suggesting it. Returns 404 for a form that isn't published to the ImpactStore and approved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The form's id from makerble_explore_forms, e.g. 'case-5'" },
+        },
+        required: ["id"],
+      },
+      handler: ({ id }) => get(`/explore/forms/${encodeURIComponent(id)}`),
     },
 
     // ── Checklist Templates (CP-8908) ─────────────────────────────────────────
