@@ -7028,7 +7028,12 @@ export function buildTools(api) {
         "makerble_list_feature_launches) the announcement is for. Wherever the announcement leaves body, " +
         "learn_more_url, button_deep_link or feature_tour_id empty, the popup and What's new use the launch's " +
         "short_description, user_guide_url, deep_link and feature_tour_id, so body can be left empty while the " +
-        "launch has a short_description. Send null to clear it.",
+        "launch has a short_description. Send null to clear it.\n\n" +
+        "Placement (Makerble's own only): placement during_build shows it on the screen a new organisation sees while " +
+        "Makerble builds its first workspaces after the onboarding journey, instead of in the popup. \"During build\" " +
+        "announcements never pop up and aren't listed in What's new: while live, they take turns on that screen in " +
+        "priority order (1 first), each for display_seconds (3 to 120, default 10), until the build finishes. Use them " +
+        "for short tips a new organisation can read while it waits. The default placement is popup.",
       inputSchema: {
         type: "object",
         properties: {
@@ -7128,6 +7133,13 @@ export function buildTools(api) {
             type: ["number", "null"],
             description: "Makerble's own only. The feature launch it announces; its message, links and tour fill any left empty here. null to clear",
           },
+          placement: {
+            type: "string",
+            enum: ["popup", "during_build"],
+            description: "Makerble's own only. popup (the default) or during_build: on the building screen after the onboarding journey",
+          },
+          priority: { type: "number", description: "For during_build: the order they show in, 1 first (default 1)" },
+          display_seconds: { type: "number", description: "For during_build: seconds it shows before the next, 3 to 120 (default 10)" },
           starts_on: { type: "string", description: "First day it shows (YYYY-MM-DD); needed to schedule" },
           ends_on: { type: "string", description: "Last day it shows (YYYY-MM-DD); needed to schedule" },
           status: { type: "string", enum: ["draft", "scheduled"], description: "draft (nobody sees it) or scheduled" },
