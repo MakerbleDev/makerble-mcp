@@ -1,6 +1,6 @@
 /**
  * makerble-tools.js
- * All 362 Makerble MCP tool definitions.
+ * All 365 Makerble MCP tool definitions.
  * Imported by server.js and used by both transports (stdio & HTTP).
  */
 
@@ -676,6 +676,15 @@ export function buildTools(api) {
         "onboarding journey's \"Start from a toolkit\" path does: one workspace (Project) per name with the Toolkit " +
         "installed, an extra workspace for each extra chosen (Referrals, Volunteers and so on, each with its own " +
         "Project Type), and a Checklist (participant journey) that every contact in the area's workspaces gets. " +
+        "Or, instead of toolkit_id, give stages: the stages of the organisation's own process, as the onboarding " +
+        "journey's \"Personalise the platform to my organisation\" path does. Each stage is {name, action} and " +
+        "becomes one step of the same name in the Checklist; action is what happens at that stage, one of " +
+        "complete_form_external (the contact fills in a form), complete_form_internal (a colleague fills it in), " +
+        "complete_survey, add_to_project, add_flag, invite_to_event, add_observer, add_relationship, add_role " +
+        "(add to an audience), add_skill (add a specialist need), add_to_group, complete_form_for_relative, " +
+        "complete_survey_for_relative, create_case, create_task, invite_to_participate, send_sms, send_email, " +
+        "receive_sms, receive_email, send_survey, send_360_survey or create_labelled_story. Content for the stages " +
+        "(forms, surveys, flags and so on) is not set up this way; add it in Makerble afterwards. " +
         "spacing says how the area is split into workspaces: 'facilitator' (one per coach, mentor or practitioner), " +
         "'site' (one per location), 'cohort' (one per intake of a group or class) or 'single' (only one workspace, " +
         "named after the area of work when workspace_names is empty). Up to 50 workspace_names, each with an " +
@@ -689,13 +698,25 @@ export function buildTools(api) {
         properties: {
           organisation_id: { type: "integer", description: "The organisation (Charity) id" },
           area_of_work: { type: "string", description: "The area of work's name, e.g. 'Youth mentoring' (up to 100 characters)" },
-          toolkit_id: { type: "integer", description: "The listed Toolkit (Collection) to install into each workspace" },
+          toolkit_id: { type: "integer", description: "The listed Toolkit (Collection) to install into each workspace. Leave out when giving stages." },
+          stages: {
+            type: "array",
+            description: "Instead of toolkit_id: the stages of the organisation's process, in order (1 to 20)",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "The stage's name, e.g. 'Assessment' (up to 100 characters)" },
+                action: { type: "string", description: "What happens at the stage, e.g. 'complete_survey' (see the tool description)" },
+              },
+              required: ["name", "action"],
+            },
+          },
           spacing: { type: "string", enum: ["facilitator", "site", "cohort", "single"], description: "How the area is split into workspaces" },
           workspace_names: { type: "array", items: { type: "string" }, description: "One name per workspace (up to 100 characters each)" },
           workspace_colours: { type: "array", items: { type: "string" }, description: "Each workspace's colour, in the same order as workspace_names, as a six-digit hex colour; a missing one gets the next Makerble brand colour" },
           extra_ids: { type: "array", items: { type: "integer" }, description: "Extras from makerble_list_onboarding_extras" },
         },
-        required: ["organisation_id", "area_of_work", "toolkit_id", "spacing"],
+        required: ["organisation_id", "area_of_work", "spacing"],
       },
       handler: ({ organisation_id, ...body }) => post(`/organisations/${organisation_id}/onboarding_journeys`, body),
     },
@@ -704,7 +725,8 @@ export function buildTools(api) {
       name: "makerble_get_area_of_work_setup",
       description:
         "Get an area of work set up with makerble_set_up_area_of_work (an onboarding journey): its status " +
-        "('building', 'completed' or 'failed'), area_of_work, toolkit_id, spacing, workspace_names, " +
+        "('building', 'completed' or 'failed'), area_of_work, path ('toolkit' or 'personalise'), toolkit_id, " +
+        "stages (each {name, action}, on the personalise path), spacing, workspace_names, " +
         "workspace_colours and extra_ids, " +
         "and once completed the workspace_ids (Projects) it made, the area's own first then the extras', and the " +
         "checklist_id of its Checklist. Only the person who set it up can see it.",
@@ -1198,6 +1220,41 @@ export function buildTools(api) {
         },
       },
       handler: (p) => get("/users", p),
+    },
+
+    {
+      name: "makerble_get_notification_settings",
+      description:
+        "Get the signed-in user's own email notification settings, as on the Notifications tab of User Settings in " +
+        "Makerble: which emails they get, e.g. when a guest at one of their events cancels (event_guest_cancelled), " +
+        "when someone tags them, or when an event is deleted from a project they manage. Only the user's own " +
+        "settings; there is no way to read a colleague's. Returns { data: [{ key, label, enabled }] }, where label is " +
+        "the wording on the Notifications tab. Use the keys with makerble_update_notification_settings.",
+      inputSchema: { type: "object", properties: {} },
+      handler: () => get("/users/notification_settings"),
+    },
+
+    {
+      name: "makerble_update_notification_settings",
+      description:
+        "Turn the signed-in user's own email notifications on or off, as ticking or unticking them on the " +
+        "Notifications tab of User Settings does. Only the settings sent change. For example, " +
+        "{ event_guest_cancelled: false } stops the email they get when a guest at an event where they are an Event " +
+        "Manager or Worker cancels. Get the keys from makerble_get_notification_settings. An unknown key or a value " +
+        "that isn't true or false returns 422 with errors, and nothing changes. Returns all their settings, after the " +
+        "change, as makerble_get_notification_settings does.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            additionalProperties: { type: "boolean" },
+            description: "Setting keys and true (send these emails) or false (don't), e.g. { \"event_guest_cancelled\": false }",
+          },
+        },
+        required: ["settings"],
+      },
+      handler: ({ settings }) => patch("/users/notification_settings", { settings }),
     },
 
     {
@@ -6224,6 +6281,30 @@ export function buildTools(api) {
     },
 
     {
+      name: "makerble_get_event_guest_calendar_links",
+      description:
+        "Get the links a guest (Contact) uses to add an event to their own calendar, the same ones their Personal " +
+        "Portal and the 'Add to Calendar' email give them: google_calendar_url, outlook_url (Outlook.com) and " +
+        "office365_url (Microsoft 365) each open a new, filled-in calendar event to save; ics_url is the event as an " +
+        ".ics file for Apple Calendar or any other calendar app; cancel_url is the page where the guest can cancel " +
+        "their booking, or null when the event's Event Format (event category) doesn't let guests cancel. Use it when " +
+        "a colleague wants to send a guest a way to put the event in their calendar. The ics_url and cancel_url work " +
+        "without signing in and belong to that one guest, so only give them to that guest. Anyone who can open the " +
+        "event page can call it; a Contact who isn't a guest of the event returns 404. Find guests with " +
+        "makerble_list_event_guests. Returns { event_id, contact_id, google_calendar_url, outlook_url, office365_url, " +
+        "ics_url, cancel_url }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "The event id" },
+          contact_id: { type: "number", description: "The guest's Contact (beneficiary) id" },
+        },
+        required: ["id", "contact_id"],
+      },
+      handler: ({ id, contact_id }) => get(`/events/${id}/guests/${contact_id}/calendar_links`),
+    },
+
+    {
       name: "makerble_remove_event_guest",
       description:
         "Remove a Contact (beneficiary) from an event's guests. For an event in a recurring series, apply_to " +
@@ -6352,7 +6433,7 @@ export function buildTools(api) {
         "organisation can read it (others get 403; another organisation's returns 404). Find the id with " +
         "makerble_list_event_formats. Use it to check whether a format is a one-to-one or group appointment " +
         "and how long its appointments last. " +
-        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes, and the Add to Calendar email settings send_add_to_calendar_email, allow_guests_to_cancel and cancellation_guest_status_id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6371,9 +6452,13 @@ export function buildTools(api) {
         "Admin of charity_id can create one (others get 403). Give it a name and the organisation's Guest " +
         "Statuses its events use (guest_status_ids, in order). To make it an appointment, set appointment_type " +
         "('one_to_one' or 'group'), and optionally default_length_minutes and the preparation and debrief time " +
-        "a colleague needs either side. To use it in a Project afterwards, add it to the Project in Makerble. " +
+        "a colleague needs either side. Leave out guest_status_ids to give it the organisation's Invited then Cancelled " +
+        "Guest Statuses. To email guests an 'Add to Calendar' confirmation when they are added to its events, set " +
+        "send_add_to_calendar_email; to let them cancel from that email, also set allow_guests_to_cancel and " +
+        "cancellation_guest_status_id (one of its Guest Statuses, usually Cancelled). " +
+        "To use it in a Project afterwards, add it to the Project in Makerble. " +
         "Invalid settings return 422 with errors listing each problem. " +
-        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes, and the Add to Calendar email settings send_add_to_calendar_email, allow_guests_to_cancel and cancellation_guest_status_id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6390,6 +6475,9 @@ export function buildTools(api) {
           default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
           preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
           debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+          send_add_to_calendar_email: { type: "boolean", description: "Email each guest (Contact) added to an event of this format, confirming the booking with links to add it to Google Calendar or their own calendar. The organisation must have email messaging turned on (422 otherwise)" },
+          allow_guests_to_cancel: { type: "boolean", description: "Add a link to that email that lets the guest cancel. Only kept while send_add_to_calendar_email is true" },
+          cancellation_guest_status_id: { type: ["number", "null"], description: "The Guest Status (event state) a guest who cancels is moved to, usually the organisation's 'Cancelled'. Required when allow_guests_to_cancel is true, and must be one of this Event Format's Guest Statuses" },
         },
         required: ["charity_id", "name"],
       },
@@ -6403,9 +6491,11 @@ export function buildTools(api) {
         "Event Formats page. Only the settings you send change. Only an Organisation Admin of its organisation " +
         "can edit it (others get 403; another organisation's returns 404). Use it to rename a format, change " +
         "its Guest Statuses, or set whether it is a one-to-one or group appointment (appointment_type; null " +
-        "for Not an appointment), its default length, and the preparation and debrief time either side. " +
+        "for Not an appointment), its default length, and the preparation and debrief time either side, or turn " +
+        "on the 'Add to Calendar' email to guests and whether they can cancel from it. Remove the cancellation " +
+        "Guest Status from guest_status_ids only after setting allow_guests_to_cancel to false. " +
         "Invalid settings return 422 with errors, e.g. a default length not in 5-minute steps. " +
-        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, and the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes.",
+        "Returns the Event Format: id, name, is_default, charity_id, attendance_form_id (the attendance Survey), its Guest Statuses, Event Role and guest settings, project_ids, the appointment settings appointment_type, default_length_minutes, preparation_minutes and debrief_minutes, and the Add to Calendar email settings send_add_to_calendar_email, allow_guests_to_cancel and cancellation_guest_status_id.",
       inputSchema: {
         type: "object",
         properties: {
@@ -6422,6 +6512,9 @@ export function buildTools(api) {
           default_length_minutes: { type: ["number", "null"], description: "How long an event of this format usually lasts, in minutes, in 5-minute steps up to 1440. Makerble's Create Event page sets the end time from it. null for none" },
           preparation_minutes: { type: "number", description: "Preparation time a colleague needs before each appointment, in minutes (0-1440). Blank or 0 for none" },
           debrief_minutes: { type: "number", description: "Debrief time a colleague needs after each appointment, in minutes (0-1440). Blank or 0 for none" },
+          send_add_to_calendar_email: { type: "boolean", description: "Email each guest (Contact) added to an event of this format, confirming the booking with links to add it to Google Calendar or their own calendar. The organisation must have email messaging turned on (422 otherwise)" },
+          allow_guests_to_cancel: { type: "boolean", description: "Add a link to that email that lets the guest cancel. Only kept while send_add_to_calendar_email is true" },
+          cancellation_guest_status_id: { type: ["number", "null"], description: "The Guest Status (event state) a guest who cancels is moved to, usually the organisation's 'Cancelled'. Required when allow_guests_to_cancel is true, and must be one of this Event Format's Guest Statuses" },
         },
         required: ["id"],
       },
