@@ -330,6 +330,8 @@ export function buildTools(api) {
         "representative_job_position is Director, GM, VP, CEO, CFO, General Counsel or Other. website_url is a web address, e.g. " +
         "www.example.org (https:// is added when left out); representative_phone_number is international, e.g. +447700900123. Send country_id only when " +
         "the Organisation has no country. Typical flow: makerble_get_supplementary_details, then send the missing_fields. " +
+        "Once nothing is missing, saving sends the details to Twilio to check; verification_status then moves on from " +
+        "not_started and the details can't be changed while Twilio checks them. " +
         "Only an Organisation Admin (Charity Editor).",
       inputSchema: {
         type: "object",
