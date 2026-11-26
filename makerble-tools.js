@@ -327,8 +327,8 @@ export function buildTools(api) {
         "NOT_FOR_PROFIT, EDUCATION, HEALTHCARE; business_registration_identifier is EIN, CBN, CN, ACN, CIN, VAT, VATRN, RN or " +
         "Other (ignored when registration_identifier_automatic is true, as the country decides it); " +
         "business_regions_of_operation is AFRICA, ASIA, EUROPE, LATIN_AMERICA, USA_AND_CANADA or AUSTRALIA; " +
-        "representative_job_position is Director, GM, VP, CEO, CFO, General Counsel or Other. website_url starts with " +
-        "http:// or https://; representative_phone_number is international, e.g. +447700900123. Send country_id only when " +
+        "representative_job_position is Director, GM, VP, CEO, CFO, General Counsel or Other. website_url is a web address, e.g. " +
+        "www.example.org (https:// is added when left out); representative_phone_number is international, e.g. +447700900123. Send country_id only when " +
         "the Organisation has no country. Typical flow: makerble_get_supplementary_details, then send the missing_fields. " +
         "Only an Organisation Admin (Charity Editor).",
       inputSchema: {
